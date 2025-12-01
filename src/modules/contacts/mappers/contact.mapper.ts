@@ -35,6 +35,17 @@ export class ContactMapper {
   }
 
   toDto(entity: Contact): any {
+    const companyDto = entity.company ? {
+      id: entity.company.id,
+      name: entity.company.name,
+      address: entity.company.address,
+      type: entity.company.type,
+      serviceId: entity.company.serviceId,
+      isCustomer: entity.company.customer,
+      isClient: entity.company.client,
+      notes: Array.isArray(entity.company.notes) ? entity.company.notes : [],
+    } : null;
+    
     return {
       id: entity.id,
       name: entity.name,
@@ -44,7 +55,7 @@ export class ContactMapper {
       address: entity.address,
       isCustomer: entity.customer,
       isClient: entity.client,
-      companyId: entity.company ? entity.company.id : undefined, // Assuming company is loaded
+      company: companyDto,
       notes: entity.notes,
     };
   }

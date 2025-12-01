@@ -51,8 +51,21 @@ export class LeadMapper {
       status: entity.status,
       leadType: entity.leadType,
       notes: entity.notes,
-      contactId: entity.contact ? entity.contact.id : undefined,
-      projectTypeId: entity.projectType ? entity.projectType.id : undefined,
+      contact: entity.contact ? {
+        id: entity.contact.id,
+        name: entity.contact.name,
+        phone: entity.contact.phone,
+        email: entity.contact.email,
+        occupation: entity.contact.occupation,
+        address: entity.contact.address,
+        isCustomer: entity.contact.customer,
+        isClient: entity.contact.client,
+      } : null,
+      projectType: entity.projectType ? {
+        id: entity.projectType.id,
+        name: entity.projectType.name,
+        color: entity.projectType.color,
+      } : null,
     };
   }
 }

@@ -32,6 +32,11 @@ export class ContactsService extends BaseService<any, number, Contact> {
     super(contactRepo, contactMapper);
   }
 
+  async findAll(): Promise<any[]> {
+    const entities = await this.contactRepo.find({ relations: ['company'] });
+    return entities.map((entity) => this.contactMapper.toDto(entity));
+  }
+
   async create(dto: CreateContactDto): Promise<any> {
     // Validate name
     if (dto.name && await this.contactsRepository.existsByNameIgnoreCase(dto.name)) {
@@ -79,7 +84,7 @@ export class ContactsService extends BaseService<any, number, Contact> {
       throw ValidationException.format('Contact phone already exists: %s', dto.phone);
     }
 
-    const entity = await this.contactRepo.findOne({ where: { id } });
+    const entity = await this.contactRepo.findOne({ where: { id }, relations: ['company'] });
     if (!entity) {
       throw new ResourceNotFoundException(`Contact not found with id: ${id}`);
     }
@@ -112,7 +117,7 @@ export class ContactsService extends BaseService<any, number, Contact> {
   }
 
   async getContactById(id: number): Promise<any> {
-    const entity = await this.contactRepo.findOne({ where: { id } });
+    const entity = await this.contactRepo.findOne({ where: { id }, relations: ['company'] });
     if (!entity) {
       throw new ContactExceptions.ContactNotFoundException(id);
     }
