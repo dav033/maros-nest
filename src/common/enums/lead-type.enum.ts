@@ -1,0 +1,5 @@
+export enum LeadType {
+  CONSTRUCTION = 'CONSTRUCTION',
+  PLUMBING = 'PLUMBING',
+  ROOFING = 'ROOFING',
+}
