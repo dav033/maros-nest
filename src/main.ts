@@ -35,7 +35,8 @@ async function bootstrap() {
       'https://maros-app.netlify.app',
     ],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: '*',
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
+    exposedHeaders: ['Content-Type'],
     credentials: true,
     maxAge: 3600,
   });

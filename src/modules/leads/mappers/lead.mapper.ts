@@ -42,6 +42,19 @@ export class LeadMapper {
       return null;
     };
 
+    // Parse notes if it's a string (JSONB sometimes comes as string)
+    let notes = entity.notes;
+    console.log('[BACKEND LEAD MAPPER] entity.notes raw:', entity.notes, 'type:', typeof entity.notes);
+    if (typeof notes === 'string') {
+      try {
+        notes = JSON.parse(notes);
+      } catch (e) {
+        notes = [];
+      }
+    }
+    notes = Array.isArray(notes) ? notes : [];
+    console.log('[BACKEND LEAD MAPPER] notes final:', notes);
+
     return {
       id: entity.id,
       leadNumber: entity.leadNumber,
@@ -50,7 +63,7 @@ export class LeadMapper {
       location: entity.location,
       status: entity.status,
       leadType: entity.leadType,
-      notes: entity.notes,
+      notes: notes,
       contact: entity.contact ? {
         id: entity.contact.id,
         name: entity.contact.name,
