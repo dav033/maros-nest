@@ -9,7 +9,7 @@
       "problemMatcher": [],
       "presentation": {
         "reveal": "always",
-        "panel": "new",
+        "panel": "new", 
         "focus": false
       },
       "runOptions": {

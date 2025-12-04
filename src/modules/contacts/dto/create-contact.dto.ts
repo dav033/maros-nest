@@ -32,6 +32,12 @@ export class CreateContactDto {
   @MaxLength(255)
   address?: string;
 
+  @ApiPropertyOptional({ description: 'Address link (Google Maps URL, etc.)', maxLength: 500 })
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  addressLink?: string;
+
   @ApiPropertyOptional({ description: 'Is the contact a customer?', default: false })
   @IsBoolean()
   @IsOptional()

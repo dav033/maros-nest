@@ -13,6 +13,9 @@ export class Company {
   @Column({ length: 255, nullable: true })
   address?: string;
 
+  @Column({ name: 'address_link', length: 500, nullable: true })
+  addressLink?: string;
+
   @Column({
     type: 'enum',
     enum: CompanyType,

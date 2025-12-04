@@ -33,6 +33,9 @@ export class Contact {
   @Column({ length: 255, nullable: true })
   address?: string;
 
+  @Column({ name: 'address_link', length: 500, nullable: true })
+  addressLink?: string;
+
   @Column({ name: 'is_customer', default: false })
   customer: boolean;
 

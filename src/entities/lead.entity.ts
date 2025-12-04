@@ -34,6 +34,9 @@ export class Lead {
   @Column({ length: 255, nullable: true })
   location?: string;
 
+  @Column({ name: 'address_link', length: 500, nullable: true })
+  addressLink?: string;
+
   @Column({
     type: 'enum',
     enum: LeadStatus,

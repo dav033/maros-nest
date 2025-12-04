@@ -29,6 +29,12 @@ export class CreateLeadDto {
   @MaxLength(255)
   location?: string;
 
+  @ApiPropertyOptional({ description: 'Address link (Google Maps URL, etc.)', maxLength: 500 })
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  addressLink?: string;
+
   @ApiProperty({ description: 'Status of the lead', enum: LeadStatus })
   @IsEnum(LeadStatus)
   @IsOptional()

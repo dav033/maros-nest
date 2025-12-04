@@ -16,6 +16,12 @@ export class CreateCompanyDto {
   @MaxLength(255)
   address?: string;
 
+  @ApiPropertyOptional({ description: 'Address link (Google Maps URL, etc.)', maxLength: 500 })
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  addressLink?: string;
+
   @ApiProperty({ description: 'Type of the company', enum: CompanyType })
   @IsEnum(CompanyType)
   @IsNotEmpty()
