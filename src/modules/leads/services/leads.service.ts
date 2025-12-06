@@ -192,6 +192,9 @@ export class LeadsService {
     if (dto.location !== undefined) {
       entity.location = dto.location;
     }
+    if (dto.addressLink !== undefined) {
+      entity.addressLink = dto.addressLink;
+    }
     if (dto.status !== undefined) {
       entity.status = dto.status;
     }

@@ -13,6 +13,7 @@ export class LeadMapper {
     // Convert string date to Date object
     entity.startDate = dto.startDate ? new Date(dto.startDate) : new Date();
     if (dto.location) entity.location = dto.location;
+    if (dto.addressLink) entity.addressLink = dto.addressLink;
     if (dto.status) entity.status = dto.status;
     if (dto.leadType) entity.leadType = dto.leadType;
     if (dto.notes) entity.notes = dto.notes;
@@ -28,6 +29,7 @@ export class LeadMapper {
     if (dto.name !== undefined) entity.name = dto.name;
     if (dto.startDate !== undefined) entity.startDate = new Date(dto.startDate);
     if (dto.location !== undefined) entity.location = dto.location;
+    if (dto.addressLink !== undefined) entity.addressLink = dto.addressLink;
     if (dto.status !== undefined) entity.status = dto.status;
     if (dto.leadType !== undefined) entity.leadType = dto.leadType;
     if (dto.notes !== undefined) entity.notes = dto.notes;
@@ -61,6 +63,7 @@ export class LeadMapper {
       name: entity.name,
       startDate: formatDate(entity.startDate),
       location: entity.location,
+      addressLink: entity.addressLink,
       status: entity.status,
       leadType: entity.leadType,
       notes: notes,
