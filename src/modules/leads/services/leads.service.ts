@@ -122,6 +122,7 @@ export class LeadsService {
       leadNumber: entity.leadNumber,
       name: entity.name,
       location: entity.location,
+      addressLink: entity.addressLink,
       hasId: !!(entity as any).id
     })}`);
 
@@ -173,7 +174,8 @@ export class LeadsService {
   }
 
   private async updateEntityFields(dto: CreateLeadDto, entity: Lead): Promise<void> {
-    if (dto.leadNumber !== undefined) {
+    // Lead number should not be cleared once set, only updated to a valid value
+    if (dto.leadNumber !== undefined && dto.leadNumber !== null && dto.leadNumber.trim() !== '') {
       entity.leadNumber = dto.leadNumber;
     }
     if (dto.name !== undefined) {

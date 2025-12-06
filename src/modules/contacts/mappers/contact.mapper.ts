@@ -8,10 +8,12 @@ export class ContactMapper {
   toEntity(dto: CreateContactDto): Contact {
     const entity = new Contact();
     entity.name = dto.name;
-    entity.occupation = dto.occupation;
+    // Map role or occupation to occupation field
+    entity.occupation = dto.occupation ?? dto.role;
     entity.phone = dto.phone;
     entity.email = dto.email;
     entity.address = dto.address;
+    entity.addressLink = dto.addressLink;
     entity.customer = dto.isCustomer ?? false;
     entity.client = dto.isClient ?? false;
     entity.notes = dto.notes;
@@ -25,10 +27,16 @@ export class ContactMapper {
 
   updateEntity(dto: UpdateContactDto, entity: Contact): void {
     if (dto.name !== undefined) entity.name = dto.name;
+    
+    // Map role update to occupation
+    if (dto.role !== undefined) entity.occupation = dto.role;
+    // If occupation is explicitly provided, it overrides role
     if (dto.occupation !== undefined) entity.occupation = dto.occupation;
+    
     if (dto.phone !== undefined) entity.phone = dto.phone;
     if (dto.email !== undefined) entity.email = dto.email;
     if (dto.address !== undefined) entity.address = dto.address;
+    if (dto.addressLink !== undefined) entity.addressLink = dto.addressLink;
     if (dto.isCustomer !== undefined) entity.customer = dto.isCustomer;
     if (dto.isClient !== undefined) entity.client = dto.isClient;
     if (dto.notes !== undefined) entity.notes = dto.notes;
@@ -49,10 +57,12 @@ export class ContactMapper {
     return {
       id: entity.id,
       name: entity.name,
+      role: entity.occupation,
       occupation: entity.occupation,
       phone: entity.phone,
       email: entity.email,
       address: entity.address,
+      addressLink: entity.addressLink,
       isCustomer: entity.customer,
       isClient: entity.client,
       company: companyDto,

@@ -9,6 +9,7 @@ export class CompanyMapper {
     const entity = new Company();
     entity.name = dto.name;
     entity.address = dto.address;
+    entity.addressLink = dto.addressLink;
     entity.type = dto.type;
     entity.serviceId = dto.serviceId;
     entity.customer = dto.isCustomer ?? false;
@@ -20,6 +21,7 @@ export class CompanyMapper {
   updateEntity(dto: UpdateCompanyDto, entity: Company): void {
     if (dto.name !== undefined) entity.name = dto.name;
     if (dto.address !== undefined) entity.address = dto.address;
+    if (dto.addressLink !== undefined) entity.addressLink = dto.addressLink;
     if (dto.type !== undefined) entity.type = dto.type;
     if (dto.serviceId !== undefined) entity.serviceId = dto.serviceId;
     if (dto.isCustomer !== undefined) entity.customer = dto.isCustomer;
@@ -37,6 +39,7 @@ export class CompanyMapper {
       id: entity.id,
       name: entity.name,
       address: entity.address,
+      addressLink: entity.addressLink,
       type: entity.type,
       serviceId: entity.serviceId,
       isCustomer: entity.customer,

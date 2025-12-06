@@ -8,6 +8,12 @@ export class CreateContactDto {
   @MaxLength(100)
   name: string;
 
+  @ApiPropertyOptional({ description: 'Role of the contact', maxLength: 100 })
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  role?: string;
+
   @ApiPropertyOptional({ description: 'Occupation of the contact', maxLength: 100 })
   @IsString()
   @IsOptional()

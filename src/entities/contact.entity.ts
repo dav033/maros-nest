@@ -21,6 +21,8 @@ export class Contact {
   @Column({ length: 100 })
   name: string;
 
+
+
   @Column({ length: 100, nullable: true })
   occupation?: string;
 
