@@ -1,4 +1,4 @@
-export enum ProjectStatus {
+export enum ProjectProgressStatus {
   NOT_EXECUTED = 'NOT_EXECUTED',
   IN_PROGRESS = 'IN_PROGRESS',
   COMPLETED = 'COMPLETED',

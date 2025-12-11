@@ -1,30 +1,26 @@
-import { IsString, IsNotEmpty, MaxLength, IsOptional, IsEnum, IsNumber, IsDateString, IsArray, IsBoolean } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsEnum, IsNumber, IsArray, IsBoolean, Min, ArrayMinSize, ValidateNested } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ProjectStatus } from '../../../common/enums/project-status.enum';
+import { Type } from 'class-transformer';
+import { ProjectProgressStatus } from '../../../common/enums/project-progress-status.enum';
 import { InvoiceStatus } from '../../../common/enums/invoice-status.enum';
 
 export class CreateProjectDto {
-  @ApiProperty({ description: 'Name of the project', maxLength: 100 })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(100)
-  projectName: string;
-
-  @ApiPropertyOptional({ description: 'Overview of the project' })
-  @IsString()
+  @ApiProperty({ description: 'Invoice amount', type: Number, example: 1000.50 })
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   @IsOptional()
-  overview?: string;
+  invoiceAmount?: number;
 
-  @ApiPropertyOptional({ description: 'Payments made', type: [Number] })
+  @ApiPropertyOptional({ description: 'Payments made (array of numbers with 2 decimal places)', type: [Number], example: [500.00, 300.50] })
   @IsArray()
-  @IsNumber({}, { each: true })
+  @IsNumber({ maxDecimalPlaces: 2 }, { each: true })
   @IsOptional()
   payments?: number[];
 
-  @ApiPropertyOptional({ description: 'Status of the project', enum: ProjectStatus })
-  @IsEnum(ProjectStatus)
+  @ApiPropertyOptional({ description: 'Progress status of the project', enum: ProjectProgressStatus })
+  @IsEnum(ProjectProgressStatus)
   @IsOptional()
-  projectStatus?: ProjectStatus;
+  projectProgressStatus?: ProjectProgressStatus;
 
   @ApiPropertyOptional({ description: 'Invoice status', enum: InvoiceStatus })
   @IsEnum(InvoiceStatus)
@@ -36,18 +32,19 @@ export class CreateProjectDto {
   @IsOptional()
   quickbooks?: boolean;
 
-  @ApiPropertyOptional({ description: 'Start date' })
-  @IsDateString()
+  @ApiPropertyOptional({ description: 'Project overview/description', type: String })
+  @IsString()
   @IsOptional()
-  startDate?: string;
+  overview?: string;
 
-  @ApiPropertyOptional({ description: 'End date' })
-  @IsDateString()
+  @ApiPropertyOptional({ description: 'Project notes', type: [String], example: ['Note 1', 'Note 2'] })
+  @IsArray()
+  @IsString({ each: true })
   @IsOptional()
-  endDate?: string;
+  notes?: string[];
 
-  @ApiPropertyOptional({ description: 'Lead ID associated with the project' })
+  @ApiProperty({ description: 'Lead ID associated with the project (required)', type: Number })
   @IsNumber()
-  @IsOptional()
-  leadId?: number;
+  @IsNotEmpty()
+  leadId: number;
 }

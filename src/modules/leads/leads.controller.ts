@@ -55,16 +55,24 @@ export class LeadsController {
     type: Boolean,
     description: 'Skip ClickUp synchronization'
   })
+  @ApiQuery({ 
+    name: 'leadType', 
+    required: false, 
+    enum: LeadType,
+    description: 'Lead type for number generation if leadNumber is not provided'
+  })
   @ApiResponse({ status: 200, description: 'Lead created successfully' })
   async createLeadByNewContact(
     @Body() request: CreateLeadByNewContactDto,
     @Query('skipClickUpSync') skipClickUpSync?: string,
+    @Query('leadType') leadType?: LeadType,
   ) {
     const skip = skipClickUpSync === 'true';
     return this.leadsService.createLeadWithNewContact(
       request.lead,
       request.contact,
       skip,
+      leadType,
     );
   }
 
@@ -76,16 +84,24 @@ export class LeadsController {
     type: Boolean,
     description: 'Skip ClickUp synchronization'
   })
+  @ApiQuery({ 
+    name: 'leadType', 
+    required: false, 
+    enum: LeadType,
+    description: 'Lead type for number generation if leadNumber is not provided'
+  })
   @ApiResponse({ status: 200, description: 'Lead created successfully' })
   async createLeadByExistingContact(
     @Body() request: CreateLeadByExistingContactDto,
     @Query('skipClickUpSync') skipClickUpSync?: string,
+    @Query('leadType') leadType?: LeadType,
   ) {
     const skip = skipClickUpSync === 'true';
     return this.leadsService.createLeadWithExistingContact(
       request.lead,
       request.contactId,
       skip,
+      leadType,
     );
   }
 
@@ -101,6 +117,15 @@ export class LeadsController {
     @Query('leadNumber') leadNumber: string,
   ): Promise<LeadNumberValidationResponseDto> {
     return this.leadsService.validateLeadNumber(leadNumber);
+  }
+
+  @Get('number/:leadNumber')
+  @ApiOperation({ summary: 'Get lead by lead number' })
+  @ApiParam({ name: 'leadNumber', type: String })
+  @ApiResponse({ status: 200, description: 'Returns the lead with customer info' })
+  @ApiResponse({ status: 404, description: 'Lead not found' })
+  async getLeadByNumber(@Param('leadNumber') leadNumber: string) {
+    return this.leadsService.getLeadByNumber(leadNumber);
   }
 
   @Get(':leadId')

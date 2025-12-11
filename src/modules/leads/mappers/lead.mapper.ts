@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { CreateLeadDto } from '../dto/create-lead.dto';
 import { UpdateLeadDto } from '../dto/update-lead.dto';
 import { Lead } from '../../../entities/lead.entity';
+import { getLeadTypeFromNumber } from '../../../common/utils/lead-type.utils';
 
 @Injectable()
 export class LeadMapper {
@@ -9,13 +10,13 @@ export class LeadMapper {
     const entity = new Lead();
     // leadNumber and name are set by service after applyDefaults
     if (dto.leadNumber) entity.leadNumber = dto.leadNumber;
-    entity.name = dto.name || ''; // name is required by entity, service ensures it's set
-    // Convert string date to Date object
-    entity.startDate = dto.startDate ? new Date(dto.startDate) : new Date();
+    entity.name = dto.name || undefined; // name can be null
+    // Convert string date to Date object, can be null
+    entity.startDate = dto.startDate ? new Date(dto.startDate) : undefined;
     if (dto.location) entity.location = dto.location;
     if (dto.addressLink) entity.addressLink = dto.addressLink;
     if (dto.status) entity.status = dto.status;
-    if (dto.leadType) entity.leadType = dto.leadType;
+    // leadType ya no se almacena, se determina desde leadNumber
     if (dto.notes) entity.notes = dto.notes;
     
     // Relations (contact, projectType) are usually handled by the service
@@ -27,11 +28,13 @@ export class LeadMapper {
   updateEntity(dto: UpdateLeadDto, entity: Lead): void {
     if (dto.leadNumber !== undefined) entity.leadNumber = dto.leadNumber;
     if (dto.name !== undefined) entity.name = dto.name;
-    if (dto.startDate !== undefined) entity.startDate = new Date(dto.startDate);
+    if (dto.startDate !== undefined) {
+      entity.startDate = dto.startDate ? new Date(dto.startDate) : undefined;
+    }
     if (dto.location !== undefined) entity.location = dto.location;
     if (dto.addressLink !== undefined) entity.addressLink = dto.addressLink;
     if (dto.status !== undefined) entity.status = dto.status;
-    if (dto.leadType !== undefined) entity.leadType = dto.leadType;
+    // leadType ya no se almacena, se determina desde leadNumber
     if (dto.notes !== undefined) entity.notes = dto.notes;
   }
 
@@ -65,7 +68,7 @@ export class LeadMapper {
       location: entity.location,
       addressLink: entity.addressLink,
       status: entity.status,
-      leadType: entity.leadType,
+      leadType: getLeadTypeFromNumber(entity.leadNumber),
       notes: notes,
       contact: entity.contact ? {
         id: entity.contact.id,
@@ -74,8 +77,19 @@ export class LeadMapper {
         email: entity.contact.email,
         occupation: entity.contact.occupation,
         address: entity.contact.address,
+        addressLink: entity.contact.addressLink,
         isCustomer: entity.contact.customer,
         isClient: entity.contact.client,
+        company: entity.contact.company ? {
+          id: entity.contact.company.id,
+          name: entity.contact.company.name,
+          type: entity.contact.company.type,
+          address: entity.contact.company.address,
+          addressLink: entity.contact.company.addressLink,
+          serviceId: entity.contact.company.serviceId,
+          isCustomer: entity.contact.company.customer,
+          isClient: entity.contact.company.client,
+        } : null,
       } : null,
       projectType: entity.projectType ? {
         id: entity.projectType.id,

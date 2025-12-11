@@ -17,8 +17,9 @@ export const getDatabaseConfig = (
     entities: [__dirname + '/../**/*.entity{.ts,.js}'],
     migrations: [__dirname + '/../database/migrations/*{.ts,.js}'],
     
-    // DISABLE synchronize to prevent connection issues during schema introspection
-    // Use migrations instead for schema changes
+    // Disable synchronize - use migrations instead for schema changes
+    // WARNING: synchronize: true can cause data loss and schema conflicts
+    // Always use migrations for schema changes, even in development
     synchronize: false,
     
     // Don't drop schema on connection

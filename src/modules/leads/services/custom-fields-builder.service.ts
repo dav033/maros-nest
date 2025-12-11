@@ -6,6 +6,7 @@ import { CreateLeadDto } from '../dto/create-lead.dto';
 import { ClickUpCustomFieldDto } from '../../clickup/dto/clickup-task-request.dto';
 import { ClickUpRoutingService } from '../../clickup/services/clickup-routing.service';
 import { LeadType } from '../../../common/enums/lead-type.enum';
+import { getLeadTypeFromNumber } from '../../../common/utils/lead-type.utils';
 
 @Injectable()
 export class CustomFieldsBuilder {
@@ -20,7 +21,7 @@ export class CustomFieldsBuilder {
   async build(dto: CreateLeadDto): Promise<ClickUpCustomFieldDto[]> {
     const fields: ClickUpCustomFieldDto[] = [];
 
-    const type = dto.leadType || LeadType.CONSTRUCTION;
+    const type = getLeadTypeFromNumber(dto.leadNumber) || LeadType.CONSTRUCTION;
     const number = dto.leadNumber;
     
     const route = this.routingService.route(type);

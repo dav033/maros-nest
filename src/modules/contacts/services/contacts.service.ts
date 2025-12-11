@@ -37,6 +37,20 @@ export class ContactsService extends BaseService<any, number, Contact> {
     return entities.map((entity) => this.contactMapper.toDto(entity));
   }
 
+  async findByCompany(companyId: number): Promise<any[]> {
+    const company = await this.companyRepo.findOne({ where: { id: companyId } });
+    if (!company) {
+      throw new ResourceNotFoundException(`Company not found with id: ${companyId}`);
+    }
+
+    const entities = await this.contactRepo.find({
+      where: { company: { id: companyId } },
+      relations: ['company'],
+    });
+
+    return entities.map((entity) => this.contactMapper.toDto(entity));
+  }
+
   async create(dto: CreateContactDto): Promise<any> {
     // Validate name
     if (dto.name && await this.contactsRepository.existsByNameIgnoreCase(dto.name)) {

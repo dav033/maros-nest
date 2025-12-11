@@ -7,6 +7,12 @@ export class LeadNotFoundException extends ResourceNotFoundException {
   }
 }
 
+export class LeadNotFoundByNumberException extends ResourceNotFoundException {
+  constructor(leadNumber: string) {
+    super(`Lead not found with lead number: ${leadNumber}`);
+  }
+}
+
 export class LeadCreationException extends BusinessException {
   constructor(message: string, public readonly originalError?: Error) {
     super(message, 'LEAD_CREATION_ERROR');
@@ -15,5 +21,6 @@ export class LeadCreationException extends BusinessException {
 
 export const LeadExceptions = {
   LeadNotFoundException,
+  LeadNotFoundByNumberException,
   LeadCreationException,
 };

@@ -14,6 +14,7 @@ import { LeadType } from '../../../common/enums/lead-type.enum';
 import { LeadStatus } from '../../../common/enums/lead-status.enum';
 import { LeadNumberValidationResponseDto } from '../dto/lead-number-validation-response.dto';
 import { ValidationException, LeadExceptions, ContactExceptions, ProjectTypeExceptions, DatabaseException } from '../../../common/exceptions';
+import { getLeadTypeFromNumber } from '../../../common/utils/lead-type.utils';
 
 @Injectable()
 export class LeadsService {
@@ -54,50 +55,59 @@ export class LeadsService {
     return this.leadMapper.toDto(entity);
   }
 
+  async getLeadByNumber(leadNumber: string): Promise<any> {
+    const trimmedLeadNumber = leadNumber?.trim();
+    if (!trimmedLeadNumber) {
+      throw ValidationException.format('Lead number is required');
+    }
+
+    const entity = await this.leadsRepository.findByLeadNumberWithRelations(trimmedLeadNumber);
+    if (!entity) {
+      throw new LeadExceptions.LeadNotFoundByNumberException(trimmedLeadNumber);
+    }
+
+    return this.leadMapper.toDto(entity);
+  }
+
   async createLeadWithNewContact(
     leadDto: CreateLeadDto,
     contactDto: any,
     skipClickUpSync: boolean = false,
+    leadTypeForGeneration?: LeadType,
   ): Promise<any> {
     const savedContact = await this.contactsService.create(contactDto);
     const contactEntity = await this.contactRepo.findOne({ where: { id: savedContact.id } });
     if (!contactEntity) {
       throw new ContactExceptions.ContactNotFoundException(savedContact.id);
     }
-    return this.persistLead(leadDto, contactEntity, skipClickUpSync);
+    return this.persistLead(leadDto, contactEntity, skipClickUpSync, leadTypeForGeneration);
   }
 
   async createLeadWithExistingContact(
     leadDto: CreateLeadDto,
     contactId: number,
     skipClickUpSync: boolean = false,
+    leadTypeForGeneration?: LeadType,
   ): Promise<any> {
     const contactEntity = await this.contactRepo.findOne({ where: { id: contactId } });
     if (!contactEntity) {
       throw new ContactExceptions.ContactNotFoundException(contactId);
     }
-    return this.persistLead(leadDto, contactEntity, skipClickUpSync);
+    return this.persistLead(leadDto, contactEntity, skipClickUpSync, leadTypeForGeneration);
   }
 
   private async persistLead(
     leadDto: CreateLeadDto,
     contact: Contact,
     skipClickUpSync: boolean,
+    leadTypeForGeneration?: LeadType,
   ): Promise<any> {
-    await this.applyDefaults(leadDto);
+    await this.applyDefaults(leadDto, leadTypeForGeneration);
 
-    // Auto-generate lead name if empty: {leadNumber}-{location}
-    if (!leadDto.name || leadDto.name.trim() === '') {
-      if (leadDto.location && leadDto.location.trim() !== '') {
-        leadDto.name = `${leadDto.leadNumber}-${leadDto.location.trim()}`;
-      } else {
-        throw ValidationException.format('Location is required when lead name is not provided');
-      }
-    }
-
-    // Validate location is not empty
-    if (!leadDto.location || leadDto.location.trim() === '') {
-      throw ValidationException.format('Location is required');
+    // Auto-generate lead name if empty and we have the necessary data: {leadNumber}-{location}
+    // Name can be null if not provided and cannot be auto-generated
+    if ((!leadDto.name || leadDto.name.trim() === '') && leadDto.leadNumber && leadDto.location && leadDto.location.trim() !== '') {
+      leadDto.name = `${leadDto.leadNumber}-${leadDto.location.trim()}`;
     }
 
     // Get projectTypeId from ProjectType object or throw error if not present
@@ -182,14 +192,14 @@ export class LeadsService {
       entity.name = dto.name;
     }
     if (dto.startDate !== undefined) {
-      // Handle both Date objects and string dates
-      if (typeof dto.startDate === 'string') {
+      // Handle both Date objects and string dates, can be null
+      if (dto.startDate === null || dto.startDate === '') {
+        entity.startDate = undefined;
+      } else if (typeof dto.startDate === 'string') {
         entity.startDate = new Date(dto.startDate);
       } else {
         entity.startDate = dto.startDate;
       }
-    } else if (!entity.startDate) {
-      entity.startDate = new Date();
     }
     if (dto.location !== undefined) {
       entity.location = dto.location;
@@ -200,9 +210,7 @@ export class LeadsService {
     if (dto.status !== undefined) {
       entity.status = dto.status;
     }
-    if (dto.leadType !== undefined) {
-      entity.leadType = dto.leadType;
-    }
+    // leadType ya no se almacena, se determina desde leadNumber
     if (dto.contactId !== undefined) {
       const contactEntity = await this.contactRepo.findOne({ where: { id: dto.contactId } });
       if (!contactEntity) {
@@ -254,15 +262,15 @@ export class LeadsService {
     }
   }
 
-  private async applyDefaults(leadDto: CreateLeadDto): Promise<void> {
+  private async applyDefaults(leadDto: CreateLeadDto, leadTypeForGeneration?: LeadType): Promise<void> {
     leadDto.status = leadDto.status || LeadStatus.NOT_EXECUTED;
     
-    if (!leadDto.startDate) {
-      leadDto.startDate = new Date() as any;
-    }
+    // startDate can be null, no default assignment
 
     if (!leadDto.leadNumber || leadDto.leadNumber.trim() === '') {
-      leadDto.leadNumber = await this.generateLeadNumber(leadDto.leadType || LeadType.CONSTRUCTION);
+      // Si no se proporciona leadNumber, generar uno según el tipo proporcionado o CONSTRUCTION por defecto
+      const typeToUse = leadTypeForGeneration || LeadType.CONSTRUCTION;
+      leadDto.leadNumber = await this.generateLeadNumber(typeToUse);
     } else {
       // Validate that the provided lead number doesn't already exist
       const exists = await this.leadsRepository.existsByLeadNumber(leadDto.leadNumber);
@@ -271,9 +279,10 @@ export class LeadsService {
       }
     }
 
-    // Auto-generate name if not provided: {leadNumber}-{location}
-    if (!leadDto.name || leadDto.name.trim() === '') {
-      leadDto.name = `${leadDto.leadNumber}-${leadDto.location || 'Unknown'}`;
+    // Auto-generate name if not provided and we have the necessary data: {leadNumber}-{location}
+    // Name can be null if not provided and cannot be auto-generated
+    if ((!leadDto.name || leadDto.name.trim() === '') && leadDto.leadNumber && leadDto.location) {
+      leadDto.name = `${leadDto.leadNumber}-${leadDto.location}`;
     }
   }
 
@@ -291,6 +300,9 @@ export class LeadsService {
     const max = allLeadNumbers
       .map((s) => {
         if (!s) return -1;
+        if (type === LeadType.ROOFING && /^\d{3}R-\d{4}$/.test(s)) {
+          return parseInt(s.substring(0, 3), 10);
+        }
         if (type === LeadType.PLUMBING && /^\d{3}P-\d{4}$/.test(s)) {
           return parseInt(s.substring(0, 3), 10);
         }
@@ -305,7 +317,13 @@ export class LeadsService {
     const next = max + 1;
     const base = String(next).padStart(3, '0');
 
-    return type === LeadType.PLUMBING ? `${base}P-${mmyy}` : `${base}-${mmyy}`;
+    if (type === LeadType.ROOFING) {
+      return `${base}R-${mmyy}`;
+    } else if (type === LeadType.PLUMBING) {
+      return `${base}P-${mmyy}`;
+    } else {
+      return `${base}-${mmyy}`;
+    }
   }
 
   private async resolveProjectType(id: number): Promise<ProjectType> {
@@ -357,7 +375,7 @@ export class LeadsService {
   }
 
   private extractNumericPrefix(leadNumber: string): string | null {
-    if (/^\d{3}P-\d{4}$/.test(leadNumber) || /^\d{3}-\d{4}$/.test(leadNumber)) {
+    if (/^\d{3}R-\d{4}$/.test(leadNumber) || /^\d{3}P-\d{4}$/.test(leadNumber) || /^\d{3}-\d{4}$/.test(leadNumber)) {
       return leadNumber.substring(0, 3);
     }
     return null;

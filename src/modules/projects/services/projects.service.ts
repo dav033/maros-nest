@@ -2,82 +2,99 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Project } from '../../../entities/project.entity';
+import { Lead } from '../../../entities/lead.entity';
 import { ProjectsRepository } from '../repositories/projects.repository';
-
-export interface ProjectWithLeadDto {
-  id: number;
-  projectName: string;
-  overview?: string;
-  payments?: string;
-  projectStatus: string;
-  invoiceStatus?: string;
-  quickbooks?: string;
-  startDate?: Date;
-  endDate?: Date;
-  leadId?: number;
-  leadName?: string;
-  leadNumber?: string;
-  location?: string;
-  contactName?: string;
-  customerName?: string;
-}
+import { ProjectMapper } from '../mappers/project.mapper';
+import { CreateProjectDto } from '../dto/create-project.dto';
+import { UpdateProjectDto } from '../dto/update-project.dto';
+import { ValidationException, ResourceNotFoundException } from '../../../common/exceptions';
+import { BaseService } from '../../../common/services/base.service';
 
 @Injectable()
-export class ProjectsService {
+export class ProjectsService extends BaseService<any, number, Project> {
   private readonly logger = new Logger(ProjectsService.name);
 
   constructor(
     private readonly projectsRepository: ProjectsRepository,
     @InjectRepository(Project)
     private readonly projectRepo: Repository<Project>,
-  ) {}
-
-  async getProjectsWithLead(): Promise<ProjectWithLeadDto[]> {
-    const projects = await this.projectsRepository.findProjectsWithLeadAndContact();
-    return projects.map((project) => this.convertToDtoWithLead(project));
+    @InjectRepository(Lead)
+    private readonly leadRepo: Repository<Lead>,
+    private readonly projectMapper: ProjectMapper,
+  ) {
+    super(projectRepo, projectMapper);
   }
 
-  private convertToDtoWithLead(entity: Project): ProjectWithLeadDto {
-    const dto: ProjectWithLeadDto = {
-      id: entity.id,
-      projectName: entity.projectName,
-      overview: entity.overview,
-      payments: Array.isArray(entity.payments) ? entity.payments.join(', ') : entity.payments,
-      projectStatus: entity.projectStatus || '',
-      invoiceStatus: entity.invoiceStatus,
-      quickbooks: typeof entity.quickbooks === 'boolean' ? (entity.quickbooks ? 'true' : 'false') : entity.quickbooks,
-      startDate: entity.startDate,
-      endDate: entity.endDate,
-    };
-
-    const lead = entity.lead;
-    if (lead) {
-      dto.leadId = lead.id;
-      dto.leadName = lead.name;
-      dto.leadNumber = lead.leadNumber;
-
-      let location: string | undefined;
-      try {
-        location = lead.location;
-      } catch (error) {
-        // Ignore if location is not loaded
-      }
-      if (!location || location.trim() === '') {
-        location = lead.name;
-      }
-      dto.location = location;
-
-      try {
-        const contact = lead.contact;
-        if (contact) {
-          dto.contactName = contact.name;
-          dto.customerName = contact.name;
-        }
-      } catch (error) {
-        this.logger.debug(`Contact not loaded for lead ${lead.id}`);
-      }
+  async create(dto: CreateProjectDto): Promise<any> {
+    // Validate that lead exists
+    const lead = await this.leadRepo.findOne({ where: { id: dto.leadId } });
+    if (!lead) {
+      throw ValidationException.format('Lead not found with id: %s', dto.leadId.toString());
     }
 
-    return dto;
+    // Check if lead already has a project (1:1 relationship)
+    const existingProject = await this.projectRepo.findOne({ 
+      where: { lead: { id: dto.leadId } },
+      relations: ['lead']
+    });
+    if (existingProject) {
+      throw ValidationException.format('Lead with id %s already has a project', dto.leadId.toString());
+    }
+
+    const entity = this.projectMapper.toEntity(dto);
+    entity.lead = lead;
+
+    const saved = await this.projectRepo.save(entity);
+    return this.projectMapper.toDto(saved);
+  }
+
+  async update(id: number, dto: UpdateProjectDto): Promise<any> {
+    const entity = await this.projectRepo.findOne({ 
+      where: { id }, 
+      relations: ['lead'] 
+    });
+    if (!entity) {
+      throw new ResourceNotFoundException(`Project not found with id: ${id}`);
+    }
+
+    // If leadId is being updated, validate the new lead
+    if (dto.leadId !== undefined && dto.leadId !== entity.lead.id) {
+      const newLead = await this.leadRepo.findOne({ where: { id: dto.leadId } });
+      if (!newLead) {
+        throw ValidationException.format('Lead not found with id: %s', dto.leadId.toString());
+      }
+
+      // Check if the new lead already has a project
+      const existingProject = await this.projectRepo.findOne({ 
+        where: { lead: { id: dto.leadId } }
+      });
+      if (existingProject && existingProject.id !== id) {
+        throw ValidationException.format('Lead with id %s already has a project', dto.leadId.toString());
+      }
+
+      entity.lead = newLead;
+    }
+
+    this.projectMapper.updateEntity(dto, entity);
+    const saved = await this.projectRepo.save(entity);
+    return this.projectMapper.toDto(saved);
+  }
+
+  async findAll(): Promise<any[]> {
+    const entities = await this.projectRepo.find({ 
+      relations: ['lead', 'lead.contact', 'lead.projectType'] 
+    });
+    return entities.map((entity) => this.projectMapper.toDto(entity));
+  }
+
+  async findById(id: number): Promise<any> {
+    const entity = await this.projectRepo.findOne({ 
+      where: { id }, 
+      relations: ['lead', 'lead.contact', 'lead.projectType'] 
+    });
+    if (!entity) {
+      throw new ResourceNotFoundException(`Project not found with id: ${id}`);
+    }
+    return this.projectMapper.toDto(entity);
   }
 }

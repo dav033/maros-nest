@@ -8,15 +8,14 @@ import {
   Index,
 } from 'typeorm';
 import { LeadStatus } from '../common/enums/lead-status.enum';
-import { LeadType } from '../common/enums/lead-type.enum';
 import { Contact } from './contact.entity';
 import { ProjectType } from './project-type.entity';
-import { LeadClickUpMapping } from './lead-clickup-mapping.entity';
+import { Project } from './project.entity';
 
 @Entity('leads')
-@Index('idx_lead_number_unique', ['leadNumber'], { 
-  unique: true, 
-  where: '"lead_number" IS NOT NULL' 
+@Index('idx_lead_number_unique', ['leadNumber'], {
+  unique: true,
+  where: '"lead_number" IS NOT NULL',
 })
 export class Lead {
   @PrimaryGeneratedColumn()
@@ -25,11 +24,11 @@ export class Lead {
   @Column({ name: 'lead_number', length: 50, nullable: true })
   leadNumber?: string;
 
-  @Column({ length: 100 })
-  name: string;
+  @Column({ length: 100, nullable: true })
+  name?: string;
 
-  @Column({ name: 'start_date', type: 'date' })
-  startDate: Date;
+  @Column({ name: 'start_date', type: 'date', nullable: true })
+  startDate?: Date;
 
   @Column({ length: 255, nullable: true })
   location?: string;
@@ -44,14 +43,6 @@ export class Lead {
   })
   status?: LeadStatus;
 
-  @Column({
-    name: 'lead_type',
-    type: 'enum',
-    enum: LeadType,
-    nullable: true,
-  })
-  leadType?: LeadType;
-
   @Column({ type: 'jsonb', nullable: true, name: 'notes' })
   notes?: string[];
 
@@ -65,6 +56,6 @@ export class Lead {
   @JoinColumn({ name: 'type' })
   projectType: ProjectType;
 
-  @OneToOne(() => LeadClickUpMapping, (mapping) => mapping.lead)
-  clickUpMapping: LeadClickUpMapping;
+  @OneToOne(() => Project, (project) => project.lead)
+  project: Project;
 }

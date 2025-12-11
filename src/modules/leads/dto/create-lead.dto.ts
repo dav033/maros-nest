@@ -2,7 +2,6 @@ import { IsString, IsNotEmpty, MaxLength, IsOptional, IsEnum, IsNumber, IsDateSt
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { LeadStatus } from '../../../common/enums/lead-status.enum';
-import { LeadType } from '../../../common/enums/lead-type.enum';
 import { CreateContactDto } from '../../contacts/dto/create-contact.dto';
 
 export class CreateLeadDto {
@@ -18,10 +17,10 @@ export class CreateLeadDto {
   @MaxLength(100)
   name?: string;
 
-  @ApiProperty({ description: 'Start date of the lead (YYYY-MM-DD)' })
+  @ApiPropertyOptional({ description: 'Start date of the lead (YYYY-MM-DD)' })
   @IsDateString()
-  @IsNotEmpty()
-  startDate: string;
+  @IsOptional()
+  startDate?: string;
 
   @ApiPropertyOptional({ description: 'Location', maxLength: 255 })
   @IsString()
@@ -39,11 +38,6 @@ export class CreateLeadDto {
   @IsEnum(LeadStatus)
   @IsOptional()
   status?: LeadStatus;
-
-  @ApiProperty({ description: 'Type of the lead', enum: LeadType })
-  @IsEnum(LeadType)
-  @IsOptional()
-  leadType?: LeadType;
 
   @ApiPropertyOptional({ description: 'Contact ID associated with the lead' })
   @IsNumber()

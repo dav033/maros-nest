@@ -6,6 +6,7 @@ import { CustomFieldsBuilder } from '../services/custom-fields-builder.service';
 import { ContactInfoFormatter } from '../../contacts/services/contact-info-formatter.service';
 import clickupConfig from '../../../config/clickup.config';
 import { LeadType } from '../../../common/enums/lead-type.enum';
+import { getLeadTypeFromNumber } from '../../../common/utils/lead-type.utils';
 
 @Injectable()
 export class LeadToClickUpMapper {
@@ -19,7 +20,8 @@ export class LeadToClickUpMapper {
   async toClickUpTask(dto: CreateLeadDto): Promise<ClickUpTaskRequestDto> {
     const customFields = await this.customFieldsBuilder.build(dto);
     const description = await this.buildDescription(dto);
-    const tags = this.buildTags(dto.leadType);
+    const leadType = getLeadTypeFromNumber(dto.leadNumber);
+    const tags = this.buildTags(leadType ?? undefined);
     const startDate = this.convertDateStringToTimestamp(dto.startDate);
 
     return {
@@ -66,8 +68,9 @@ export class LeadToClickUpMapper {
       lines.push(`- **Start Date:** ${fecha}`);
     }
 
-    if (dto.leadType) {
-      lines.push(`- **Type:** ${dto.leadType}`);
+    const leadType = getLeadTypeFromNumber(dto.leadNumber);
+    if (leadType) {
+      lines.push(`- **Type:** ${leadType}`);
     }
 
     if (contacto) {

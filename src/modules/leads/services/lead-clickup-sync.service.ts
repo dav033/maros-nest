@@ -5,6 +5,7 @@ import { ContactsService } from '../../contacts/services/contacts.service';
 import { ClickUpRoutingService } from '../../clickup/services/clickup-routing.service';
 import { Lead } from '../../../entities/lead.entity';
 import { LeadType } from '../../../common/enums/lead-type.enum';
+import { getLeadTypeFromNumber } from '../../../common/utils/lead-type.utils';
 
 @Injectable()
 export class LeadClickUpSyncService {
@@ -17,14 +18,15 @@ export class LeadClickUpSyncService {
   ) {}
 
   async syncLeadCreate(lead: Lead): Promise<void> {
-    this.logger.log(`Starting ClickUp sync for lead creation: ${lead.id} - ${lead.leadNumber} (${lead.leadType})`);
+    const leadType = getLeadTypeFromNumber(lead.leadNumber) || LeadType.CONSTRUCTION;
+    this.logger.log(`Starting ClickUp sync for lead creation: ${lead.id} - ${lead.leadNumber} (${leadType})`);
     try {
       const taskRequest = await this.buildClickUpTaskRequest(lead);
       this.logger.debug(`Task request built: ${JSON.stringify(taskRequest, null, 2)}`);
       
-      const response = await this.clickUpService.createTask(lead.leadType || LeadType.CONSTRUCTION, taskRequest);
+      const response = await this.clickUpService.createTask(leadType, taskRequest);
       
-      this.logger.log(`ClickUp CREATE ok: taskId=${response.id} lead=${lead.leadNumber} type=${lead.leadType}`);
+      this.logger.log(`ClickUp CREATE ok: taskId=${response.id} lead=${lead.leadNumber} type=${leadType}`);
     } catch (error: any) {
       this.logger.error(`Error syncing lead creation ${lead.id} with ClickUp: ${error.message}`, error.stack);
       // Don't throw - we don't want to fail lead creation if ClickUp sync fails
@@ -32,29 +34,31 @@ export class LeadClickUpSyncService {
   }
 
   async syncLeadUpdate(lead: Lead): Promise<void> {
+    const leadType = getLeadTypeFromNumber(lead.leadNumber) || LeadType.CONSTRUCTION;
     try {
-      const taskId = await this.clickUpService.findTaskIdByLeadNumber(lead.leadType || LeadType.CONSTRUCTION, lead.leadNumber || '');
+      const taskId = await this.clickUpService.findTaskIdByLeadNumber(leadType, lead.leadNumber || '');
       
       if (!taskId) {
-        this.logger.warn(`ClickUp UPDATE skipped: task not found for lead=${lead.leadNumber} (type=${lead.leadType})`);
+        this.logger.warn(`ClickUp UPDATE skipped: task not found for lead=${lead.leadNumber} (type=${leadType})`);
         return;
       }
 
       const taskRequest = await this.buildClickUpTaskRequest(lead);
       await this.clickUpService.updateTask(taskId, taskRequest);
       
-      this.logger.log(`ClickUp UPDATE ok: taskId=${taskId} lead=${lead.leadNumber} type=${lead.leadType}`);
+      this.logger.log(`ClickUp UPDATE ok: taskId=${taskId} lead=${lead.leadNumber} type=${leadType}`);
     } catch (error: any) {
       this.logger.error(`Error syncing lead update ${lead.id} with ClickUp: ${error.message}`, error.stack);
     }
   }
 
   async syncLeadDelete(lead: Lead): Promise<void> {
+    const leadType = getLeadTypeFromNumber(lead.leadNumber) || LeadType.CONSTRUCTION;
     try {
-      const deleted = await this.clickUpService.deleteTaskByLeadNumber(lead.leadType || LeadType.CONSTRUCTION, lead.leadNumber || '');
+      const deleted = await this.clickUpService.deleteTaskByLeadNumber(leadType, lead.leadNumber || '');
       
       if (deleted) {
-        this.logger.log(`ClickUp DELETE ok: lead=${lead.leadNumber} type=${lead.leadType}`);
+        this.logger.log(`ClickUp DELETE ok: lead=${lead.leadNumber} type=${leadType}`);
       } else {
         this.logger.warn(`ClickUp DELETE skipped: task not found for lead=${lead.leadNumber}`);
       }
@@ -64,7 +68,8 @@ export class LeadClickUpSyncService {
   }
 
   private async buildClickUpTaskRequest(lead: Lead): Promise<ClickUpTaskRequestDto> {
-    const route = this.routingService.route(lead.leadType || LeadType.CONSTRUCTION);
+    const leadType = getLeadTypeFromNumber(lead.leadNumber) || LeadType.CONSTRUCTION;
+    const route = this.routingService.route(leadType);
     const customFields: Array<{ id: string; value: any }> = [];
 
     // Lead Number field
@@ -143,12 +148,13 @@ export class LeadClickUpSyncService {
       name: taskName,
       description,
       custom_fields: customFields,
-      tags: ['lead', lead.leadType?.toLowerCase() || 'construction', 'automated'],
+      tags: ['lead', leadType.toLowerCase(), 'automated'],
       start_date: startDate,
     };
   }
 
   private buildDescription(lead: Lead): string {
+    const leadType = getLeadTypeFromNumber(lead.leadNumber);
     const parts = [
       '**New Lead Created**',
       '',
@@ -167,8 +173,8 @@ export class LeadClickUpSyncService {
       parts.push(`- **Start Date:** ${formatted}`);
     }
 
-    if (lead.leadType) {
-      parts.push(`- **Type:** ${lead.leadType}`);
+    if (leadType) {
+      parts.push(`- **Type:** ${leadType}`);
     }
 
     if (lead.contact) {

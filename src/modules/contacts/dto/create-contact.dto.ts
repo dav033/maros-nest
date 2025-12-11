@@ -2,11 +2,11 @@ import { IsString, IsNotEmpty, MaxLength, IsOptional, IsBoolean, IsNumber, IsArr
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateContactDto {
-  @ApiProperty({ description: 'Name of the contact', maxLength: 100 })
+  @ApiPropertyOptional({ description: 'Name of the contact', maxLength: 100 })
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   @MaxLength(100)
-  name: string;
+  name?: string;
 
   @ApiPropertyOptional({ description: 'Role of the contact', maxLength: 100 })
   @IsString()

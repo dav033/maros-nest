@@ -2,10 +2,10 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
-  ManyToOne,
+  OneToOne,
   JoinColumn,
 } from 'typeorm';
-import { ProjectStatus } from '../common/enums/project-status.enum';
+import { ProjectProgressStatus } from '../common/enums/project-progress-status.enum';
 import { InvoiceStatus } from '../common/enums/invoice-status.enum';
 import { Lead } from './lead.entity';
 
@@ -14,22 +14,25 @@ export class Project {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ name: 'project_name', length: 100 })
-  projectName: string;
-
-  @Column({ type: 'text', nullable: true })
-  overview?: string;
+  @Column({
+    name: 'invoice_amount',
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+    nullable: true,
+  })
+  invoiceAmount?: number;
 
   @Column({ type: 'numeric', array: true, nullable: true })
   payments?: number[];
 
   @Column({
-    name: 'project_status',
+    name: 'project_progress_status',
     type: 'enum',
-    enum: ProjectStatus,
+    enum: ProjectProgressStatus,
     nullable: true,
   })
-  projectStatus?: ProjectStatus;
+  projectProgressStatus?: ProjectProgressStatus;
 
   @Column({
     name: 'invoice_status',
@@ -42,13 +45,13 @@ export class Project {
   @Column({ nullable: true })
   quickbooks?: boolean;
 
-  @Column({ name: 'start_date', type: 'timestamp', nullable: true })
-  startDate?: Date;
+  @Column({ type: 'text', nullable: true })
+  overview?: string;
 
-  @Column({ name: 'end_date', type: 'timestamp', nullable: true })
-  endDate?: Date;
+  @Column({ type: 'jsonb', nullable: true, name: 'notes' })
+  notes?: string[];
 
-  @ManyToOne(() => Lead, { nullable: true, cascade: ['insert', 'update'] })
+  @OneToOne(() => Lead, { nullable: false, cascade: ['insert', 'update'] })
   @JoinColumn({ name: 'lead_id' })
   lead: Lead;
 }

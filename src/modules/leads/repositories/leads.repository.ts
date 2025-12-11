@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not } from 'typeorm';
 import { Lead } from '../../../entities/lead.entity';
 import { LeadType } from '../../../common/enums/lead-type.enum';
+import { getLeadTypeFromNumber, filterLeadsByType } from '../../../common/utils/lead-type.utils';
 
 @Injectable()
 export class LeadsRepository {
@@ -13,29 +14,29 @@ export class LeadsRepository {
 
   async findAll(): Promise<Lead[]> {
     return this.repo.find({
-      relations: ['contact', 'projectType'],
+      relations: ['contact', 'contact.company', 'projectType'],
     });
   }
 
   async findByLeadType(type: LeadType): Promise<Lead[]> {
-    return this.repo.find({
-      where: { leadType: type },
-      relations: ['contact', 'projectType'],
+    // Obtener todos los leads y filtrar por tipo usando la función utilitaria
+    const allLeads = await this.repo.find({
+      relations: ['contact', 'contact.company', 'projectType'],
     });
+    return filterLeadsByType(allLeads, type);
   }
 
   async findAllLeadNumbersByType(leadType: LeadType): Promise<string[]> {
-    const leads = await this.repo
+    const allLeads = await this.repo
       .createQueryBuilder('lead')
       .select('lead.leadNumber')
-      .where('lead.leadType = :leadType', { leadType })
-      .andWhere('lead.leadNumber IS NOT NULL')
+      .where('lead.leadNumber IS NOT NULL')
       .andWhere("lead.leadNumber != ''")
       .getMany();
     
-    // Filter out undefined values (though query already filters NULL)
-    // and assert type since we know they're all strings
-    return leads.map(l => l.leadNumber).filter((n): n is string => n !== undefined);
+    // Filtrar por tipo usando la función utilitaria
+    const filtered = filterLeadsByType(allLeads, leadType);
+    return filtered.map(l => l.leadNumber).filter((n): n is string => n !== undefined);
   }
 
   async existsByLeadNumber(leadNumber: string): Promise<boolean> {
@@ -50,8 +51,18 @@ export class LeadsRepository {
 
   async findMaxSequenceForMonth(leadType: LeadType, monthYear: string): Promise<number | null> {
     // monthYear format expected: MMYY (e.g., 1123 for Nov 2023)
-    // leadNumber format expected: NNN-MMYY (e.g., 001-1123)
+    // leadNumber format expected: NNN-MMYY (e.g., 001-1123) o NNNR-MMYY, NNNP-MMYY
     // We need to extract the first part (NNN) and find max
+    
+    // Construir el patrón según el tipo
+    let pattern = '';
+    if (leadType === LeadType.ROOFING) {
+      pattern = '%R-' + monthYear;
+    } else if (leadType === LeadType.PLUMBING) {
+      pattern = '%P-' + monthYear;
+    } else {
+      pattern = '%-' + monthYear;
+    }
     
     // Using raw query for complex substring/cast logic
     // Postgres specific syntax
@@ -59,10 +70,10 @@ export class LeadsRepository {
       `
       SELECT MAX(CAST(SUBSTRING(lead_number, 1, 3) AS integer)) as max_seq
       FROM leads
-      WHERE lead_type = $1
+      WHERE lead_number LIKE $1
         AND RIGHT(lead_number, 4) = $2
       `,
-      [leadType, monthYear],
+      [pattern, monthYear],
     );
 
     return result[0]?.max_seq || null;
@@ -71,7 +82,14 @@ export class LeadsRepository {
   async findByIdWithRelations(id: number): Promise<Lead | null> {
     return this.repo.findOne({
       where: { id },
-      relations: ['contact', 'projectType'],
+      relations: ['contact', 'contact.company', 'projectType'],
+    });
+  }
+
+  async findByLeadNumberWithRelations(leadNumber: string): Promise<Lead | null> {
+    return this.repo.findOne({
+      where: { leadNumber },
+      relations: ['contact', 'contact.company', 'projectType'],
     });
   }
 

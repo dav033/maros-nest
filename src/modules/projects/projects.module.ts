@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Project } from '../../entities/project.entity';
+import { Lead } from '../../entities/lead.entity';
 import { ProjectType } from '../../entities/project-type.entity';
 import { ProjectsRepository } from './repositories/projects.repository';
 import { ProjectTypesRepository } from './repositories/project-types.repository';
@@ -13,7 +14,7 @@ import { ProjectTypeMapper } from './mappers/project-type.mapper';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Project, ProjectType]),
+    TypeOrmModule.forFeature([Project, Lead, ProjectType]),
   ],
   controllers: [ProjectsController, ProjectTypeController, ProjectTypesController],
   providers: [

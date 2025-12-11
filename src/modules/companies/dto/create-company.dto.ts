@@ -22,10 +22,10 @@ export class CreateCompanyDto {
   @MaxLength(500)
   addressLink?: string;
 
-  @ApiProperty({ description: 'Type of the company', enum: CompanyType })
+  @ApiPropertyOptional({ description: 'Type of the company', enum: CompanyType })
   @IsEnum(CompanyType)
-  @IsNotEmpty()
-  type: CompanyType;
+  @IsOptional()
+  type?: CompanyType;
 
   @ApiPropertyOptional({ description: 'Service ID associated with the company' })
   @IsNumber()

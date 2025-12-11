@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Project } from '../../../entities/project.entity';
-import { ProjectStatus } from '../../../common/enums/project-status.enum';
+import { ProjectProgressStatus } from '../../../common/enums/project-progress-status.enum';
 
 @Injectable()
 export class ProjectsRepository {
@@ -11,8 +11,8 @@ export class ProjectsRepository {
     private readonly repo: Repository<Project>,
   ) {}
 
-  async findByProjectStatus(status: ProjectStatus): Promise<Project[]> {
-    return this.repo.find({ where: { projectStatus: status } });
+  async findByProjectProgressStatus(status: ProjectProgressStatus): Promise<Project[]> {
+    return this.repo.find({ where: { projectProgressStatus: status } });
   }
 
   async findProjectsWithLeadAndContact(): Promise<Project[]> {

@@ -19,8 +19,9 @@ export class Company {
   @Column({
     type: 'enum',
     enum: CompanyType,
+    nullable: true,
   })
-  type: CompanyType;
+  type?: CompanyType;
 
   @Column({ name: 'service_id', nullable: true })
   serviceId?: number;
