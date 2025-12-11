@@ -32,6 +32,13 @@ export class ProjectsRepository {
     return this.repo.find({ where: { lead: { id: leadId } } });
   }
 
+  async findByLeadNumber(leadNumber: string): Promise<Project | null> {
+    return this.repo.findOne({ 
+      where: { lead: { leadNumber } },
+      relations: ['lead', 'lead.contact', 'lead.projectType', 'lead.contact.company']
+    });
+  }
+
   async save(project: Project): Promise<Project> {
     return this.repo.save(project);
   }

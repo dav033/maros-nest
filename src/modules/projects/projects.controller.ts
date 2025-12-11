@@ -6,12 +6,13 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   ParseIntPipe,
   HttpCode,
   HttpStatus,
   BadRequestException,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { ProjectsService } from './services/projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
@@ -26,6 +27,18 @@ export class ProjectsController {
   @ApiResponse({ status: 200, description: 'Returns all projects with their associated leads' })
   async getProjects() {
     return this.projectsService.findAll();
+  }
+
+  @Get('by-lead-number')
+  @ApiOperation({ summary: 'Get project by lead number' })
+  @ApiQuery({ name: 'leadNumber', type: String, required: true })
+  @ApiResponse({ status: 200, description: 'Returns the project' })
+  @ApiResponse({ status: 404, description: 'Project not found' })
+  async getProjectByLeadNumber(@Query('leadNumber') leadNumber: string) {
+    if (!leadNumber) {
+      throw new BadRequestException('leadNumber query parameter is required');
+    }
+    return this.projectsService.findByLeadNumber(leadNumber);
   }
 
   @Get(':id')

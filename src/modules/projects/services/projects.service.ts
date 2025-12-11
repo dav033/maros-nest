@@ -97,4 +97,12 @@ export class ProjectsService extends BaseService<any, number, Project> {
     }
     return this.projectMapper.toDto(entity);
   }
+
+  async findByLeadNumber(leadNumber: string): Promise<any> {
+    const entity = await this.projectsRepository.findByLeadNumber(leadNumber);
+    if (!entity) {
+      throw new ResourceNotFoundException(`Project not found with leadNumber: ${leadNumber}`);
+    }
+    return this.projectMapper.toDto(entity);
+  }
 }
