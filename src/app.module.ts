@@ -13,6 +13,7 @@ import { ContactsModule } from './modules/contacts/contacts.module';
 import { LeadsModule } from './modules/leads/leads.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { CrmModule } from './modules/crm/crm.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { CrmModule } from './modules/crm/crm.module';
     LeadsModule,
     ProjectsModule,
     CrmModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

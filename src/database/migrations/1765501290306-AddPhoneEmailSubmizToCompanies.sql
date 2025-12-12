@@ -19,3 +19,4 @@ ADD COLUMN IF NOT EXISTS "submiz" VARCHAR(255);
 -- ALTER TABLE "companies" DROP COLUMN IF EXISTS "email";
 -- ALTER TABLE "companies" DROP COLUMN IF EXISTS "submiz";
 
+
