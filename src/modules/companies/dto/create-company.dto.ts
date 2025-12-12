@@ -47,4 +47,22 @@ export class CreateCompanyDto {
   @IsString({ each: true })
   @IsOptional()
   notes?: string[];
+
+  @ApiPropertyOptional({ description: 'Phone number of the company', maxLength: 255 })
+  @IsString()
+  @IsOptional()
+  @MaxLength(255)
+  phone?: string;
+
+  @ApiPropertyOptional({ description: 'Email address of the company', maxLength: 255 })
+  @IsString()
+  @IsOptional()
+  @MaxLength(255)
+  email?: string;
+
+  @ApiPropertyOptional({ description: 'Submiz field for the company', maxLength: 255 })
+  @IsString()
+  @IsOptional()
+  @MaxLength(255)
+  submiz?: string;
 }

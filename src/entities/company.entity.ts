@@ -35,6 +35,15 @@ export class Company {
   @Column({ type: 'jsonb', nullable: true })
   notes?: string[];
 
+  @Column({ length: 255, nullable: true })
+  phone?: string;
+
+  @Column({ length: 255, nullable: true })
+  email?: string;
+
+  @Column({ length: 255, nullable: true })
+  submiz?: string;
+
   @OneToMany(() => Contact, (contact) => contact.company)
   contacts: Contact[];
 }
