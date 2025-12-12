@@ -1,4 +1,10 @@
-import { IsString, IsArray, ValidateNested, IsNotEmpty } from 'class-validator';
+import {
+  IsString,
+  IsArray,
+  ValidateNested,
+  IsNotEmpty,
+  IsOptional,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { RestorationVisitActivityDto } from './restoration-visit-activity.dto';
@@ -14,18 +20,18 @@ export class RestorationVisitDto {
   @IsNotEmpty()
   language: string;
 
-  @ApiProperty({ 
-    description: 'Activities', 
-    type: [RestorationVisitActivityDto] 
+  @ApiProperty({
+    description: 'Activities',
+    type: [RestorationVisitActivityDto],
   })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => RestorationVisitActivityDto)
   activities: RestorationVisitActivityDto[];
 
-  @ApiPropertyOptional({ 
-    description: 'Additional activities', 
-    type: [RestorationVisitActivityDto] 
+  @ApiPropertyOptional({
+    description: 'Additional activities',
+    type: [RestorationVisitActivityDto],
   })
   @IsArray()
   @ValidateNested({ each: true })
@@ -33,22 +39,21 @@ export class RestorationVisitDto {
   @IsOptional()
   additional_activities?: RestorationVisitActivityDto[];
 
-  @ApiPropertyOptional({ 
-    description: 'Next activities', 
-    type: [String] 
+  @ApiPropertyOptional({
+    description: 'Next activities',
+    type: [String],
   })
   @IsArray()
   @IsString({ each: true })
   @IsOptional()
   next_activities?: string[];
 
-  @ApiPropertyOptional({ 
-    description: 'Observations', 
-    type: [String] 
+  @ApiPropertyOptional({
+    description: 'Observations',
+    type: [String],
   })
   @IsArray()
   @IsString({ each: true })
   @IsOptional()
   observations?: string[];
 }
-
