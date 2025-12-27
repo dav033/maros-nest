@@ -13,7 +13,7 @@ export default new DataSource({
   database: process.env.DB_NAME || 'maros_construction',
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
   entities: ['src/**/*.entity{.ts,.js}'],
-  migrations: ['src/database/migrations/*{.ts,.js}'],
+  // migrations: ['src/database/migrations/*{.ts,.js}'], // Migraciones desactivadas
   synchronize: false, // Never use synchronize in production
   logging: process.env.LOG_LEVEL === 'debug',
 });

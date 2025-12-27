@@ -8,6 +8,7 @@ import { getDatabaseConfig } from './config/database.config';
 import { getLoggerConfig } from './config/logger.config';
 import { validate } from './config/env.validation';
 import clickupConfig from './config/clickup.config';
+import n8nConfig from './config/n8n.config';
 import { CompaniesModule } from './modules/companies/companies.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { LeadsModule } from './modules/leads/leads.module';
@@ -22,7 +23,7 @@ import { ReportsModule } from './modules/reports/reports.module';
       isGlobal: true, // Make ConfigService available globally
       envFilePath: ['.env.local', '.env'], // Load .env files
       validate, // Validate environment variables on startup
-      load: [clickupConfig], // Load ClickUp configuration
+      load: [clickupConfig, n8nConfig], // Load ClickUp and N8N configuration
     }),
 
     // Winston Logger Module

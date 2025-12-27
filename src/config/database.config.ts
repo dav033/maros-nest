@@ -15,14 +15,13 @@ export const getDatabaseConfig = (
     database: configService.get<string>('DB_NAME'),
     ssl: configService.get<boolean>('DB_SSL') ? { rejectUnauthorized: false } : false,
     entities: [__dirname + '/../**/*.entity{.ts,.js}'],
-    migrations: [__dirname + '/../database/migrations/*{.ts,.js}'],
+    // migrations: [__dirname + '/../database/migrations/*{.ts,.js}'], // Migraciones desactivadas
     
-    // Disable synchronize - use migrations instead for schema changes
-    // WARNING: synchronize: true can cause data loss and schema conflicts
-    // Always use migrations for schema changes, even in development
+    // Synchronize desactivado - las tablas se gestionan manualmente en Supabase
+    // WARNING: synchronize: true can cause data loss in production
     synchronize: false,
     
-    // Don't drop schema on connection
+    // Don't drop schema on connection (safety measure)
     dropSchema: false,
     
     // Logging configuration

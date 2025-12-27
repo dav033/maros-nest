@@ -12,6 +12,7 @@ import {
   ResourceNotFoundException,
 } from '../../../common/exceptions';
 import { BaseService } from '../../../common/services/base.service';
+import { N8nService } from '../../n8n/services/n8n.service';
 
 @Injectable()
 export class ProjectsService extends BaseService<any, number, Project> {
@@ -24,6 +25,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
     @InjectRepository(Lead)
     private readonly leadRepo: Repository<Lead>,
     private readonly projectMapper: ProjectMapper,
+    private readonly n8nService: N8nService,
   ) {
     super(projectRepo, projectMapper);
   }
@@ -101,7 +103,40 @@ export class ProjectsService extends BaseService<any, number, Project> {
     const entities = await this.projectRepo.find({
       relations: ['lead', 'lead.contact', 'lead.projectType'],
     });
-    return entities.map((entity) => this.projectMapper.toDto(entity));
+    
+    // Extract project numbers from leads
+    const projectNumbers = entities
+      .map((entity) => entity.lead?.leadNumber)
+      .filter((number): number is string => !!number);
+    
+    // Get financial information from n8n for all projects
+    let financialData: Map<string, any> = new Map();
+    if (projectNumbers.length > 0) {
+      try {
+        const financials = await this.n8nService.getProjectFinancials(projectNumbers);
+        financialData = new Map(
+          financials.map((financial) => [financial.projectNumber, financial]),
+        );
+        this.logger.log(
+          `Retrieved financial data for ${financials.length} projects from n8n`,
+        );
+      } catch (error: any) {
+        this.logger.error(
+          `Error fetching financial data from n8n: ${error.message}`,
+        );
+        // Continue without financial data rather than failing
+      }
+    }
+    
+    // Map entities to DTOs and include financial information
+    return entities.map((entity) => {
+      const dto = this.projectMapper.toDto(entity);
+      const leadNumber = entity.lead?.leadNumber;
+      if (leadNumber && financialData.has(leadNumber)) {
+        dto.financial = financialData.get(leadNumber);
+      }
+      return dto;
+    });
   }
 
   async findById(id: number): Promise<any> {
@@ -112,7 +147,26 @@ export class ProjectsService extends BaseService<any, number, Project> {
     if (!entity) {
       throw new ResourceNotFoundException(`Project not found with id: ${id}`);
     }
-    return this.projectMapper.toDto(entity);
+    
+    const dto = this.projectMapper.toDto(entity);
+    
+    // Get financial information from n8n if lead number exists
+    const leadNumber = entity.lead?.leadNumber;
+    if (leadNumber) {
+      try {
+        const financial = await this.n8nService.getProjectFinancial(leadNumber);
+        if (financial) {
+          dto.financial = financial;
+        }
+      } catch (error: any) {
+        this.logger.error(
+          `Error fetching financial data from n8n for project ${id}: ${error.message}`,
+        );
+        // Continue without financial data rather than failing
+      }
+    }
+    
+    return dto;
   }
 
   async findByLeadNumber(leadNumber: string): Promise<any> {
@@ -122,6 +176,22 @@ export class ProjectsService extends BaseService<any, number, Project> {
         `Project not found with leadNumber: ${leadNumber}`,
       );
     }
-    return this.projectMapper.toDto(entity);
+    
+    const dto = this.projectMapper.toDto(entity);
+    
+    // Get financial information from n8n
+    try {
+      const financial = await this.n8nService.getProjectFinancial(leadNumber);
+      if (financial) {
+        dto.financial = financial;
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `Error fetching financial data from n8n for lead number ${leadNumber}: ${error.message}`,
+      );
+      // Continue without financial data rather than failing
+    }
+    
+    return dto;
   }
 }

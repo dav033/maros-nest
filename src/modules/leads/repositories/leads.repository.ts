@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not } from 'typeorm';
 import { Lead } from '../../../entities/lead.entity';
+import { Project } from '../../../entities/project.entity';
 import { LeadType } from '../../../common/enums/lead-type.enum';
 import { getLeadTypeFromNumber, filterLeadsByType } from '../../../common/utils/lead-type.utils';
 
@@ -13,16 +14,29 @@ export class LeadsRepository {
   ) {}
 
   async findAll(): Promise<Lead[]> {
-    return this.repo.find({
-      relations: ['contact', 'contact.company', 'projectType'],
-    });
+    // Exclude leads that have an associated project
+    // The foreign key is in projects table (lead_id), so we check if a project exists for this lead
+    return this.repo
+      .createQueryBuilder('lead')
+      .leftJoinAndSelect('lead.contact', 'contact')
+      .leftJoinAndSelect('contact.company', 'company')
+      .leftJoinAndSelect('lead.projectType', 'projectType')
+      .leftJoin(Project, 'project', 'project.lead_id = lead.id')
+      .where('project.id IS NULL')
+      .getMany();
   }
 
   async findByLeadType(type: LeadType): Promise<Lead[]> {
-    // Obtener todos los leads y filtrar por tipo usando la función utilitaria
-    const allLeads = await this.repo.find({
-      relations: ['contact', 'contact.company', 'projectType'],
-    });
+    // Obtener todos los leads sin proyecto y filtrar por tipo usando la función utilitaria
+    // The foreign key is in projects table (lead_id), so we check if a project exists for this lead
+    const allLeads = await this.repo
+      .createQueryBuilder('lead')
+      .leftJoinAndSelect('lead.contact', 'contact')
+      .leftJoinAndSelect('contact.company', 'company')
+      .leftJoinAndSelect('lead.projectType', 'projectType')
+      .leftJoin(Project, 'project', 'project.lead_id = lead.id')
+      .where('project.id IS NULL')
+      .getMany();
     return filterLeadsByType(allLeads, type);
   }
 

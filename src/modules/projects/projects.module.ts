@@ -11,10 +11,12 @@ import { ProjectsController } from './projects.controller';
 import { ProjectTypeController, ProjectTypesController } from './project-types.controller';
 import { ProjectMapper } from './mappers/project.mapper';
 import { ProjectTypeMapper } from './mappers/project-type.mapper';
+import { N8nModule } from '../n8n/n8n.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Project, Lead, ProjectType]),
+    N8nModule,
   ],
   controllers: [ProjectsController, ProjectTypeController, ProjectTypesController],
   providers: [
