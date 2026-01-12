@@ -47,6 +47,13 @@ export class LeadsController {
     return this.leadsService.getLeadsByType(type);
   }
 
+  @Get('review')
+  @ApiOperation({ summary: 'Get leads in review' })
+  @ApiResponse({ status: 200, description: 'Returns leads with inReview = true' })
+  async getLeadsInReview() {
+    return this.leadsService.getLeadsInReview();
+  }
+
   @Post('new-contact')
   @ApiOperation({ summary: 'Create lead with new contact' })
   @ApiQuery({ 

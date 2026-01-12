@@ -47,6 +47,11 @@ export class LeadsService {
     return entities.map((entity) => this.leadMapper.toDto(entity));
   }
 
+  async getLeadsInReview(): Promise<any[]> {
+    const entities = await this.leadsRepository.findInReview();
+    return entities.map((entity) => this.leadMapper.toDto(entity));
+  }
+
   async getLeadById(id: number): Promise<any> {
     const entity = await this.leadsRepository.findByIdWithRelations(id);
     if (!entity) {

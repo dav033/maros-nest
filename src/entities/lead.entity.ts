@@ -46,6 +46,9 @@ export class Lead {
   @Column({ type: 'jsonb', nullable: true, name: 'notes' })
   notes?: string[];
 
+  @Column({ name: 'in_review', type: 'boolean', default: false })
+  inReview: boolean;
+
   @ManyToOne(() => Contact, (contact) => contact.leads, { nullable: true })
   @JoinColumn({ name: 'contact_id' })
   contact: Contact;

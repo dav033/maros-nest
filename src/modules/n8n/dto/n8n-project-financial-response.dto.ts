@@ -56,3 +56,8 @@ export class N8nProjectFinancialResponseDto {
   estimateVsInvoicedDelta: number;
 }
 
+
+
+
+
+

@@ -134,11 +134,6 @@ export class EnvironmentVariables {
   @IsString()
   SUPABASE_DB_WEBHOOK_SECRET: string;
 
-  // N8N
-  @IsUrl()
-  @IsOptional()
-  N8N_WEBHOOK_URL: string = 'https://n8n.marosconstruction.com/webhook/';
-
   // CORS
   @IsString()
   @IsOptional()

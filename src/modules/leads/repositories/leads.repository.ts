@@ -16,6 +16,7 @@ export class LeadsRepository {
   async findAll(): Promise<Lead[]> {
     // Exclude leads that have an associated project
     // The foreign key is in projects table (lead_id), so we check if a project exists for this lead
+    // Also exclude leads that are in review (inReview = true)
     return this.repo
       .createQueryBuilder('lead')
       .leftJoinAndSelect('lead.contact', 'contact')
@@ -23,12 +24,14 @@ export class LeadsRepository {
       .leftJoinAndSelect('lead.projectType', 'projectType')
       .leftJoin(Project, 'project', 'project.lead_id = lead.id')
       .where('project.id IS NULL')
+      .andWhere('lead.in_review = false')
       .getMany();
   }
 
   async findByLeadType(type: LeadType): Promise<Lead[]> {
     // Obtener todos los leads sin proyecto y filtrar por tipo usando la función utilitaria
     // The foreign key is in projects table (lead_id), so we check if a project exists for this lead
+    // Also exclude leads that are in review (inReview = true)
     const allLeads = await this.repo
       .createQueryBuilder('lead')
       .leftJoinAndSelect('lead.contact', 'contact')
@@ -36,8 +39,23 @@ export class LeadsRepository {
       .leftJoinAndSelect('lead.projectType', 'projectType')
       .leftJoin(Project, 'project', 'project.lead_id = lead.id')
       .where('project.id IS NULL')
+      .andWhere('lead.in_review = false')
       .getMany();
     return filterLeadsByType(allLeads, type);
+  }
+
+  async findInReview(): Promise<Lead[]> {
+    // Obtener todos los leads que están en revisión (inReview = true)
+    // Excluir leads que tienen un proyecto asociado
+    return this.repo
+      .createQueryBuilder('lead')
+      .leftJoinAndSelect('lead.contact', 'contact')
+      .leftJoinAndSelect('contact.company', 'company')
+      .leftJoinAndSelect('lead.projectType', 'projectType')
+      .leftJoin(Project, 'project', 'project.lead_id = lead.id')
+      .where('lead.in_review = true')
+      .andWhere('project.id IS NULL')
+      .getMany();
   }
 
   async findAllLeadNumbersByType(leadType: LeadType): Promise<string[]> {

@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, MaxLength, IsOptional, IsEnum, IsNumber, IsDateString, IsArray, ValidateNested, ValidateIf } from 'class-validator';
+import { IsString, IsNotEmpty, MaxLength, IsOptional, IsEnum, IsNumber, IsDateString, IsArray, ValidateNested, ValidateIf, IsBoolean } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { LeadStatus } from '../../../common/enums/lead-status.enum';
@@ -54,6 +54,11 @@ export class CreateLeadDto {
   @IsString({ each: true })
   @IsOptional()
   notes?: string[];
+
+  @ApiPropertyOptional({ description: 'Whether the lead is in review', default: false })
+  @IsBoolean()
+  @IsOptional()
+  inReview?: boolean;
 }
 
 export class CreateLeadWithNewContactDto {
