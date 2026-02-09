@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Lead } from '../../../entities/lead.entity';
 import { Contact } from '../../../entities/contact.entity';
+import { Company } from '../../../entities/company.entity';
 import { ProjectType } from '../../../entities/project-type.entity';
 import { Project } from '../../../entities/project.entity';
 import { LeadsRepository } from '../repositories/leads.repository';
@@ -37,6 +38,22 @@ export class LeadsService {
     private readonly dataSource: DataSource,
   ) {}
 
+  /**
+   * Ejecuta una tarea en background sin bloquear la respuesta al cliente
+   * Usa setImmediate para ejecutar después de que la respuesta se haya enviado
+   * @deprecated Usar executeInBackground de common/utils/background-tasks.util en su lugar
+   */
+  private executeInBackground(task: () => Promise<void>, taskName: string): void {
+    setImmediate(async () => {
+      try {
+        await task();
+      } catch (error: any) {
+        this.logger.error(`Error in background task ${taskName}: ${error.message}`, error.stack);
+        // No re-throw - las tareas en background no deben afectar la respuesta
+      }
+    });
+  }
+
   async getAllLeads(): Promise<any[]> {
     const entities = await this.leadsRepository.findAll();
     return entities.map((entity) => this.leadMapper.toDto(entity));
@@ -58,6 +75,39 @@ export class LeadsService {
       throw new LeadExceptions.LeadNotFoundException(id);
     }
     return this.leadMapper.toDto(entity);
+  }
+
+  async getLeadDetails(id: number): Promise<any> {
+    const lead = await this.leadsRepository.findByIdWithRelations(id);
+    if (!lead) {
+      throw new LeadExceptions.LeadNotFoundException(id);
+    }
+
+    // Get project if exists
+    const project = lead.project ? await this.projectRepo.findOne({
+      where: { id: lead.project.id },
+      relations: ['lead'],
+    }) : null;
+
+    const leadDto = this.leadMapper.toDto(lead);
+
+    return {
+      ...leadDto,
+      project: project ? this.mapProjectToDto(project) : null,
+    };
+  }
+
+  private mapProjectToDto(project: Project): any {
+    return {
+      id: project.id,
+      invoiceAmount: project.invoiceAmount ? parseFloat(project.invoiceAmount.toString()) : null,
+      payments: project.payments,
+      projectProgressStatus: project.projectProgressStatus,
+      invoiceStatus: project.invoiceStatus,
+      quickbooks: project.quickbooks,
+      overview: project.overview,
+      notes: project.notes,
+    };
   }
 
   async getLeadByNumber(leadNumber: string): Promise<any> {
@@ -145,9 +195,15 @@ export class LeadsService {
       const saved = await this.leadRepo.save(entity);
       const dto = this.leadMapper.toDto(saved);
 
+      // Responder al cliente primero, luego sincronizar con ClickUp en background
       if (!skipClickUpSync) {
-        await this.clickUpSyncService.syncLeadCreate(saved);
-        this.logger.log(`ClickUp sync completed for lead ${dto.id} (${dto.leadNumber})`);
+        this.executeInBackground(
+          async () => {
+            await this.clickUpSyncService.syncLeadCreate(saved);
+            this.logger.log(`ClickUp sync completed for lead ${dto.id} (${dto.leadNumber})`);
+          },
+          `ClickUp sync for lead ${dto.id} creation`
+        );
       } else {
         this.logger.log(`Skip ClickUp sync on create for lead ${dto.id} (${dto.leadNumber})`);
       }
@@ -160,32 +216,124 @@ export class LeadsService {
   }
 
   async updateLead(id: number, patchDto: CreateLeadDto): Promise<any> {
-    const entity = await this.leadRepo.findOne({ 
+    const startTime = Date.now();
+    
+    // Optimización: Si solo se están actualizando las notas, usar método optimizado
+    const isNotesOnlyUpdate = this.isNotesOnlyUpdate(patchDto);
+    if (isNotesOnlyUpdate) {
+      return this.updateLeadNotesOnly(id, patchDto.notes || []);
+    }
+
+    // Verificar existencia primero (sin cargar relaciones si no es necesario)
+    const exists = await this.leadRepo.findOne({ 
       where: { id },
-      relations: ['contact', 'projectType']
+      select: ['id', 'leadNumber']
     });
     
-    if (!entity) {
+    if (!exists) {
       throw new LeadExceptions.LeadNotFoundException(id);
     }
 
-    if (patchDto.leadNumber && patchDto.leadNumber !== entity.leadNumber) {
-      const exists = await this.leadsRepository.existsByLeadNumberAndIdNot(patchDto.leadNumber, id);
-      if (exists) {
+    // Validar leadNumber si está cambiando
+    if (patchDto.leadNumber && patchDto.leadNumber !== exists.leadNumber) {
+      const leadNumberExists = await this.leadsRepository.existsByLeadNumberAndIdNot(patchDto.leadNumber, id);
+      if (leadNumberExists) {
         throw ValidationException.format('Lead number already exists: %s', patchDto.leadNumber);
       }
     }
 
     this.logger.log(`Updating lead ${id} with data: ${JSON.stringify(patchDto)}`);
+    
+    // Cargar entity completo solo si necesitamos actualizar relaciones
+    const needsRelations = patchDto.contactId !== undefined || patchDto.projectTypeId !== undefined;
+    const entity = await this.leadRepo.findOne({ 
+      where: { id },
+      relations: needsRelations ? ['contact', 'projectType'] : []
+    });
+    
+    if (!entity) {
+      throw new LeadExceptions.LeadNotFoundException(id);
+    }
+    
     await this.updateEntityFields(patchDto, entity);
     await this.dataSource.manager.save(entity);
 
     const dto = this.leadMapper.toDto(entity);
     
-    await this.clickUpSyncService.syncLeadUpdate(entity);
-    this.logger.log(`ClickUp sync completed for lead update ${dto.id}`);
+    // Responder al cliente primero, luego sincronizar con ClickUp en background
+    this.executeInBackground(
+      async () => {
+        await this.clickUpSyncService.syncLeadUpdate(entity);
+        this.logger.log(`ClickUp sync completed for lead update ${dto.id}`);
+      },
+      `ClickUp sync for lead ${dto.id} update`
+    );
+    
+    const duration = Date.now() - startTime;
+    this.logger.log(`Lead ${id} updated in ${duration}ms (ClickUp sync in background)`);
     
     return dto;
+  }
+
+  /**
+   * Método optimizado para actualizar solo las notas de un lead
+   * Usa UPDATE directo sin cargar relaciones antes de la actualización
+   */
+  private async updateLeadNotesOnly(id: number, notes: string[]): Promise<any> {
+    const startTime = Date.now();
+    
+    // UPDATE directo usando query builder (mucho más rápido que save con relaciones)
+    // No necesitamos verificar existencia primero, el UPDATE fallará si no existe
+    const updateResult = await this.leadRepo
+      .createQueryBuilder()
+      .update(Lead)
+      .set({ notes })
+      .where('id = :id', { id })
+      .execute();
+
+    if (updateResult.affected === 0) {
+      throw new LeadExceptions.LeadNotFoundException(id);
+    }
+
+    // Cargar el lead actualizado SOLO después del UPDATE exitoso
+    // Cargamos relaciones porque el DTO las necesita, pero solo después del UPDATE
+    const updated = await this.leadRepo.findOne({ 
+      where: { id },
+      relations: ['contact', 'projectType']
+    });
+
+    if (!updated) {
+      // Esto no debería pasar, pero por seguridad
+      throw new LeadExceptions.LeadNotFoundException(id);
+    }
+
+    const dto = this.leadMapper.toDto(updated);
+    const duration = Date.now() - startTime;
+    this.logger.log(`Notes updated for lead ${id} (optimized: no pre-load, no ClickUp) in ${duration}ms`);
+    
+    return dto;
+  }
+
+  /**
+   * Determina si el DTO solo contiene actualizaciones de notas
+   * Esto permite optimizar la operación saltando la sincronización con ClickUp
+   */
+  private isNotesOnlyUpdate(patchDto: CreateLeadDto): boolean {
+    // Verificar si hay algún campo diferente a notes definido
+    if (patchDto.leadNumber !== undefined ||
+        patchDto.name !== undefined ||
+        patchDto.startDate !== undefined ||
+        patchDto.location !== undefined ||
+        patchDto.addressLink !== undefined ||
+        patchDto.status !== undefined ||
+        patchDto.contactId !== undefined ||
+        patchDto.projectTypeId !== undefined ||
+        patchDto.inReview !== undefined) {
+      return false;
+    }
+    
+    // Si notes está definido y es el único campo, es una actualización solo de notas
+    return patchDto.notes !== undefined;
   }
 
   private async updateEntityFields(dto: CreateLeadDto, entity: Lead): Promise<void> {
@@ -217,11 +365,18 @@ export class LeadsService {
     }
     // leadType ya no se almacena, se determina desde leadNumber
     if (dto.contactId !== undefined) {
-      const contactEntity = await this.contactRepo.findOne({ where: { id: dto.contactId } });
-      if (!contactEntity) {
-        throw new ContactExceptions.ContactNotFoundException(dto.contactId);
+      // Permitir limpiar la relación de contacto enviando contactId = null
+      if (dto.contactId === null) {
+        entity.contact = null;
+      } else {
+        const contactEntity = await this.contactRepo.findOne({
+          where: { id: dto.contactId },
+        });
+        if (!contactEntity) {
+          throw new ContactExceptions.ContactNotFoundException(dto.contactId);
+        }
+        entity.contact = contactEntity;
       }
-      entity.contact = contactEntity;
     }
     if (dto.projectTypeId !== undefined) {
       const projectTypeEntity = await this.projectTypeRepo.findOne({ where: { id: dto.projectTypeId } });
@@ -233,26 +388,96 @@ export class LeadsService {
     if (dto.notes !== undefined) {
       entity.notes = dto.notes;
     }
+    if (dto.inReview !== undefined) {
+      entity.inReview = dto.inReview;
+    }
   }
 
-  async deleteLead(id: number): Promise<boolean> {
-    const entity = await this.leadRepo.findOne({ where: { id } });
+  async getLeadRejectionInfo(id: number): Promise<{
+    lead: { id: number; name: string };
+    contact: { id: number; name: string; canDelete: boolean; otherLeadsCount: number } | null;
+    company: { id: number; name: string; canDelete: boolean; otherLeadsCount: number } | null;
+  }> {
+    const lead = await this.leadRepo.findOne({
+      where: { id },
+      relations: ['contact', 'contact.company'],
+    });
+
+    if (!lead) {
+      throw new LeadExceptions.LeadNotFoundException(id);
+    }
+
+    let contactInfo: { id: number; name: string; canDelete: boolean; otherLeadsCount: number } | null = null;
+    let companyInfo: { id: number; name: string; canDelete: boolean; otherLeadsCount: number } | null = null;
+
+    if (lead.contact) {
+      // Count other leads for this contact (excluding current lead)
+      const otherContactLeads = await this.leadRepo.count({
+        where: { contact: { id: lead.contact.id } },
+      });
+      const otherLeadsCount = otherContactLeads - 1; // Exclude current lead
+
+      contactInfo = {
+        id: lead.contact.id,
+        name: lead.contact.name || 'Unknown',
+        canDelete: otherLeadsCount === 0,
+        otherLeadsCount,
+      };
+
+      if (lead.contact.company) {
+        // Count other leads for contacts in this company (excluding current lead)
+        const otherCompanyLeads = await this.leadRepo
+          .createQueryBuilder('lead')
+          .innerJoin('lead.contact', 'contact')
+          .where('contact.company_id = :companyId', { companyId: lead.contact.company.id })
+          .getCount();
+        const companyOtherLeadsCount = otherCompanyLeads - 1; // Exclude current lead
+
+        companyInfo = {
+          id: lead.contact.company.id,
+          name: lead.contact.company.name || 'Unknown',
+          canDelete: companyOtherLeadsCount === 0,
+          otherLeadsCount: companyOtherLeadsCount,
+        };
+      }
+    }
+
+    return {
+      lead: { id: lead.id, name: lead.name || 'Unknown' },
+      contact: contactInfo,
+      company: companyInfo,
+    };
+  }
+
+  async deleteLead(
+    id: number,
+    options?: { deleteContact?: boolean; deleteCompany?: boolean },
+  ): Promise<{ message: string; deletedContact?: boolean; deletedCompany?: boolean }> {
+    const entity = await this.leadRepo.findOne({
+      where: { id },
+      relations: ['contact', 'contact.company'],
+    });
     if (!entity) {
       throw new LeadExceptions.LeadNotFoundException(id);
     }
 
+    const contactId = entity.contact?.id;
+    const companyId = entity.contact?.company?.id;
+
     const dto = this.leadMapper.toDto(entity);
 
-    await this.clickUpSyncService.syncLeadDelete(entity);
-    this.logger.log(`ClickUp sync completed for lead deletion ${dto.id}`);
+    // Guardar referencia para usar en background (antes de eliminar)
+    const leadForSync = { ...entity };
+    const leadId = entity.id;
+    const leadNumber = entity.leadNumber;
 
     try {
+      // Optimización: Usar UPDATE directo con SQL raw para relaciones
       // Clear lead references from projects before deletion
-      const projects = await this.projectRepo.find({ where: { lead: { id } } });
-      for (const project of projects) {
-        project.lead = null as any;
-        await this.projectRepo.save(project);
-      }
+      await this.dataSource.query(
+        'UPDATE projects SET lead_id = NULL WHERE lead_id = $1',
+        [id]
+      );
 
       // Load entity with all relations
       const leadWithRelations = await this.leadsRepository.findByIdWithRelations(id);
@@ -261,7 +486,70 @@ export class LeadsService {
       }
 
       await this.leadRepo.remove(leadWithRelations);
-      return true;
+
+      // Responder al cliente primero, luego sincronizar con ClickUp en background
+      this.executeInBackground(
+        async () => {
+          await this.clickUpSyncService.syncLeadDelete(leadForSync);
+          this.logger.log(`ClickUp sync completed for lead deletion ${leadId} (${leadNumber})`);
+        },
+        `ClickUp sync for lead ${leadId} deletion`
+      );
+
+      let deletedContact = false;
+      let deletedCompany = false;
+
+      // Delete company first (if requested and safe)
+      if (options?.deleteCompany && companyId) {
+        const companyLeadsCount = await this.leadRepo
+          .createQueryBuilder('lead')
+          .innerJoin('lead.contact', 'contact')
+          .where('contact.company_id = :companyId', { companyId })
+          .getCount();
+
+        if (companyLeadsCount === 0) {
+          // Check if company has other contacts
+          const companyContactsCount = await this.contactRepo.count({
+            where: { company: { id: companyId } },
+          });
+
+          if (companyContactsCount === 0 || (companyContactsCount === 1 && options?.deleteContact)) {
+            // Safe to delete company after contact
+          }
+        }
+      }
+
+      // Delete contact (if requested and safe)
+      if (options?.deleteContact && contactId) {
+        const contactLeadsCount = await this.leadRepo.count({
+          where: { contact: { id: contactId } },
+        });
+
+        if (contactLeadsCount === 0) {
+          await this.contactRepo.delete(contactId);
+          deletedContact = true;
+          this.logger.log(`Deleted orphan contact ${contactId}`);
+        }
+      }
+
+      // Now delete company if safe
+      if (options?.deleteCompany && companyId) {
+        const companyContactsCount = await this.contactRepo.count({
+          where: { company: { id: companyId } },
+        });
+
+        if (companyContactsCount === 0) {
+          await this.dataSource.getRepository(Company).delete(companyId);
+          deletedCompany = true;
+          this.logger.log(`Deleted orphan company ${companyId}`);
+        }
+      }
+
+      return {
+        message: 'Lead deleted successfully',
+        deletedContact,
+        deletedCompany,
+      };
     } catch (error) {
       throw new DatabaseException('Cannot delete lead due to existing references', error);
     }

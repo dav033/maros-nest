@@ -51,7 +51,7 @@ export class Lead {
 
   @ManyToOne(() => Contact, (contact) => contact.leads, { nullable: true })
   @JoinColumn({ name: 'contact_id' })
-  contact: Contact;
+  contact: Contact | null;
 
   @ManyToOne(() => ProjectType, (projectType) => projectType.leads, {
     nullable: true,

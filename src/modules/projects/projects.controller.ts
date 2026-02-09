@@ -41,6 +41,15 @@ export class ProjectsController {
     return this.projectsService.findByLeadNumber(leadNumber);
   }
 
+  @Get(':id/details')
+  @ApiOperation({ summary: 'Get project details with lead and contact information' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({ status: 200, description: 'Returns the project with all related data' })
+  @ApiResponse({ status: 404, description: 'Project not found' })
+  async getProjectDetails(@Param('id', ParseIntPipe) id: number) {
+    return this.projectsService.getProjectDetails(id);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get project by ID' })
   @ApiParam({ name: 'id', type: Number })

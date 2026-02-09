@@ -41,6 +41,15 @@ export class ContactsController {
     return this.contactsService.findByCompany(companyId);
   }
 
+  @Get(':id/details')
+  @ApiOperation({ summary: 'Get contact details with leads and projects' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({ status: 200, description: 'Returns the contact with all related data' })
+  @ApiResponse({ status: 404, description: 'Contact not found' })
+  async getContactDetails(@Param('id', ParseIntPipe) id: number) {
+    return this.contactsService.getContactDetails(id);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get contact by ID' })
   @ApiParam({ name: 'id', type: Number })

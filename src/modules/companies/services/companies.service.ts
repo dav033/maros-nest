@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Company } from '../../../entities/company.entity';
 import { Contact } from '../../../entities/contact.entity';
 import { CompaniesRepository } from '../repositories/companies.repository';
@@ -9,9 +9,12 @@ import { CreateCompanyDto } from '../dto/create-company.dto';
 import { UpdateCompanyDto } from '../dto/update-company.dto';
 import { ValidationException, ResourceNotFoundException } from '../../../common/exceptions';
 import { BaseService } from '../../../common/services/base.service';
+import { executeInBackground } from '../../../common/utils/background-tasks.util';
 
 @Injectable()
 export class CompaniesService extends BaseService<any, number, Company> {
+  private readonly logger = new Logger(CompaniesService.name);
+
   constructor(
     private readonly companiesRepository: CompaniesRepository,
     @InjectRepository(Company)
@@ -19,6 +22,7 @@ export class CompaniesService extends BaseService<any, number, Company> {
     @InjectRepository(Contact)
     private readonly contactRepo: Repository<Contact>,
     private readonly companyMapper: CompanyMapper,
+    private readonly dataSource: DataSource,
   ) {
     super(companyRepo, companyMapper);
   }
@@ -77,53 +81,91 @@ export class CompaniesService extends BaseService<any, number, Company> {
   }
 
   async delete(id: number): Promise<void> {
+    const startTime = Date.now();
+    
+    // Verificar existencia sin cargar relaciones
     const company = await this.companyRepo.findOne({ 
       where: { id },
-      relations: ['contacts']
+      select: ['id']
     });
     
     if (!company) {
       throw new ResourceNotFoundException(`Company not found with id: ${id}`);
     }
 
-    // Remove company reference from all associated contacts
-    if (company.contacts && company.contacts.length > 0) {
-      for (const contact of company.contacts) {
-        contact.company = null as any;
-        await this.contactRepo.save(contact);
-      }
-    }
+    // Optimización: Usar UPDATE directo con SQL raw para relaciones
+    // Esto es mucho más rápido que hacer save() en un loop
+    await this.dataSource.query(
+      'UPDATE contacts SET company_id = NULL WHERE company_id = $1',
+      [id]
+    );
 
-    // Now delete the company
+    // Ahora eliminar la compañía
     await this.companyRepo.delete(id);
+    
+    const duration = Date.now() - startTime;
+    this.logger.log(`Company ${id} deleted in ${duration}ms (optimized: bulk update contacts)`);
   }
 
   async assignContactsToCompany(companyId: number, contactIds: number[]): Promise<void> {
-    const company = await this.companyRepo.findOne({ where: { id: companyId } });
+    const startTime = Date.now();
+    
+    // Verificar que la compañía existe
+    const company = await this.companyRepo.findOne({ 
+      where: { id: companyId },
+      select: ['id']
+    });
     if (!company) {
       throw new ResourceNotFoundException(`Company not found with id: ${companyId}`);
     }
 
-    // Remove company from contacts that are no longer selected
+    // Obtener IDs de contactos actuales (sin cargar entidades completas)
     const currentContacts = await this.contactRepo.find({
       where: { company: { id: companyId } },
+      select: ['id'],
     });
+    const currentContactIds = currentContacts.map(c => c.id);
 
-    for (const contact of currentContacts) {
-      if (!contactIds.includes(contact.id)) {
-        contact.company = null as any;
-        await this.contactRepo.save(contact);
+    // Identificar contactos a remover y a agregar
+    const contactsToRemove = currentContactIds.filter(id => !contactIds.includes(id));
+    const contactsToAdd = contactIds.filter(id => !currentContactIds.includes(id));
+
+    // Validar que todos los contactos a agregar existen
+    if (contactsToAdd.length > 0) {
+      const existingContacts = await this.contactRepo.find({
+        where: contactsToAdd.map(id => ({ id })),
+        select: ['id'],
+      });
+      const existingContactIds = existingContacts.map(c => c.id);
+      const missingContacts = contactsToAdd.filter(id => !existingContactIds.includes(id));
+      
+      if (missingContacts.length > 0) {
+        throw new ResourceNotFoundException(
+          `Contact(s) not found with id(s): ${missingContacts.join(', ')}`
+        );
       }
     }
 
-    // Assign company to selected contacts
-    for (const contactId of contactIds) {
-      const contact = await this.contactRepo.findOne({ where: { id: contactId } });
-      if (!contact) {
-        throw new ResourceNotFoundException(`Contact not found with id: ${contactId}`);
-      }
-      contact.company = company;
-      await this.contactRepo.save(contact);
+    // Optimización: Usar UPDATE directo con SQL raw para relaciones
+    // Remover compañía de contactos que ya no están seleccionados
+    if (contactsToRemove.length > 0) {
+      await this.dataSource.query(
+        'UPDATE contacts SET company_id = NULL WHERE id = ANY($1::int[])',
+        [contactsToRemove]
+      );
     }
+
+    // Asignar compañía a contactos seleccionados usando SQL directo
+    if (contactsToAdd.length > 0) {
+      await this.dataSource.query(
+        'UPDATE contacts SET company_id = $1 WHERE id = ANY($2::int[])',
+        [companyId, contactsToAdd]
+      );
+    }
+
+    const duration = Date.now() - startTime;
+    this.logger.log(
+      `Assigned ${contactsToAdd.length} contacts, removed ${contactsToRemove.length} contacts from company ${companyId} in ${duration}ms (optimized: bulk updates)`
+    );
   }
 }

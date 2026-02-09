@@ -1,8 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Contact } from '../../../entities/contact.entity';
 import { Company } from '../../../entities/company.entity';
+import { Lead } from '../../../entities/lead.entity';
+import { Project } from '../../../entities/project.entity';
 import { ContactsRepository } from '../repositories/contacts.repository';
 import { ContactMapper } from '../mappers/contact.mapper';
 import { CreateContactDto } from '../dto/create-contact.dto';
@@ -21,12 +23,18 @@ export interface ContactValidationResponse {
 
 @Injectable()
 export class ContactsService extends BaseService<any, number, Contact> {
+  private readonly logger = new Logger(ContactsService.name);
+
   constructor(
     private readonly contactsRepository: ContactsRepository,
     @InjectRepository(Contact)
     private readonly contactRepo: Repository<Contact>,
     @InjectRepository(Company)
     private readonly companyRepo: Repository<Company>,
+    @InjectRepository(Lead)
+    private readonly leadRepo: Repository<Lead>,
+    @InjectRepository(Project)
+    private readonly projectRepo: Repository<Project>,
     private readonly contactMapper: ContactMapper,
   ) {
     super(contactRepo, contactMapper);
@@ -83,6 +91,8 @@ export class ContactsService extends BaseService<any, number, Contact> {
   }
 
   async update(id: number, dto: UpdateContactDto): Promise<any> {
+    const startTime = Date.now();
+    
     // Validate name
     if (dto.name && await this.contactsRepository.existsByNameIgnoreCaseAndIdNot(dto.name, id)) {
       throw ValidationException.format('Contact name already exists: %s', dto.name);
@@ -98,7 +108,13 @@ export class ContactsService extends BaseService<any, number, Contact> {
       throw ValidationException.format('Contact phone already exists: %s', dto.phone);
     }
 
-    const entity = await this.contactRepo.findOne({ where: { id }, relations: ['company'] });
+    // Optimización: Solo cargar relaciones si se está actualizando companyId
+    const needsCompanyRelation = dto.companyId !== undefined;
+    const entity = await this.contactRepo.findOne({ 
+      where: { id }, 
+      relations: needsCompanyRelation ? ['company'] : []
+    });
+    
     if (!entity) {
       throw new ResourceNotFoundException(`Contact not found with id: ${id}`);
     }
@@ -119,6 +135,9 @@ export class ContactsService extends BaseService<any, number, Contact> {
     }
 
     const saved = await this.contactRepo.save(entity);
+    const duration = Date.now() - startTime;
+    this.logger.log(`Contact ${id} updated in ${duration}ms`);
+    
     return this.contactMapper.toDto(saved);
   }
 
@@ -190,5 +209,92 @@ export class ContactsService extends BaseService<any, number, Contact> {
   async findClients(): Promise<any[]> {
     const entities = await this.contactsRepository.findByClientTrue();
     return entities.map((entity) => this.contactMapper.toDto(entity));
+  }
+
+  async getContactDetails(id: number): Promise<any> {
+    const contact = await this.contactRepo.findOne({
+      where: { id },
+      relations: ['company'],
+    });
+
+    if (!contact) {
+      throw new ContactExceptions.ContactNotFoundException(id);
+    }
+
+    // Get all leads for this contact with their project types
+    const leads = await this.leadRepo.find({
+      where: { contact: { id } },
+      relations: ['projectType', 'project'],
+      order: { id: 'DESC' },
+    });
+
+    // Get all projects associated with these leads
+    const leadIds = leads.map((lead) => lead.id);
+    const projects = leadIds.length > 0
+      ? await this.projectRepo
+          .createQueryBuilder('project')
+          .leftJoinAndSelect('project.lead', 'lead')
+          .leftJoinAndSelect('lead.projectType', 'projectType')
+          .where('lead.id IN (:...leadIds)', { leadIds })
+          .getMany()
+      : [];
+
+    // Map leads with their projects
+    const leadsWithProjects = leads.map((lead) => {
+      const project = projects.find((p) => p.lead.id === lead.id);
+      return {
+        ...this.mapLeadToDto(lead),
+        project: project ? this.mapProjectToDto(project) : null,
+      };
+    });
+
+    const contactDto = this.contactMapper.toDto(contact);
+
+    return {
+      ...contactDto,
+      leads: leadsWithProjects,
+      stats: {
+        totalLeads: leads.length,
+        totalProjects: projects.length,
+        activeProjects: projects.filter((p) => 
+          p.projectProgressStatus === 'IN_PROGRESS' || 
+          p.projectProgressStatus === 'PERMITS'
+        ).length,
+        completedProjects: projects.filter((p) => 
+          p.projectProgressStatus === 'COMPLETED'
+        ).length,
+      },
+    };
+  }
+
+  private mapLeadToDto(lead: Lead): any {
+    return {
+      id: lead.id,
+      leadNumber: lead.leadNumber,
+      name: lead.name,
+      startDate: lead.startDate,
+      location: lead.location,
+      addressLink: lead.addressLink,
+      status: lead.status,
+      notes: lead.notes,
+      inReview: lead.inReview,
+      projectType: lead.projectType ? {
+        id: lead.projectType.id,
+        name: lead.projectType.name,
+      } : null,
+    };
+  }
+
+  private mapProjectToDto(project: Project): any {
+    return {
+      id: project.id,
+      invoiceAmount: project.invoiceAmount ? parseFloat(project.invoiceAmount.toString()) : null,
+      payments: project.payments,
+      projectProgressStatus: project.projectProgressStatus,
+      invoiceStatus: project.invoiceStatus,
+      quickbooks: project.quickbooks,
+      overview: project.overview,
+      notes: project.notes,
+    };
   }
 }

@@ -135,6 +135,15 @@ export class LeadsController {
     return this.leadsService.getLeadByNumber(leadNumber);
   }
 
+  @Get(':leadId/details')
+  @ApiOperation({ summary: 'Get lead details with project information' })
+  @ApiParam({ name: 'leadId', type: Number })
+  @ApiResponse({ status: 200, description: 'Returns the lead with all related data' })
+  @ApiResponse({ status: 404, description: 'Lead not found' })
+  async getLeadDetails(@Param('leadId', ParseIntPipe) leadId: number) {
+    return this.leadsService.getLeadDetails(leadId);
+  }
+
   @Get(':leadId')
   @ApiOperation({ summary: 'Get lead by ID' })
   @ApiParam({ name: 'leadId', type: Number })
@@ -156,15 +165,32 @@ export class LeadsController {
     return this.leadsService.updateLead(leadId, request.lead);
   }
 
+  @Get(':leadId/rejection-info')
+  @ApiOperation({ summary: 'Get lead rejection info (can delete contact/company?)' })
+  @ApiParam({ name: 'leadId', type: Number })
+  @ApiResponse({ status: 200, description: 'Returns rejection info' })
+  @ApiResponse({ status: 404, description: 'Lead not found' })
+  async getLeadRejectionInfo(@Param('leadId', ParseIntPipe) leadId: number) {
+    return this.leadsService.getLeadRejectionInfo(leadId);
+  }
+
   @Delete(':leadId')
   @ApiOperation({ summary: 'Delete lead' })
   @ApiParam({ name: 'leadId', type: Number })
+  @ApiQuery({ name: 'deleteContact', required: false, type: Boolean })
+  @ApiQuery({ name: 'deleteCompany', required: false, type: Boolean })
   @ApiResponse({ status: 200, description: 'Lead deleted successfully' })
   @ApiResponse({ status: 404, description: 'Lead not found' })
-  async deleteLead(@Param('leadId', ParseIntPipe) leadId: number) {
-    const deleted = await this.leadsService.deleteLead(leadId);
-    if (deleted) {
-      return { message: 'Lead eliminado correctamente' };
-    }
+  async deleteLead(
+    @Param('leadId', ParseIntPipe) leadId: number,
+    @Query('deleteContact') deleteContact?: string,
+    @Query('deleteCompany') deleteCompany?: string,
+  ) {
+    const options = {
+      deleteContact: deleteContact === 'true',
+      deleteCompany: deleteCompany === 'true',
+    };
+    const result = await this.leadsService.deleteLead(leadId, options);
+    return result;
   }
 }

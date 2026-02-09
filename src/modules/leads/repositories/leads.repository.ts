@@ -114,7 +114,7 @@ export class LeadsRepository {
   async findByIdWithRelations(id: number): Promise<Lead | null> {
     return this.repo.findOne({
       where: { id },
-      relations: ['contact', 'contact.company', 'projectType'],
+      relations: ['contact', 'contact.company', 'projectType', 'project'],
     });
   }
 

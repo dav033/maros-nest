@@ -87,9 +87,13 @@ export class LeadMapper {
           type: entity.contact.company.type,
           address: entity.contact.company.address,
           addressLink: entity.contact.company.addressLink,
+          phone: entity.contact.company.phone,
+          email: entity.contact.company.email,
+          submiz: entity.contact.company.submiz,
           serviceId: entity.contact.company.serviceId,
           isCustomer: entity.contact.company.customer,
           isClient: entity.contact.company.client,
+          notes: entity.contact.company.notes,
         } : null,
       } : null,
       projectType: entity.projectType ? {
