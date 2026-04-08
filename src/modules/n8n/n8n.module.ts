@@ -6,7 +6,7 @@ import n8nConfig from '../../config/n8n.config';
 
 @Module({
   imports: [
-    HttpModule,
+    HttpModule.register({ timeout: 15000 }),
     ConfigModule.forFeature(n8nConfig),
   ],
   providers: [N8nService],

@@ -13,7 +13,6 @@ import {
 } from '../../../common/exceptions';
 import { BaseService } from '../../../common/services/base.service';
 import { N8nService } from '../../n8n/services/n8n.service';
-import { executeInBackground } from '../../../common/utils/background-tasks.util';
 
 @Injectable()
 export class ProjectsService extends BaseService<any, number, Project> {
@@ -102,43 +101,38 @@ export class ProjectsService extends BaseService<any, number, Project> {
 
   async findAll(): Promise<any[]> {
     const startTime = Date.now();
-    
+
     const entities = await this.projectRepo.find({
       relations: ['lead', 'lead.contact', 'lead.projectType'],
     });
-    
-    // Responder primero con los datos básicos
+
     const dtos = entities.map((entity) => this.projectMapper.toDto(entity));
-    
-    // Obtener datos financieros de N8N en background (opcional, no bloquea la respuesta)
+
     const projectNumbers = entities
       .map((entity) => entity.lead?.leadNumber)
       .filter((number): number is string => !!number);
-    
+
     if (projectNumbers.length > 0) {
-      // Ejecutar en background para no bloquear la respuesta
-      executeInBackground(
-        async () => {
-          try {
-            const financials = await this.n8nService.getProjectFinancials(projectNumbers);
-            this.logger.log(
-              `Retrieved financial data for ${financials.length} projects from n8n (background)`,
-            );
-            // Nota: Los datos financieros se obtendrán en la próxima petición o se pueden cachear
-          } catch (error: any) {
-            this.logger.error(
-              `Error fetching financial data from n8n in background: ${error.message}`,
-            );
+      try {
+        const financials = await this.n8nService.getProjectFinancials(projectNumbers);
+        const financialMap = new Map(financials.map((f) => [f.projectNumber, f]));
+
+        dtos.forEach((dto, i) => {
+          const leadNumber = entities[i].lead?.leadNumber;
+          if (leadNumber) {
+            dto.financial = financialMap.get(leadNumber) ?? null;
           }
-        },
-        'N8N financial data fetch for findAll',
-        this.logger
-      );
+        });
+
+        this.logger.log(`Retrieved financial data for ${financials.length} projects from n8n`);
+      } catch (error: any) {
+        this.logger.error(`Error fetching financial data from n8n: ${error.message}`);
+      }
     }
-    
+
     const duration = Date.now() - startTime;
-    this.logger.log(`Projects findAll completed in ${duration}ms (N8N data in background)`);
-    
+    this.logger.log(`Projects findAll completed in ${duration}ms`);
+
     return dtos;
   }
 
@@ -154,32 +148,21 @@ export class ProjectsService extends BaseService<any, number, Project> {
     }
     
     const dto = this.projectMapper.toDto(entity);
-    
-    // Obtener datos financieros de N8N en background (opcional, no bloquea la respuesta)
+
     const leadNumber = entity.lead?.leadNumber;
     if (leadNumber) {
-      executeInBackground(
-        async () => {
-          try {
-            const financial = await this.n8nService.getProjectFinancial(leadNumber);
-            this.logger.log(
-              `Retrieved financial data from n8n for project ${id} (background)`,
-            );
-            // Nota: Los datos financieros se pueden cachear o obtener en la próxima petición
-          } catch (error: any) {
-            this.logger.error(
-              `Error fetching financial data from n8n for project ${id} in background: ${error.message}`,
-            );
-          }
-        },
-        `N8N financial data fetch for project ${id}`,
-        this.logger
-      );
+      try {
+        const financial = await this.n8nService.getProjectFinancial(leadNumber);
+        dto.financial = financial ?? null;
+        this.logger.log(`Retrieved financial data from n8n for project ${id}`);
+      } catch (error: any) {
+        this.logger.error(`Error fetching financial data from n8n for project ${id}: ${error.message}`);
+      }
     }
-    
+
     const duration = Date.now() - startTime;
-    this.logger.log(`Project ${id} findById completed in ${duration}ms (N8N data in background)`);
-    
+    this.logger.log(`Project ${id} findById completed in ${duration}ms`);
+
     return dto;
   }
 
@@ -249,29 +232,18 @@ export class ProjectsService extends BaseService<any, number, Project> {
     }
     
     const dto = this.projectMapper.toDto(entity);
-    
-    // Obtener datos financieros de N8N en background (opcional, no bloquea la respuesta)
-    executeInBackground(
-      async () => {
-        try {
-          const financial = await this.n8nService.getProjectFinancial(leadNumber);
-          this.logger.log(
-            `Retrieved financial data from n8n for lead number ${leadNumber} (background)`,
-          );
-          // Nota: Los datos financieros se pueden cachear o obtener en la próxima petición
-        } catch (error: any) {
-          this.logger.error(
-            `Error fetching financial data from n8n for lead number ${leadNumber} in background: ${error.message}`,
-          );
-        }
-      },
-      `N8N financial data fetch for leadNumber ${leadNumber}`,
-      this.logger
-    );
-    
+
+    try {
+      const financial = await this.n8nService.getProjectFinancial(leadNumber);
+      dto.financial = financial ?? null;
+      this.logger.log(`Retrieved financial data from n8n for lead number ${leadNumber}`);
+    } catch (error: any) {
+      this.logger.error(`Error fetching financial data from n8n for lead number ${leadNumber}: ${error.message}`);
+    }
+
     const duration = Date.now() - startTime;
-    this.logger.log(`Project findByLeadNumber ${leadNumber} completed in ${duration}ms (N8N data in background)`);
-    
+    this.logger.log(`Project findByLeadNumber ${leadNumber} completed in ${duration}ms`);
+
     return dto;
   }
 }

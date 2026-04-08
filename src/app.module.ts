@@ -15,6 +15,7 @@ import { LeadsModule } from './modules/leads/leads.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     }),
 
     // Feature modules
+    AuthModule,
     CompaniesModule,
     ContactsModule,
     LeadsModule,
