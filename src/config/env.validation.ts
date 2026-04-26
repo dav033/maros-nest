@@ -143,6 +143,11 @@ export class EnvironmentVariables {
   @IsString()
   @IsOptional()
   LOG_LEVEL: string = 'info';
+
+  // MCP Server
+  @IsString()
+  @IsOptional()
+  MCP_TOKEN: string;
 }
 
 export function validate(config: Record<string, unknown>) {

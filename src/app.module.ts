@@ -16,6 +16,7 @@ import { ProjectsModule } from './modules/projects/projects.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { McpModule } from './modules/mcp/mcp.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { AuthModule } from './modules/auth/auth.module';
     ProjectsModule,
     CrmModule,
     ReportsModule,
+    McpModule,
   ],
   controllers: [AppController],
   providers: [AppService],
