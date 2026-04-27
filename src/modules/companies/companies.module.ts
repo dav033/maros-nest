@@ -3,6 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Company } from '../../entities/company.entity';
 import { CompanyService } from '../../entities/company-service.entity';
 import { Contact } from '../../entities/contact.entity';
+import { Lead } from '../../entities/lead.entity';
+import { Project } from '../../entities/project.entity';
 import { CompaniesRepository } from './repositories/companies.repository';
 import { CompanyServicesRepository } from './repositories/company-services.repository';
 import { CompaniesService } from './services/companies.service';
@@ -14,7 +16,7 @@ import { CompanyServiceMapper } from './mappers/company-service.mapper';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Company, CompanyService, Contact]),
+    TypeOrmModule.forFeature([Company, CompanyService, Contact, Lead, Project]),
   ],
   controllers: [CompaniesController, CompanyServicesController],
   providers: [

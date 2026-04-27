@@ -142,11 +142,32 @@ export class ContactsService extends BaseService<any, number, Contact> {
   }
 
   async getContactByName(name: string): Promise<any> {
-    const entity = await this.contactsRepository.findByName(name);
+    const entity = await this.contactsRepository.findByNameIgnoreCase(name);
     if (!entity) {
       throw new ContactExceptions.ContactNotFoundException(name);
     }
     return this.contactMapper.toDto(entity);
+  }
+
+  async getContactByEmail(email: string): Promise<any> {
+    const entity = await this.contactsRepository.findByEmailIgnoreCase(email);
+    if (!entity) {
+      throw new ContactExceptions.ContactNotFoundException(email);
+    }
+    return this.contactMapper.toDto(entity);
+  }
+
+  async getContactByPhone(phone: string): Promise<any> {
+    const entity = await this.contactsRepository.findByPhoneExact(phone);
+    if (!entity) {
+      throw new ContactExceptions.ContactNotFoundException(phone);
+    }
+    return this.contactMapper.toDto(entity);
+  }
+
+  async searchContacts(query: string): Promise<any[]> {
+    const entities = await this.contactsRepository.searchByQuery(query);
+    return entities.map((entity) => this.contactMapper.toDto(entity));
   }
 
   async getContactById(id: number): Promise<any> {

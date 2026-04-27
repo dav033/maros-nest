@@ -111,6 +111,52 @@ export class LeadsRepository {
     return result[0]?.max_seq || null;
   }
 
+  async findByStatus(status: string): Promise<Lead[]> {
+    return this.repo
+      .createQueryBuilder('lead')
+      .leftJoinAndSelect('lead.contact', 'contact')
+      .leftJoinAndSelect('contact.company', 'company')
+      .leftJoinAndSelect('lead.projectType', 'projectType')
+      .leftJoinAndSelect('lead.project', 'project')
+      .where('lead.status = :status', { status })
+      .getMany();
+  }
+
+  async findByContactId(contactId: number): Promise<Lead[]> {
+    return this.repo
+      .createQueryBuilder('lead')
+      .leftJoinAndSelect('lead.contact', 'contact')
+      .leftJoinAndSelect('contact.company', 'company')
+      .leftJoinAndSelect('lead.projectType', 'projectType')
+      .leftJoinAndSelect('lead.project', 'project')
+      .where('contact.id = :contactId', { contactId })
+      .getMany();
+  }
+
+  async findByContactName(name: string): Promise<Lead[]> {
+    return this.repo
+      .createQueryBuilder('lead')
+      .leftJoinAndSelect('lead.contact', 'contact')
+      .leftJoinAndSelect('contact.company', 'company')
+      .leftJoinAndSelect('lead.projectType', 'projectType')
+      .leftJoinAndSelect('lead.project', 'project')
+      .where('LOWER(contact.name) LIKE LOWER(:name)', { name: `%${name}%` })
+      .getMany();
+  }
+
+  async searchByName(name: string): Promise<Lead[]> {
+    return this.repo
+      .createQueryBuilder('lead')
+      .leftJoinAndSelect('lead.contact', 'contact')
+      .leftJoinAndSelect('contact.company', 'company')
+      .leftJoinAndSelect('lead.projectType', 'projectType')
+      .leftJoinAndSelect('lead.project', 'project')
+      .where('LOWER(lead.name) LIKE LOWER(:name)', { name: `%${name}%` })
+      .orWhere('LOWER(lead.location) LIKE LOWER(:name)', { name: `%${name}%` })
+      .orWhere('lead.leadNumber LIKE :num', { num: `%${name}%` })
+      .getMany();
+  }
+
   async findByIdWithRelations(id: number): Promise<Lead | null> {
     return this.repo.findOne({
       where: { id },

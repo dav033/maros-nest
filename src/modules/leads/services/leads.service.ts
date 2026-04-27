@@ -110,6 +110,26 @@ export class LeadsService {
     };
   }
 
+  async getLeadsByStatus(status: LeadStatus): Promise<any[]> {
+    const entities = await this.leadsRepository.findByStatus(status);
+    return entities.map((entity) => this.leadMapper.toDto(entity));
+  }
+
+  async getLeadsByContactId(contactId: number): Promise<any[]> {
+    const entities = await this.leadsRepository.findByContactId(contactId);
+    return entities.map((entity) => this.leadMapper.toDto(entity));
+  }
+
+  async getLeadsByContactName(name: string): Promise<any[]> {
+    const entities = await this.leadsRepository.findByContactName(name);
+    return entities.map((entity) => this.leadMapper.toDto(entity));
+  }
+
+  async searchLeads(query: string): Promise<any[]> {
+    const entities = await this.leadsRepository.searchByName(query);
+    return entities.map((entity) => this.leadMapper.toDto(entity));
+  }
+
   async getLeadByNumber(leadNumber: string): Promise<any> {
     const trimmedLeadNumber = leadNumber?.trim();
     if (!trimmedLeadNumber) {

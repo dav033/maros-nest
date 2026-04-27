@@ -13,6 +13,7 @@ import {
 } from '../../../common/exceptions';
 import { BaseService } from '../../../common/services/base.service';
 import { N8nService } from '../../n8n/services/n8n.service';
+import { ProjectProgressStatus } from '../../../common/enums/project-progress-status.enum';
 
 @Injectable()
 export class ProjectsService extends BaseService<any, number, Project> {
@@ -219,6 +220,26 @@ export class ProjectsService extends BaseService<any, number, Project> {
       ...projectDto,
       lead: leadDto,
     };
+  }
+
+  async findByStatus(status: ProjectProgressStatus): Promise<any[]> {
+    const entities = await this.projectRepo.find({
+      where: { projectProgressStatus: status },
+      relations: ['lead', 'lead.contact', 'lead.contact.company', 'lead.projectType'],
+    });
+    return entities.map((entity) => this.projectMapper.toDto(entity));
+  }
+
+  async findByContactId(contactId: number): Promise<any[]> {
+    const entities = await this.projectRepo
+      .createQueryBuilder('project')
+      .leftJoinAndSelect('project.lead', 'lead')
+      .leftJoinAndSelect('lead.contact', 'contact')
+      .leftJoinAndSelect('contact.company', 'company')
+      .leftJoinAndSelect('lead.projectType', 'projectType')
+      .where('contact.id = :contactId', { contactId })
+      .getMany();
+    return entities.map((entity) => this.projectMapper.toDto(entity));
   }
 
   async findByLeadNumber(leadNumber: string): Promise<any> {

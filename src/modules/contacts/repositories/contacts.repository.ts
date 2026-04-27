@@ -70,6 +70,36 @@ export class ContactsRepository {
     return this.repo.find({ where: { company: { id: companyId } } });
   }
 
+  async findByEmailIgnoreCase(email: string): Promise<Contact | null> {
+    return this.repo
+      .createQueryBuilder('contact')
+      .leftJoinAndSelect('contact.company', 'company')
+      .where('LOWER(contact.email) = LOWER(:email)', { email })
+      .getOne();
+  }
+
+  async findByPhoneExact(phone: string): Promise<Contact | null> {
+    return this.repo.findOne({ where: { phone }, relations: ['company'] });
+  }
+
+  async findByNameIgnoreCase(name: string): Promise<Contact | null> {
+    return this.repo
+      .createQueryBuilder('contact')
+      .leftJoinAndSelect('contact.company', 'company')
+      .where('LOWER(contact.name) = LOWER(:name)', { name })
+      .getOne();
+  }
+
+  async searchByQuery(query: string): Promise<Contact[]> {
+    return this.repo
+      .createQueryBuilder('contact')
+      .leftJoinAndSelect('contact.company', 'company')
+      .where('LOWER(contact.name) LIKE LOWER(:q)', { q: `%${query}%` })
+      .orWhere('LOWER(contact.email) LIKE LOWER(:q)', { q: `%${query}%` })
+      .orWhere('contact.phone LIKE :q', { q: `%${query}%` })
+      .getMany();
+  }
+
   // Expose standard methods if needed
   async save(contact: Contact): Promise<Contact> {
     return this.repo.save(contact);

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Company } from '../../../entities/company.entity';
+import { CompanyType } from '../../../common/enums/company-type.enum';
 
 @Injectable()
 export class CompaniesRepository {
@@ -28,6 +29,39 @@ export class CompaniesRepository {
 
   async findAll(): Promise<Company[]> {
     return this.repo.find();
+  }
+
+  async findByNameContaining(name: string): Promise<Company[]> {
+    return this.repo
+      .createQueryBuilder('company')
+      .where('LOWER(company.name) LIKE LOWER(:name)', { name: `%${name}%` })
+      .getMany();
+  }
+
+  async findByNameExact(name: string): Promise<Company | null> {
+    return this.repo
+      .createQueryBuilder('company')
+      .where('LOWER(company.name) = LOWER(:name)', { name })
+      .getOne();
+  }
+
+  async findWithContacts(id: number): Promise<Company | null> {
+    return this.repo.findOne({
+      where: { id },
+      relations: ['contacts'],
+    });
+  }
+
+  async findByNameWithContacts(name: string): Promise<Company | null> {
+    return this.repo
+      .createQueryBuilder('company')
+      .leftJoinAndSelect('company.contacts', 'contacts')
+      .where('LOWER(company.name) LIKE LOWER(:name)', { name: `%${name}%` })
+      .getOne();
+  }
+
+  async findByType(type: CompanyType): Promise<Company[]> {
+    return this.repo.find({ where: { type } });
   }
 
   async save(company: Company): Promise<Company> {
