@@ -1,13 +1,11 @@
-import { All, Controller, Logger, Req, Res, UseGuards } from '@nestjs/common';
+import { All, Controller, Logger, Req, Res } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Request, Response } from 'express';
-import { McpAuthGuard } from './guards/mcp-auth.guard';
 import { McpService } from './mcp.service';
 
 @ApiExcludeController()
 @Controller('mcp')
-@UseGuards(McpAuthGuard)
 export class McpController {
   private readonly logger = new Logger(McpController.name);
 
