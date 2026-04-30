@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Contact } from '../../../entities/contact.entity';
 import { Company } from '../../../entities/company.entity';
 import { Lead } from '../../../entities/lead.entity';
@@ -36,6 +36,7 @@ export class ContactsService extends BaseService<any, number, Contact> {
     @InjectRepository(Project)
     private readonly projectRepo: Repository<Project>,
     private readonly contactMapper: ContactMapper,
+    private readonly dataSource: DataSource,
   ) {
     super(contactRepo, contactMapper);
   }
@@ -317,5 +318,20 @@ export class ContactsService extends BaseService<any, number, Contact> {
       overview: project.overview,
       notes: project.notes,
     };
+  }
+
+  async delete(id: number): Promise<void> {
+    const contact = await this.contactRepo.findOne({ where: { id }, select: ['id'] });
+    if (!contact) {
+      throw new ContactExceptions.ContactNotFoundException(id);
+    }
+
+    await this.dataSource.query(
+      'UPDATE leads SET contact_id = NULL WHERE contact_id = $1',
+      [id],
+    );
+
+    await this.contactRepo.delete(id);
+    this.logger.log(`Contact ${id} deleted`);
   }
 }

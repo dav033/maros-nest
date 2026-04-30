@@ -5,9 +5,18 @@ import { LeadsService } from '../leads/services/leads.service';
 import { CompaniesService } from '../companies/services/companies.service';
 import { ContactsService } from '../contacts/services/contacts.service';
 import { ProjectsService } from '../projects/services/projects.service';
+import { CreateLeadDto } from '../leads/dto/create-lead.dto';
+import { CreateContactDto } from '../contacts/dto/create-contact.dto';
+import { UpdateContactDto } from '../contacts/dto/update-contact.dto';
+import { CreateCompanyDto } from '../companies/dto/create-company.dto';
+import { UpdateCompanyDto } from '../companies/dto/update-company.dto';
+import { CreateProjectDto } from '../projects/dto/create-project.dto';
+import { UpdateProjectDto } from '../projects/dto/update-project.dto';
 import { LeadStatus } from '../../common/enums/lead-status.enum';
+import { LeadType } from '../../common/enums/lead-type.enum';
 import { CompanyType } from '../../common/enums/company-type.enum';
 import { ProjectProgressStatus } from '../../common/enums/project-progress-status.enum';
+import { InvoiceStatus } from '../../common/enums/invoice-status.enum';
 
 @Injectable()
 export class McpService {
@@ -25,9 +34,13 @@ export class McpService {
     });
 
     this.registerLeadTools(server);
+    this.registerLeadWriteTools(server);
     this.registerCompanyTools(server);
+    this.registerCompanyWriteTools(server);
     this.registerContactTools(server);
+    this.registerContactWriteTools(server);
     this.registerProjectTools(server);
+    this.registerProjectWriteTools(server);
 
     return server;
   }
@@ -266,6 +279,266 @@ export class McpService {
       const data = await this.contactsService.findClients();
       return { content: [{ type: 'text', text: JSON.stringify(data) }] };
     });
+  }
+
+  private registerLeadWriteTools(server: McpServer) {
+    server.tool(
+      'create_lead_with_existing_contact',
+      'Create a new lead and associate it with an existing contact by contact ID',
+      {
+        contactId: z.number().describe('ID of the existing contact'),
+        leadNumber: z.string().optional().describe('Lead number (auto-generated if omitted)'),
+        name: z.string().optional().describe('Lead name (auto-generated if omitted)'),
+        startDate: z.string().optional().describe('Start date (YYYY-MM-DD)'),
+        location: z.string().optional().describe('Location'),
+        addressLink: z.string().optional().describe('Address link (Google Maps URL)'),
+        status: z.enum(Object.values(LeadStatus) as [string, ...string[]]).optional().describe('Lead status'),
+        projectTypeId: z.number().optional().describe('Project type ID'),
+        notes: z.array(z.string()).optional().describe('Notes'),
+        inReview: z.boolean().optional().describe('Whether the lead is in review'),
+      },
+      async ({ contactId, ...leadFields }) => {
+        const lead: CreateLeadDto = leadFields as CreateLeadDto;
+        const data = await this.leadsService.createLeadWithExistingContact(lead, contactId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'create_lead_with_new_contact',
+      'Create a new lead together with a new contact',
+      {
+        contact_name: z.string().optional().describe('Contact name'),
+        contact_phone: z.string().optional().describe('Contact phone'),
+        contact_email: z.string().optional().describe('Contact email'),
+        contact_occupation: z.string().optional().describe('Contact occupation'),
+        contact_address: z.string().optional().describe('Contact address'),
+        contact_companyId: z.number().optional().describe('Company ID for the contact'),
+        contact_isCustomer: z.boolean().optional().describe('Is the contact a customer?'),
+        contact_isClient: z.boolean().optional().describe('Is the contact a client?'),
+        contact_notes: z.array(z.string()).optional().describe('Contact notes'),
+        leadNumber: z.string().optional().describe('Lead number (auto-generated if omitted)'),
+        name: z.string().optional().describe('Lead name'),
+        startDate: z.string().optional().describe('Start date (YYYY-MM-DD)'),
+        location: z.string().optional().describe('Location'),
+        addressLink: z.string().optional().describe('Address link'),
+        status: z.enum(Object.values(LeadStatus) as [string, ...string[]]).optional().describe('Lead status'),
+        projectTypeId: z.number().optional().describe('Project type ID'),
+        notes: z.array(z.string()).optional().describe('Lead notes'),
+        inReview: z.boolean().optional().describe('Whether the lead is in review'),
+      },
+      async ({ contact_name, contact_phone, contact_email, contact_occupation, contact_address, contact_companyId, contact_isCustomer, contact_isClient, contact_notes, ...leadFields }) => {
+        const contact: CreateContactDto = {
+          name: contact_name,
+          phone: contact_phone,
+          email: contact_email,
+          occupation: contact_occupation,
+          address: contact_address,
+          companyId: contact_companyId,
+          isCustomer: contact_isCustomer,
+          isClient: contact_isClient,
+          notes: contact_notes,
+        };
+        const lead: CreateLeadDto = leadFields as CreateLeadDto;
+        const data = await this.leadsService.createLeadWithNewContact(lead, contact);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'update_lead',
+      'Update an existing lead by its ID. Only provided fields are updated',
+      {
+        leadId: z.number().describe('The lead ID to update'),
+        leadNumber: z.string().optional().describe('Lead number'),
+        name: z.string().optional().describe('Lead name'),
+        startDate: z.string().optional().describe('Start date (YYYY-MM-DD)'),
+        location: z.string().optional().describe('Location'),
+        addressLink: z.string().optional().describe('Address link'),
+        status: z.enum(Object.values(LeadStatus) as [string, ...string[]]).optional().describe('Lead status'),
+        projectTypeId: z.number().optional().describe('Project type ID'),
+        notes: z.array(z.string()).optional().describe('Notes (replaces all existing notes)'),
+        inReview: z.boolean().optional().describe('Whether the lead is in review'),
+      },
+      async ({ leadId, ...fields }) => {
+        const data = await this.leadsService.updateLead(leadId, fields as CreateLeadDto);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'delete_lead',
+      'Delete a lead by its ID. Optionally also delete the associated contact and/or company',
+      {
+        leadId: z.number().describe('The lead ID to delete'),
+        deleteContact: z.boolean().optional().describe('Also delete the associated contact?'),
+        deleteCompany: z.boolean().optional().describe('Also delete the associated company?'),
+      },
+      async ({ leadId, deleteContact, deleteCompany }) => {
+        const data = await this.leadsService.deleteLead(leadId, { deleteContact, deleteCompany });
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+  }
+
+  private registerCompanyWriteTools(server: McpServer) {
+    server.tool(
+      'create_company',
+      'Create a new company in the CRM',
+      {
+        name: z.string().describe('Company name'),
+        address: z.string().optional().describe('Company address'),
+        addressLink: z.string().optional().describe('Address link (Google Maps URL)'),
+        type: z.enum(Object.values(CompanyType) as [string, ...string[]]).optional().describe('Company type'),
+        serviceId: z.number().optional().describe('Service ID'),
+        isCustomer: z.boolean().optional().describe('Is the company a customer?'),
+        isClient: z.boolean().optional().describe('Is the company a client?'),
+        notes: z.array(z.string()).optional().describe('Notes'),
+        phone: z.string().optional().describe('Phone number'),
+        email: z.string().optional().describe('Email address'),
+      },
+      async (fields) => {
+        const data = await this.companiesService.create(fields as CreateCompanyDto);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'update_company',
+      'Update an existing company by its ID. Only provided fields are updated',
+      {
+        companyId: z.number().describe('The company ID to update'),
+        name: z.string().optional().describe('Company name'),
+        address: z.string().optional().describe('Company address'),
+        addressLink: z.string().optional().describe('Address link'),
+        type: z.enum(Object.values(CompanyType) as [string, ...string[]]).optional().describe('Company type'),
+        serviceId: z.number().optional().describe('Service ID'),
+        isCustomer: z.boolean().optional().describe('Is the company a customer?'),
+        isClient: z.boolean().optional().describe('Is the company a client?'),
+        notes: z.array(z.string()).optional().describe('Notes (replaces all existing notes)'),
+        phone: z.string().optional().describe('Phone number'),
+        email: z.string().optional().describe('Email address'),
+      },
+      async ({ companyId, ...fields }) => {
+        const data = await this.companiesService.update(companyId, fields as UpdateCompanyDto);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'delete_company',
+      'Delete a company by its ID',
+      { companyId: z.number().describe('The company ID to delete') },
+      async ({ companyId }) => {
+        await this.companiesService.delete(companyId);
+        return { content: [{ type: 'text', text: JSON.stringify({ message: `Company ${companyId} deleted successfully` }) }] };
+      },
+    );
+  }
+
+  private registerContactWriteTools(server: McpServer) {
+    server.tool(
+      'delete_contact',
+      'Delete a contact by its ID. Associated leads will have their contact reference cleared',
+      { contactId: z.number().describe('The contact ID to delete') },
+      async ({ contactId }) => {
+        await this.contactsService.delete(contactId);
+        return { content: [{ type: 'text', text: JSON.stringify({ message: `Contact ${contactId} deleted successfully` }) }] };
+      },
+    );
+
+    server.tool(
+      'create_contact',
+      'Create a new contact in the CRM',
+      {
+        name: z.string().optional().describe('Contact name'),
+        occupation: z.string().optional().describe('Occupation'),
+        phone: z.string().optional().describe('Phone number'),
+        email: z.string().optional().describe('Email address'),
+        address: z.string().optional().describe('Address'),
+        addressLink: z.string().optional().describe('Address link (Google Maps URL)'),
+        isCustomer: z.boolean().optional().describe('Is the contact a customer?'),
+        isClient: z.boolean().optional().describe('Is the contact a client?'),
+        companyId: z.number().optional().describe('Company ID to associate with'),
+        notes: z.array(z.string()).optional().describe('Notes'),
+      },
+      async (fields) => {
+        const data = await this.contactsService.create(fields as CreateContactDto);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'update_contact',
+      'Update an existing contact by its ID. Only provided fields are updated',
+      {
+        contactId: z.number().describe('The contact ID to update'),
+        name: z.string().optional().describe('Contact name'),
+        occupation: z.string().optional().describe('Occupation'),
+        phone: z.string().optional().describe('Phone number'),
+        email: z.string().optional().describe('Email address'),
+        address: z.string().optional().describe('Address'),
+        addressLink: z.string().optional().describe('Address link'),
+        isCustomer: z.boolean().optional().describe('Is the contact a customer?'),
+        isClient: z.boolean().optional().describe('Is the contact a client?'),
+        companyId: z.number().optional().describe('Company ID'),
+        notes: z.array(z.string()).optional().describe('Notes (replaces all existing notes)'),
+      },
+      async ({ contactId, ...fields }) => {
+        const data = await this.contactsService.update(contactId, fields as UpdateContactDto);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+  }
+
+  private registerProjectWriteTools(server: McpServer) {
+    server.tool(
+      'delete_project',
+      'Delete a project by its ID. The associated lead is preserved',
+      { projectId: z.number().describe('The project ID to delete') },
+      async ({ projectId }) => {
+        await this.projectsService.delete(projectId);
+        return { content: [{ type: 'text', text: JSON.stringify({ message: `Project ${projectId} deleted successfully` }) }] };
+      },
+    );
+
+    server.tool(
+      'create_project',
+      'Create a new project for an existing lead',
+      {
+        leadId: z.number().describe('Lead ID to associate the project with'),
+        invoiceAmount: z.number().optional().describe('Invoice amount'),
+        payments: z.array(z.number()).optional().describe('Payments made (array of amounts)'),
+        projectProgressStatus: z.enum(Object.values(ProjectProgressStatus) as [string, ...string[]]).optional().describe('Project progress status'),
+        invoiceStatus: z.enum(Object.values(InvoiceStatus) as [string, ...string[]]).optional().describe('Invoice status'),
+        quickbooks: z.boolean().optional().describe('Is it registered in QuickBooks?'),
+        overview: z.string().optional().describe('Project overview/description'),
+        notes: z.array(z.string()).optional().describe('Project notes'),
+      },
+      async (fields) => {
+        const data = await this.projectsService.create(fields as CreateProjectDto);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'update_project',
+      'Update an existing project by its ID. Only provided fields are updated',
+      {
+        projectId: z.number().describe('The project ID to update'),
+        invoiceAmount: z.number().optional().describe('Invoice amount'),
+        payments: z.array(z.number()).optional().describe('Payments made (replaces all existing payments)'),
+        projectProgressStatus: z.enum(Object.values(ProjectProgressStatus) as [string, ...string[]]).optional().describe('Project progress status'),
+        invoiceStatus: z.enum(Object.values(InvoiceStatus) as [string, ...string[]]).optional().describe('Invoice status'),
+        quickbooks: z.boolean().optional().describe('Is it registered in QuickBooks?'),
+        overview: z.string().optional().describe('Project overview/description'),
+        notes: z.array(z.string()).optional().describe('Project notes (replaces all existing notes)'),
+      },
+      async ({ projectId, ...fields }) => {
+        const data = await this.projectsService.update(projectId, fields as UpdateProjectDto);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
   }
 
   private registerProjectTools(server: McpServer) {

@@ -267,4 +267,13 @@ export class ProjectsService extends BaseService<any, number, Project> {
 
     return dto;
   }
+
+  async delete(id: number): Promise<void> {
+    const project = await this.projectRepo.findOne({ where: { id }, select: ['id'] });
+    if (!project) {
+      throw new ResourceNotFoundException(`Project not found with id: ${id}`);
+    }
+    await this.projectRepo.delete(id);
+    this.logger.log(`Project ${id} deleted`);
+  }
 }
