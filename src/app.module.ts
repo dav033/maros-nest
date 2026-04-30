@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { WinstonModule } from 'nest-winston';
+import { ScheduleModule } from '@nestjs/schedule';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { getDatabaseConfig } from './config/database.config';
@@ -17,9 +19,16 @@ import { CrmModule } from './modules/crm/crm.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { McpModule } from './modules/mcp/mcp.module';
+import { QuickbooksModule } from './quickbooks/quickbooks.module';
 
 @Module({
   imports: [
+    // Global scheduling (cron jobs)
+    ScheduleModule.forRoot(),
+
+    // Global event bus — used by QuickbooksTokenRefreshCron to emit qbo.connection.broken
+    EventEmitterModule.forRoot(),
+
     // Configuration Module - Load environment variables
     ConfigModule.forRoot({
       isGlobal: true, // Make ConfigService available globally
@@ -55,6 +64,7 @@ import { McpModule } from './modules/mcp/mcp.module';
     CrmModule,
     ReportsModule,
     McpModule,
+    QuickbooksModule,
   ],
   controllers: [AppController],
   providers: [AppService],

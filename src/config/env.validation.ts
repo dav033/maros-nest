@@ -148,6 +148,24 @@ export class EnvironmentVariables {
   @IsString()
   @IsOptional()
   MCP_TOKEN: string;
+
+  // QuickBooks Online
+  @IsString()
+  QB_CLIENT_ID: string;
+
+  @IsString()
+  QB_SECRET_KEY: string;
+
+  @IsUrl({ require_tld: false })
+  QB_REDIRECT_URI: string;
+
+  @IsEnum(['sandbox', 'production'])
+  @IsOptional()
+  QB_ENVIRONMENT: 'sandbox' | 'production' = 'sandbox';
+
+  /** 64 hex characters = 32 bytes for AES-256-GCM. Generate with: openssl rand -hex 32 */
+  @IsString()
+  QB_ENCRYPTION_KEY: string;
 }
 
 export function validate(config: Record<string, unknown>) {
