@@ -8,7 +8,6 @@ import { ProjectsService } from '../projects/services/projects.service';
 import { QuickbooksFinancialsService } from '../../quickbooks/services/quickbooks-financials.service';
 import { QuickbooksReportsService } from '../../quickbooks/services/quickbooks-reports.service';
 import { QuickbooksApiService } from '../../quickbooks/services/quickbooks-api.service';
-import { ProjectProgressStatus } from '../../common/enums/project-progress-status.enum';
 import { CreateLeadDto } from '../leads/dto/create-lead.dto';
 import { CreateContactDto } from '../contacts/dto/create-contact.dto';
 import { UpdateContactDto } from '../contacts/dto/update-contact.dto';
