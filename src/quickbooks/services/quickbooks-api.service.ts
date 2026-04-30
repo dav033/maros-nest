@@ -55,6 +55,36 @@ export class QuickbooksApiService {
     );
   }
 
+  /**
+   * Fetches a single QBO entity by type and numeric/string ID.
+   * entityType is case-insensitive (e.g. 'invoice', 'estimate', 'payment').
+   */
+  async getById(
+    realmId: string,
+    entityType: string,
+    id: string,
+  ): Promise<unknown> {
+    return this.withRetry(realmId, (client) =>
+      client
+        .get<unknown>(`/${entityType.toLowerCase()}/${id}`)
+        .then((r) => r.data),
+    );
+  }
+
+  /**
+   * Runs a raw QBO query via POST (required when the query string is too long
+   * for a GET query param, e.g. large IN lists).
+   */
+  async queryPost(realmId: string, sqlLikeQuery: string): Promise<unknown> {
+    return this.withRetry(realmId, (client) =>
+      client
+        .post<unknown>('/query', sqlLikeQuery, {
+          headers: { 'Content-Type': 'text/plain' },
+        })
+        .then((r) => r.data),
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------------

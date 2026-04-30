@@ -6,6 +6,7 @@ import { TokenCryptoService } from './services/token-crypto.service';
 import { QuickbooksAuthService } from './services/quickbooks-auth.service';
 import { QuickbooksApiService } from './services/quickbooks-api.service';
 import { QuickbooksFinancialsService } from './services/quickbooks-financials.service';
+import { QuickbooksReportsService } from './services/quickbooks-reports.service';
 import { QuickbooksTokenRefreshCron } from './cron/quickbooks-token-refresh.cron';
 import { QuickbooksController } from './quickbooks.controller';
 
@@ -20,8 +21,14 @@ import { QuickbooksController } from './quickbooks.controller';
     QuickbooksAuthService,
     QuickbooksApiService,
     QuickbooksFinancialsService,
+    QuickbooksReportsService,
     QuickbooksTokenRefreshCron,
   ],
-  exports: [QuickbooksAuthService, QuickbooksApiService, QuickbooksFinancialsService],
+  exports: [
+    QuickbooksAuthService,
+    QuickbooksApiService,
+    QuickbooksFinancialsService,
+    QuickbooksReportsService,
+  ],
 })
 export class QuickbooksModule {}

@@ -25,6 +25,33 @@ export interface ProjectFinancials {
   estimateVsInvoicedDelta: number;
 }
 
+export interface InvoiceSummary {
+  invoiceId: string;
+  invoiceNumber: string;
+  txnDate: string;
+  dueDate: string;
+  totalAmount: number;
+  paidAmount: number;
+  balance: number;
+  /** Derived: Paid | Partial | Overdue | Pending */
+  status: string;
+  customerName: string;
+}
+
+export interface UnbilledWorkResult {
+  projectNumber: string;
+  found: boolean;
+  job: Record<string, unknown> | null;
+  totalEstimated: number;
+  totalInvoiced: number;
+  /** totalEstimated − totalInvoiced */
+  unbilledAmount: number;
+  /** Full QBO Estimate objects with line items */
+  estimates: unknown[];
+  /** Full QBO Invoice objects with line items */
+  invoices: unknown[];
+}
+
 export interface ProjectDetail {
   projectNumber: string;
   /** false when the project number was not found as a QBO job */
@@ -99,7 +126,7 @@ export class QuickbooksFinancialsService {
   ) {}
 
   // ---------------------------------------------------------------------------
-  // Public methods
+  // Public methods — aggregated
   // ---------------------------------------------------------------------------
 
   /**
@@ -204,8 +231,197 @@ export class QuickbooksFinancialsService {
   }
 
   // ---------------------------------------------------------------------------
+  // Public methods — Tier 2 drill-down
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns all invoices for a project with status, dates, and amounts.
+   * Each invoice's status is derived: Paid / Partial / Overdue / Pending.
+   */
+  async getInvoicesByProject(
+    projectNumber: string,
+    realmId?: string,
+  ): Promise<InvoiceSummary[]> {
+    const effectiveRealmId = realmId ?? (await this.resolveDefaultRealmId());
+    const { jobId } = await this.resolveSingleJob(projectNumber, effectiveRealmId);
+    if (!jobId) return [];
+
+    const resp = (await this.apiService.query(
+      effectiveRealmId,
+      `SELECT * FROM Invoice WHERE CustomerRef IN ('${jobId}') STARTPOSITION 1 MAXRESULTS 1000`,
+    )) as { QueryResponse?: { Invoice?: QboInvoice[] } };
+
+    const invoices = resp?.QueryResponse?.Invoice ?? [];
+    const today = new Date();
+
+    return invoices.map((inv) => {
+      const total = Number(inv.TotalAmt) || 0;
+      const balance = Number(inv.Balance) || 0;
+      const paid = total - balance;
+      const dueDate = inv.DueDate ? new Date(inv.DueDate as string) : null;
+      let status: string;
+      if (balance === 0) status = 'Paid';
+      else if (paid > 0) status = 'Partial';
+      else if (dueDate && dueDate < today) status = 'Overdue';
+      else status = 'Pending';
+
+      return {
+        invoiceId: String(inv.Id),
+        invoiceNumber: String((inv as Record<string, unknown>).DocNumber ?? ''),
+        txnDate: String((inv as Record<string, unknown>).TxnDate ?? ''),
+        dueDate: String((inv as Record<string, unknown>).DueDate ?? ''),
+        totalAmount: total,
+        paidAmount: paid,
+        balance,
+        status,
+        customerName: this.customerRefName(inv.CustomerRef),
+      };
+    });
+  }
+
+  /** Full Invoice object with line items fetched directly by QBO invoice ID. */
+  async getInvoiceById(
+    invoiceId: string,
+    realmId?: string,
+  ): Promise<unknown> {
+    const effectiveRealmId = realmId ?? (await this.resolveDefaultRealmId());
+    return this.apiService.getById(effectiveRealmId, 'invoice', invoiceId);
+  }
+
+  /** All Estimates for a project — full objects including line items. */
+  async getEstimatesByProject(
+    projectNumber: string,
+    realmId?: string,
+  ): Promise<unknown[]> {
+    const effectiveRealmId = realmId ?? (await this.resolveDefaultRealmId());
+    const { jobId } = await this.resolveSingleJob(projectNumber, effectiveRealmId);
+    if (!jobId) return [];
+
+    const resp = (await this.apiService.query(
+      effectiveRealmId,
+      `SELECT * FROM Estimate WHERE CustomerRef IN ('${jobId}') STARTPOSITION 1 MAXRESULTS 1000`,
+    )) as { QueryResponse?: { Estimate?: unknown[] } };
+
+    return resp?.QueryResponse?.Estimate ?? [];
+  }
+
+  /** Full Estimate object with line items fetched directly by QBO estimate ID. */
+  async getEstimateById(
+    estimateId: string,
+    realmId?: string,
+  ): Promise<unknown> {
+    const effectiveRealmId = realmId ?? (await this.resolveDefaultRealmId());
+    return this.apiService.getById(effectiveRealmId, 'estimate', estimateId);
+  }
+
+  /** All Payments for a project with date, method, and linked invoices. */
+  async getPaymentsByProject(
+    projectNumber: string,
+    realmId?: string,
+  ): Promise<unknown[]> {
+    const effectiveRealmId = realmId ?? (await this.resolveDefaultRealmId());
+    const { jobId } = await this.resolveSingleJob(projectNumber, effectiveRealmId);
+    if (!jobId) return [];
+
+    const resp = (await this.apiService.query(
+      effectiveRealmId,
+      `SELECT * FROM Payment WHERE CustomerRef IN ('${jobId}') STARTPOSITION 1 MAXRESULTS 1000`,
+    )) as { QueryResponse?: { Payment?: unknown[] } };
+
+    return resp?.QueryResponse?.Payment ?? [];
+  }
+
+  /**
+   * Returns the unbilled work breakdown for a project:
+   * total estimated − total invoiced, with full estimate and invoice objects
+   * so the caller can compare line items.
+   */
+  async getUnbilledWork(
+    projectNumber: string,
+    realmId?: string,
+  ): Promise<UnbilledWorkResult> {
+    const effectiveRealmId = realmId ?? (await this.resolveDefaultRealmId());
+    const { jobId, jobObject } = await this.resolveSingleJob(
+      projectNumber,
+      effectiveRealmId,
+    );
+
+    const empty: UnbilledWorkResult = {
+      projectNumber,
+      found: !!jobId,
+      job: jobObject,
+      totalEstimated: 0,
+      totalInvoiced: 0,
+      unbilledAmount: 0,
+      estimates: [],
+      invoices: [],
+    };
+
+    if (!jobId) return empty;
+
+    const [estResp, invResp] = await Promise.all([
+      this.apiService.query(
+        effectiveRealmId,
+        `SELECT * FROM Estimate WHERE CustomerRef IN ('${jobId}') STARTPOSITION 1 MAXRESULTS 1000`,
+      ) as Promise<{ QueryResponse?: { Estimate?: QboTxnBase[] } }>,
+      this.apiService.query(
+        effectiveRealmId,
+        `SELECT * FROM Invoice WHERE CustomerRef IN ('${jobId}') STARTPOSITION 1 MAXRESULTS 1000`,
+      ) as Promise<{ QueryResponse?: { Invoice?: QboInvoice[] } }>,
+    ]);
+
+    const estimates = estResp?.QueryResponse?.Estimate ?? [];
+    const invoices = invResp?.QueryResponse?.Invoice ?? [];
+
+    const totalEstimated = estimates.reduce(
+      (s, e) => s + (Number(e.TotalAmt) || 0),
+      0,
+    );
+    const totalInvoiced = invoices.reduce(
+      (s, i) => s + (Number(i.TotalAmt) || 0),
+      0,
+    );
+
+    return {
+      projectNumber,
+      found: true,
+      job: jobObject,
+      totalEstimated,
+      totalInvoiced,
+      unbilledAmount: totalEstimated - totalInvoiced,
+      estimates: estimates as unknown[],
+      invoices: invoices as unknown[],
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Shared private helpers
   // ---------------------------------------------------------------------------
+
+  /** Returns the realmId of the first stored QBO connection. Used by the MCP proxy tools. */
+  async getDefaultRealmId(): Promise<string> {
+    return this.resolveDefaultRealmId();
+  }
+
+  /** Convenience wrapper for single-project lookups. */
+  private async resolveSingleJob(
+    projectNumber: string,
+    realmId: string,
+  ): Promise<{ jobId: string | null; jobObject: QboCustomer | null }> {
+    const ctx = await this.resolveJobs(realmId, [projectNumber]);
+    return {
+      jobId: ctx.jobMap[projectNumber] ?? null,
+      jobObject: ctx.jobObjectMap[projectNumber] ?? null,
+    };
+  }
+
+  private customerRefName(
+    ref: QboTxnBase['CustomerRef'] | undefined,
+  ): string {
+    if (!ref) return '';
+    if (typeof ref === 'object' && 'name' in ref) return String(ref.name ?? '');
+    return '';
+  }
 
   private async resolveDefaultRealmId(): Promise<string> {
     const [connection] = await this.connectionRepo.find({ take: 1 });

@@ -6,6 +6,9 @@ import { CompaniesService } from '../companies/services/companies.service';
 import { ContactsService } from '../contacts/services/contacts.service';
 import { ProjectsService } from '../projects/services/projects.service';
 import { QuickbooksFinancialsService } from '../../quickbooks/services/quickbooks-financials.service';
+import { QuickbooksReportsService } from '../../quickbooks/services/quickbooks-reports.service';
+import { QuickbooksApiService } from '../../quickbooks/services/quickbooks-api.service';
+import { ProjectProgressStatus } from '../../common/enums/project-progress-status.enum';
 import { CreateLeadDto } from '../leads/dto/create-lead.dto';
 import { CreateContactDto } from '../contacts/dto/create-contact.dto';
 import { UpdateContactDto } from '../contacts/dto/update-contact.dto';
@@ -27,6 +30,8 @@ export class McpService {
     private readonly contactsService: ContactsService,
     private readonly projectsService: ProjectsService,
     private readonly qboFinancials: QuickbooksFinancialsService,
+    private readonly qboReports: QuickbooksReportsService,
+    private readonly qboApi: QuickbooksApiService,
   ) {}
 
   createServer(): McpServer {
@@ -43,7 +48,10 @@ export class McpService {
     this.registerContactWriteTools(server);
     this.registerProjectTools(server);
     this.registerProjectWriteTools(server);
-    this.registerQuickbooksTools(server);
+    this.registerQboProjectTools(server);
+    this.registerQboReportTools(server);
+    this.registerQboCrmReports(server);
+    this.registerQboProxyTools(server);
 
     return server;
   }
@@ -544,22 +552,21 @@ export class McpService {
     );
   }
 
-  private registerQuickbooksTools(server: McpServer) {
+  // ─── Tier 2: per-project drill-down ────────────────────────────────────────
+
+  private registerQboProjectTools(server: McpServer) {
+    const realmIdParam = z.string().optional().describe(
+      'QuickBooks company realm ID. Omit to use the default connected company.',
+    );
+
     server.tool(
       'get_project_financials',
-      'Get aggregated financial summary from QuickBooks Online for one or more project numbers. ' +
-        'Returns estimated amount, invoiced amount, paid amount, outstanding balance, and payment percentage per project. ' +
-        'Project numbers must match the prefix used in QBO (e.g. "001-0924"). ' +
-        'Use get_project_detail instead when you need individual transactions or line items.',
+      'Aggregated financial summary for one or more project numbers from QuickBooks: ' +
+        'estimated amount, invoiced amount, paid, outstanding, and payment percentage. ' +
+        'Use get_project_detail for full transactions with line items.',
       {
-        projectNumbers: z
-          .array(z.string())
-          .min(1)
-          .describe('One or more project numbers to look up (e.g. ["001-0924", "002-1024"])'),
-        realmId: z
-          .string()
-          .optional()
-          .describe('QuickBooks company realm ID. Omit to use the default connected company.'),
+        projectNumbers: z.array(z.string()).min(1).describe('Project numbers, e.g. ["001-0924"]'),
+        realmId: realmIdParam,
       },
       async ({ projectNumbers, realmId }) => {
         const data = await this.qboFinancials.getProjectFinancials(projectNumbers, realmId);
@@ -569,23 +576,397 @@ export class McpService {
 
     server.tool(
       'get_project_detail',
-      'Get full QuickBooks Online detail for one or more project numbers: ' +
-        'the QBO job record, every Estimate with line items, every Invoice with line items, ' +
-        'every Payment, and an aggregated financial summary. ' +
-        'Use this when you need individual transactions, dates, line item descriptions, or payment history. ' +
-        'For a quick financial snapshot only, prefer get_project_financials.',
+      'Full QuickBooks detail for one or more project numbers: the QBO job record, ' +
+        'all Estimates with line items, all Invoices with line items, all Payments, ' +
+        'and an aggregated financial summary.',
       {
-        projectNumbers: z
-          .array(z.string())
-          .min(1)
-          .describe('One or more project numbers to look up (e.g. ["001-0924", "002-1024"])'),
-        realmId: z
-          .string()
-          .optional()
-          .describe('QuickBooks company realm ID. Omit to use the default connected company.'),
+        projectNumbers: z.array(z.string()).min(1).describe('Project numbers, e.g. ["001-0924"]'),
+        realmId: realmIdParam,
       },
       async ({ projectNumbers, realmId }) => {
         const data = await this.qboFinancials.getProjectDetail(projectNumbers, realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'get_invoices_by_project',
+      'List all invoices for a project with number, date, amount, balance, due date, and derived status (Paid/Partial/Overdue/Pending).',
+      {
+        projectNumber: z.string().describe('Project number, e.g. "001-0924"'),
+        realmId: realmIdParam,
+      },
+      async ({ projectNumber, realmId }) => {
+        const data = await this.qboFinancials.getInvoicesByProject(projectNumber, realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'get_invoice_by_id',
+      'Full invoice detail from QuickBooks by QBO invoice ID, including all line items.',
+      {
+        invoiceId: z.string().describe('QBO invoice ID'),
+        realmId: realmIdParam,
+      },
+      async ({ invoiceId, realmId }) => {
+        const data = await this.qboFinancials.getInvoiceById(invoiceId, realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'get_estimates_by_project',
+      'All estimates for a project with full line items, status (Pending/Accepted/Closed), and amounts.',
+      {
+        projectNumber: z.string().describe('Project number, e.g. "001-0924"'),
+        realmId: realmIdParam,
+      },
+      async ({ projectNumber, realmId }) => {
+        const data = await this.qboFinancials.getEstimatesByProject(projectNumber, realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'get_estimate_by_id',
+      'Full estimate detail from QuickBooks by QBO estimate ID, including all line items.',
+      {
+        estimateId: z.string().describe('QBO estimate ID'),
+        realmId: realmIdParam,
+      },
+      async ({ estimateId, realmId }) => {
+        const data = await this.qboFinancials.getEstimateById(estimateId, realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'get_payments_by_project',
+      'All payments received for a project with date, amount, payment method, and linked invoices.',
+      {
+        projectNumber: z.string().describe('Project number, e.g. "001-0924"'),
+        realmId: realmIdParam,
+      },
+      async ({ projectNumber, realmId }) => {
+        const data = await this.qboFinancials.getPaymentsByProject(projectNumber, realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'get_unbilled_work',
+      'Unbilled work for a project: total estimated minus total invoiced, ' +
+        'with full estimate and invoice objects so line items can be compared. ' +
+        'A positive unbilledAmount means work was quoted but not yet billed.',
+      {
+        projectNumber: z.string().describe('Project number, e.g. "001-0924"'),
+        realmId: realmIdParam,
+      },
+      async ({ projectNumber, realmId }) => {
+        const data = await this.qboFinancials.getUnbilledWork(projectNumber, realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+  }
+
+  // ─── Tier 4: company-wide QBO reports ──────────────────────────────────────
+
+  private registerQboReportTools(server: McpServer) {
+    const realmIdParam = z.string().optional().describe(
+      'QuickBooks company realm ID. Omit to use the default connected company.',
+    );
+
+    server.tool(
+      'get_aging_report',
+      'Accounts receivable aging report: all open invoices bucketed by days overdue ' +
+        '(Current, 1-30, 31-60, 61-90, 90+) with per-bucket totals and grand total outstanding.',
+      { realmId: realmIdParam },
+      async ({ realmId }) => {
+        const data = await this.qboReports.getAgingReport(realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'get_outstanding_balances',
+      'All QuickBooks projects (jobs) with an open invoice balance, ' +
+        'sorted by outstanding amount descending. Gives a quick view of who owes what.',
+      { realmId: realmIdParam },
+      async ({ realmId }) => {
+        const data = await this.qboReports.getOutstandingBalances(realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'get_unbilled_completed_work',
+      'All QuickBooks jobs where estimated amount exceeds invoiced amount — ' +
+        'work that has been quoted or contracted but not yet billed to the client. ' +
+        'Sorted by backlog amount descending.',
+      { realmId: realmIdParam },
+      async ({ realmId }) => {
+        const data = await this.qboReports.getUnbilledCompletedWork(realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'get_revenue_by_period',
+      'Total revenue collected (payments received) within a date range. ' +
+        'Returns total amount, payment count, and full payment list.',
+      {
+        start: z.string().describe('Start date in YYYY-MM-DD format'),
+        end: z.string().describe('End date in YYYY-MM-DD format'),
+        realmId: realmIdParam,
+      },
+      async ({ start, end, realmId }) => {
+        const data = await this.qboReports.getRevenueByPeriod(start, end, realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'get_backlog',
+      'All QuickBooks jobs with contracted (estimated) work that has not yet been invoiced. ' +
+        'backlogAmount = estimatedAmount − invoicedAmount. Sorted descending.',
+      { realmId: realmIdParam },
+      async ({ realmId }) => {
+        const data = await this.qboReports.getBacklog(realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'search_projects_by_financial_criteria',
+      'Filter QuickBooks jobs by financial thresholds. All criteria are optional. ' +
+        'Examples: "all projects with outstanding > $5000", ' +
+        '"projects where estimated > invoiced", ' +
+        '"projects with invoiced between $10k and $50k".',
+      {
+        minOutstanding: z.number().optional().describe('Minimum open invoice balance'),
+        maxOutstanding: z.number().optional().describe('Maximum open invoice balance'),
+        minInvoiced: z.number().optional().describe('Minimum total invoiced amount'),
+        maxInvoiced: z.number().optional().describe('Maximum total invoiced amount'),
+        minEstimated: z.number().optional().describe('Minimum total estimated amount'),
+        hasUnbilledWork: z.boolean().optional().describe('Only return projects where estimated > invoiced'),
+        minUnbilledAmount: z.number().optional().describe('Minimum unbilled amount (estimated − invoiced)'),
+        realmId: realmIdParam,
+      },
+      async ({ realmId, ...criteria }) => {
+        const data = await this.qboReports.searchByFinancialCriteria(criteria, realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'get_top_clients_by_revenue',
+      'Top clients ranked by total invoiced amount, with paid vs outstanding breakdown.',
+      {
+        limit: z.number().optional().describe('Number of clients to return (default: 10)'),
+        realmId: realmIdParam,
+      },
+      async ({ limit, realmId }) => {
+        const data = await this.qboReports.getTopClientsByRevenue(limit ?? 10, realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+  }
+
+  // ─── CRM-based reports (cross-system) ──────────────────────────────────────
+
+  private registerQboCrmReports(server: McpServer) {
+    const realmIdParam = z.string().optional().describe(
+      'QuickBooks company realm ID. Omit to use the default connected company.',
+    );
+
+    server.tool(
+      'get_pipeline_value',
+      'Leads grouped by status with count per status. ' +
+        'Gives a snapshot of the sales pipeline. ' +
+        'Use get_project_financials on specific lead numbers to add monetary values.',
+      {},
+      async () => {
+        const [allLeads, inReview] = await Promise.all([
+          this.leadsService.getAllLeads(),
+          this.leadsService.getLeadsInReview(),
+        ]);
+        const byStatus: Record<string, { count: number; leads: unknown[] }> = {};
+        for (const lead of [...allLeads, ...inReview]) {
+          const s = (lead as { status?: string }).status ?? 'UNKNOWN';
+          if (!byStatus[s]) byStatus[s] = { count: 0, leads: [] };
+          byStatus[s].count += 1;
+          byStatus[s].leads.push(lead);
+        }
+        return { content: [{ type: 'text', text: JSON.stringify(byStatus) }] };
+      },
+    );
+
+    server.tool(
+      'get_win_rate',
+      'Win rate: percentage of leads that were converted to a project. ' +
+        'Based on CRM data (projects / total pipeline leads).',
+      {},
+      async () => {
+        const [allLeads, inReview, projects] = await Promise.all([
+          this.leadsService.getAllLeads(),
+          this.leadsService.getLeadsInReview(),
+          this.projectsService.findAll(),
+        ]);
+        const openLeads = allLeads.length + inReview.length;
+        const won = projects.length;
+        const total = openLeads + won;
+        const winRate = total > 0 ? Math.round((won / total) * 10000) / 100 : 0;
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ totalLeads: total, convertedToProject: won, openLeads, winRate }),
+          }],
+        };
+      },
+    );
+
+    server.tool(
+      'get_unbilled_completed_work_crm',
+      'Projects with COMPLETED status in the CRM that have unbilled work in QuickBooks ' +
+        '(estimated > invoiced). Combines CRM project data with QBO financials.',
+      { realmId: realmIdParam },
+      async ({ realmId }) => {
+        const completedProjects = await this.projectsService.findByStatus(
+          ProjectProgressStatus.COMPLETED,
+        );
+
+        const leadNumbers = completedProjects
+          .map((p: Record<string, unknown>) => {
+            const lead = p['lead'] as { leadNumber?: string } | undefined;
+            return lead?.leadNumber ?? null;
+          })
+          .filter(Boolean) as string[];
+
+        if (!leadNumbers.length) {
+          return { content: [{ type: 'text', text: JSON.stringify([]) }] };
+        }
+
+        const financials = await this.qboFinancials.getProjectFinancials(leadNumbers, realmId);
+        const unbilled = financials.filter((f) => f.estimateVsInvoicedDelta > 0);
+
+        const enriched = unbilled.map((f) => {
+          const project = completedProjects.find(
+            (p: Record<string, unknown>) =>
+              (p['lead'] as { leadNumber?: string } | undefined)?.leadNumber === f.projectNumber,
+          );
+          return { ...f, crmProject: project };
+        });
+
+        return { content: [{ type: 'text', text: JSON.stringify(enriched) }] };
+      },
+    );
+
+    server.tool(
+      'get_top_clients_by_volume',
+      'Top clients ranked by number of projects in the CRM.',
+      {
+        limit: z.number().optional().describe('Number of clients to return (default: 10)'),
+      },
+      async ({ limit = 10 }) => {
+        const projects = await this.projectsService.findAll();
+        const byClient: Record<string, { count: number; clientName: string; projects: unknown[] }> =
+          {};
+
+        for (const p of projects as Record<string, unknown>[]) {
+          const contact = p['contact'] as { name?: string; id?: number } | undefined;
+          const key = String(contact?.id ?? 'unknown');
+          if (!byClient[key]) byClient[key] = { count: 0, clientName: contact?.name ?? key, projects: [] };
+          byClient[key].count += 1;
+          byClient[key].projects.push(p);
+        }
+
+        const sorted = Object.values(byClient)
+          .sort((a, b) => b.count - a.count)
+          .slice(0, limit);
+
+        return { content: [{ type: 'text', text: JSON.stringify(sorted) }] };
+      },
+    );
+  }
+
+  // ─── Tier 6: direct QBO proxy ───────────────────────────────────────────────
+
+  private registerQboProxyTools(server: McpServer) {
+    const realmIdParam = z.string().optional().describe(
+      'QuickBooks company realm ID. Omit to use the default connected company.',
+    );
+
+    const resolveRealm = (realmId?: string): Promise<string> =>
+      realmId ? Promise.resolve(realmId) : this.qboFinancials.getDefaultRealmId();
+
+    server.tool(
+      'qb_get_invoice',
+      'Fetch a QuickBooks invoice directly by its QBO ID. Returns the full object including line items, customer, dates, and amounts.',
+      {
+        invoiceId: z.string().describe('QBO invoice ID'),
+        realmId: realmIdParam,
+      },
+      async ({ invoiceId, realmId }) => {
+        const rid = await resolveRealm(realmId);
+        const data = await this.qboApi.getById(rid, 'invoice', invoiceId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'qb_get_payment',
+      'Fetch a QuickBooks payment directly by its QBO ID. Returns method, amount, date, and linked invoices.',
+      {
+        paymentId: z.string().describe('QBO payment ID'),
+        realmId: realmIdParam,
+      },
+      async ({ paymentId, realmId }) => {
+        const rid = await resolveRealm(realmId);
+        const data = await this.qboApi.getById(rid, 'payment', paymentId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'qb_get_customer',
+      'Fetch a QuickBooks customer (or job/sub-customer) directly by its QBO ID.',
+      {
+        customerId: z.string().describe('QBO customer ID'),
+        realmId: realmIdParam,
+      },
+      async ({ customerId, realmId }) => {
+        const rid = await resolveRealm(realmId);
+        const data = await this.qboApi.getById(rid, 'customer', customerId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'qb_get_estimate',
+      'Fetch a QuickBooks estimate directly by its QBO ID. Returns full object with all line items.',
+      {
+        estimateId: z.string().describe('QBO estimate ID'),
+        realmId: realmIdParam,
+      },
+      async ({ estimateId, realmId }) => {
+        const rid = await resolveRealm(realmId);
+        const data = await this.qboApi.getById(rid, 'estimate', estimateId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'qb_sync_project',
+      'Force a fresh data pull from QuickBooks for a project number. ' +
+        'Returns the same payload as get_project_detail but always bypasses any cache. ' +
+        'Use when you suspect stale data.',
+      {
+        projectNumber: z.string().describe('Project number, e.g. "001-0924"'),
+        realmId: realmIdParam,
+      },
+      async ({ projectNumber, realmId }) => {
+        const data = await this.qboFinancials.getProjectDetail([projectNumber], realmId);
         return { content: [{ type: 'text', text: JSON.stringify(data) }] };
       },
     );
