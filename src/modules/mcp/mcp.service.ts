@@ -5,6 +5,7 @@ import { LeadsService } from '../leads/services/leads.service';
 import { CompaniesService } from '../companies/services/companies.service';
 import { ContactsService } from '../contacts/services/contacts.service';
 import { ProjectsService } from '../projects/services/projects.service';
+import { QuickbooksFinancialsService } from '../../quickbooks/services/quickbooks-financials.service';
 import { CreateLeadDto } from '../leads/dto/create-lead.dto';
 import { CreateContactDto } from '../contacts/dto/create-contact.dto';
 import { UpdateContactDto } from '../contacts/dto/update-contact.dto';
@@ -25,6 +26,7 @@ export class McpService {
     private readonly companiesService: CompaniesService,
     private readonly contactsService: ContactsService,
     private readonly projectsService: ProjectsService,
+    private readonly qboFinancials: QuickbooksFinancialsService,
   ) {}
 
   createServer(): McpServer {
@@ -41,6 +43,7 @@ export class McpService {
     this.registerContactWriteTools(server);
     this.registerProjectTools(server);
     this.registerProjectWriteTools(server);
+    this.registerQuickbooksTools(server);
 
     return server;
   }
@@ -536,6 +539,53 @@ export class McpService {
       },
       async ({ projectId, ...fields }) => {
         const data = await this.projectsService.update(projectId, fields as UpdateProjectDto);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+  }
+
+  private registerQuickbooksTools(server: McpServer) {
+    server.tool(
+      'get_project_financials',
+      'Get aggregated financial summary from QuickBooks Online for one or more project numbers. ' +
+        'Returns estimated amount, invoiced amount, paid amount, outstanding balance, and payment percentage per project. ' +
+        'Project numbers must match the prefix used in QBO (e.g. "001-0924"). ' +
+        'Use get_project_detail instead when you need individual transactions or line items.',
+      {
+        projectNumbers: z
+          .array(z.string())
+          .min(1)
+          .describe('One or more project numbers to look up (e.g. ["001-0924", "002-1024"])'),
+        realmId: z
+          .string()
+          .optional()
+          .describe('QuickBooks company realm ID. Omit to use the default connected company.'),
+      },
+      async ({ projectNumbers, realmId }) => {
+        const data = await this.qboFinancials.getProjectFinancials(projectNumbers, realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'get_project_detail',
+      'Get full QuickBooks Online detail for one or more project numbers: ' +
+        'the QBO job record, every Estimate with line items, every Invoice with line items, ' +
+        'every Payment, and an aggregated financial summary. ' +
+        'Use this when you need individual transactions, dates, line item descriptions, or payment history. ' +
+        'For a quick financial snapshot only, prefer get_project_financials.',
+      {
+        projectNumbers: z
+          .array(z.string())
+          .min(1)
+          .describe('One or more project numbers to look up (e.g. ["001-0924", "002-1024"])'),
+        realmId: z
+          .string()
+          .optional()
+          .describe('QuickBooks company realm ID. Omit to use the default connected company.'),
+      },
+      async ({ projectNumbers, realmId }) => {
+        const data = await this.qboFinancials.getProjectDetail(projectNumbers, realmId);
         return { content: [{ type: 'text', text: JSON.stringify(data) }] };
       },
     );
