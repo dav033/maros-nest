@@ -23,21 +23,20 @@ import { QuickbooksModule } from './quickbooks/quickbooks.module';
 
 @Module({
   imports: [
-    // Global scheduling (cron jobs)
+    // Configuration must be first — other modules depend on ConfigService
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: ['.env.local', '.env'],
+      validate,
+      load: [clickupConfig, n8nConfig],
+    }),
+
+    // Global scheduling (cron jobs) — after Config so providers can inject ConfigService
     ScheduleModule.forRoot(),
 
     // Global event bus — used by QuickbooksTokenRefreshCron to emit qbo.connection.broken
     EventEmitterModule.forRoot(),
 
-    // Configuration Module - Load environment variables
-    ConfigModule.forRoot({
-      isGlobal: true, // Make ConfigService available globally
-      envFilePath: ['.env.local', '.env'], // Load .env files
-      validate, // Validate environment variables on startup
-      load: [clickupConfig, n8nConfig], // Load ClickUp and N8N configuration
-    }),
-
-    // Winston Logger Module
     WinstonModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {

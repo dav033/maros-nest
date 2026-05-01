@@ -7,8 +7,13 @@ import { QboConnection } from '../entities/qbo-connection.entity';
 import { QuickbooksAuthService } from '../services/quickbooks-auth.service';
 import { QboReauthorizationRequiredException } from '../exceptions/qbo-reauthorization-required.exception';
 
-/** Refresh tokens that expire within this many minutes. */
-const EXPIRY_WINDOW_MINUTES = 10;
+/**
+ * Refresh tokens expiring within this window.
+ * Must be > cron interval (30 min) to guarantee the cron always catches
+ * a token before it expires. QBO access tokens last exactly 60 minutes.
+ * With a 35-min window and 30-min cron: worst case refresh is 5 min early.
+ */
+const EXPIRY_WINDOW_MINUTES = 35;
 
 @Injectable()
 export class QuickbooksTokenRefreshCron {
