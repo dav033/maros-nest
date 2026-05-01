@@ -72,6 +72,20 @@ export class QuickbooksApiService {
   }
 
   /**
+   * Calls a QBO Reports API endpoint (e.g. ProfitAndLoss, BalanceSheet).
+   * params are passed as query string parameters.
+   */
+  async report(
+    realmId: string,
+    reportName: string,
+    params: Record<string, string | number | undefined> = {},
+  ): Promise<unknown> {
+    return this.withRetry(realmId, (client) =>
+      client.get<unknown>(`/reports/${reportName}`, { params }).then((r) => r.data),
+    );
+  }
+
+  /**
    * Runs a raw QBO query via POST (required when the query string is too long
    * for a GET query param, e.g. large IN lists).
    */

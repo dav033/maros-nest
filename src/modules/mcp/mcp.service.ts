@@ -667,6 +667,68 @@ export class McpService {
         return { content: [{ type: 'text', text: JSON.stringify(data) }] };
       },
     );
+
+    server.tool(
+      'get_expenses_by_project',
+      'All vendor expenses (Purchases) charged against a project in QuickBooks. ' +
+        'Returns vendor name, date, amount, payment type (Cash/CreditCard/Check), ' +
+        'and account-based line items. These are the "Expense" rows in the QBO Transactions tab.',
+      {
+        projectNumber: z.string().describe('Project number, e.g. "001-0924"'),
+        realmId: realmIdParam,
+      },
+      async ({ projectNumber, realmId }) => {
+        const data = await this.qboFinancials.getExpensesByProject(projectNumber, realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'get_attachments_by_project',
+      'Files and documents attached to a QuickBooks project (job). ' +
+        'Returns file name, size, content type, note, and temporary download URL.',
+      {
+        projectNumber: z.string().describe('Project number, e.g. "001-0924"'),
+        realmId: realmIdParam,
+      },
+      async ({ projectNumber, realmId }) => {
+        const data = await this.qboFinancials.getAttachmentsByProject(projectNumber, realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'get_project_profit_and_loss',
+      'QuickBooks Profit & Loss report for a specific project. ' +
+        'Breaks down Income, Cost of Goods Sold (by category: materials, subcontractors, etc.), ' +
+        'and Expenses, and returns gross profit and net profit.',
+      {
+        projectNumber: z.string().describe('Project number, e.g. "001-0924"'),
+        realmId: realmIdParam,
+      },
+      async ({ projectNumber, realmId }) => {
+        const data = await this.qboFinancials.getProjectProfitAndLoss(projectNumber, realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
+
+    server.tool(
+      'get_project_full_profile',
+      'Complete QuickBooks data for a single project in one call: ' +
+        'QBO job record, aggregated financial summary, all estimates with line items, ' +
+        'all invoices with line items, all payments, all vendor expenses, ' +
+        'all attachments, and the full Profit & Loss report. ' +
+        'Use this when you need everything about a project. ' +
+        'For lighter reads use the isolated tools (get_invoices_by_project, get_expenses_by_project, etc.).',
+      {
+        projectNumber: z.string().describe('Project number, e.g. "001-0924"'),
+        realmId: realmIdParam,
+      },
+      async ({ projectNumber, realmId }) => {
+        const data = await this.qboFinancials.getProjectFullProfile(projectNumber, realmId);
+        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      },
+    );
   }
 
   // ─── Tier 4: company-wide QBO reports ──────────────────────────────────────
@@ -885,6 +947,75 @@ export class McpService {
           .slice(0, limit);
 
         return { content: [{ type: 'text', text: JSON.stringify(sorted) }] };
+      },
+    );
+
+    server.tool(
+      'get_company_financial_snapshot',
+      'Full financial overview of the entire company: reads every project from the CRM, ' +
+        'fetches their QuickBooks financials in a single batch, and returns per-project numbers ' +
+        '(estimated, invoiced, paid, outstanding) plus company-wide totals. ' +
+        'Use this to understand the current financial state of the business at a glance. ' +
+        'Projects not found in QuickBooks are flagged with found=false.',
+      { realmId: realmIdParam },
+      async ({ realmId }) => {
+        const allProjects = (await this.projectsService.findAll()) as Record<string, unknown>[];
+
+        const projectsWithLeadNumbers = allProjects.map((p) => ({
+          projectId: p['id'],
+          leadNumber: (p['lead'] as { leadNumber?: string } | undefined)?.leadNumber ?? null,
+          contactName: (p['contact'] as { name?: string } | undefined)?.name ?? null,
+          companyName:
+            ((p['contact'] as Record<string, unknown> | undefined)?.['company'] as
+              | { name?: string }
+              | undefined)?.name ?? null,
+          projectProgressStatus: p['projectProgressStatus'],
+          invoiceStatus: p['invoiceStatus'],
+        }));
+
+        const leadNumbers = projectsWithLeadNumbers
+          .map((p) => p.leadNumber)
+          .filter(Boolean) as string[];
+
+        const financials = leadNumbers.length
+          ? await this.qboFinancials.getProjectFinancials(leadNumbers, realmId)
+          : [];
+
+        const finMap = new Map(financials.map((f) => [f.projectNumber, f]));
+
+        const projects = projectsWithLeadNumbers.map((p) => {
+          const fin = p.leadNumber ? (finMap.get(p.leadNumber) ?? null) : null;
+          return {
+            ...p,
+            qbo: fin
+              ? {
+                  found: fin.found,
+                  estimatedAmount: fin.estimatedAmount,
+                  invoicedAmount: fin.invoicedAmount,
+                  paidAmount: fin.paidAmount,
+                  outstandingAmount: fin.outstandingAmount,
+                  paidPercentage: fin.paidPercentage,
+                  estimateVsInvoicedDelta: fin.estimateVsInvoicedDelta,
+                }
+              : null,
+          };
+        });
+
+        const totals = {
+          totalProjects: projects.length,
+          foundInQbo: projects.filter((p) => p.qbo?.found).length,
+          notFoundInQbo: projects.filter((p) => !p.qbo?.found).length,
+          totalEstimated: projects.reduce((s, p) => s + (p.qbo?.estimatedAmount ?? 0), 0),
+          totalInvoiced: projects.reduce((s, p) => s + (p.qbo?.invoicedAmount ?? 0), 0),
+          totalPaid: projects.reduce((s, p) => s + (p.qbo?.paidAmount ?? 0), 0),
+          totalOutstanding: projects.reduce((s, p) => s + (p.qbo?.outstandingAmount ?? 0), 0),
+          totalUnbilled: projects.reduce(
+            (s, p) => s + Math.max(0, p.qbo?.estimateVsInvoicedDelta ?? 0),
+            0,
+          ),
+        };
+
+        return { content: [{ type: 'text', text: JSON.stringify({ totals, projects }) }] };
       },
     );
   }

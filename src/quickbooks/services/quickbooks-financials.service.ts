@@ -68,6 +68,56 @@ export interface ProjectDetail {
   payments: Record<string, unknown>[];
 }
 
+export interface ExpenseItem {
+  expenseId: string;
+  txnDate: string;
+  vendorName: string;
+  totalAmount: number;
+  memo: string;
+  /** Cash | CreditCard | Check */
+  paymentType: string;
+  lines: Array<{ amount: number; description: string; accountName: string }>;
+}
+
+export interface AttachmentItem {
+  attachableId: string;
+  fileName: string;
+  fileSize: number | null;
+  contentType: string;
+  note: string;
+  txnDate: string;
+  downloadUrl: string | null;
+}
+
+export interface PnlCategory {
+  name: string;
+  amount: number;
+}
+
+export interface ProjectProfitAndLoss {
+  projectNumber: string;
+  found: boolean;
+  customerId: string | null;
+  income: { total: number; categories: PnlCategory[] };
+  costOfGoodsSold: { total: number; categories: PnlCategory[] };
+  expenses: { total: number; categories: PnlCategory[] };
+  grossProfit: number;
+  netProfit: number;
+}
+
+export interface ProjectFullProfile {
+  projectNumber: string;
+  found: boolean;
+  job: Record<string, unknown> | null;
+  financials: Omit<ProjectFinancials, 'projectNumber' | 'found'>;
+  estimates: Record<string, unknown>[];
+  invoices: Record<string, unknown>[];
+  payments: Record<string, unknown>[];
+  expenses: ExpenseItem[];
+  attachments: AttachmentItem[];
+  profitAndLoss: ProjectProfitAndLoss | null;
+}
+
 // ---------------------------------------------------------------------------
 // Internal QBO response shapes (minimal — only the fields we aggregate on)
 // ---------------------------------------------------------------------------
@@ -394,6 +444,153 @@ export class QuickbooksFinancialsService {
     };
   }
 
+  /** All vendor expenses (Purchases) charged against a project in QuickBooks. */
+  async getExpensesByProject(
+    projectNumber: string,
+    realmId?: string,
+  ): Promise<ExpenseItem[]> {
+    const effectiveRealmId = realmId ?? (await this.resolveDefaultRealmId());
+    const { jobId } = await this.resolveSingleJob(projectNumber, effectiveRealmId);
+    if (!jobId) return [];
+
+    const resp = (await this.apiService.query(
+      effectiveRealmId,
+      `SELECT * FROM Purchase WHERE CustomerRef IN ('${jobId}') STARTPOSITION 1 MAXRESULTS 1000`,
+    )) as { QueryResponse?: { Purchase?: Record<string, unknown>[] } };
+
+    return (resp?.QueryResponse?.Purchase ?? []).map((p) => this.mapExpense(p));
+  }
+
+  /** Files and documents attached to a QuickBooks project (job). */
+  async getAttachmentsByProject(
+    projectNumber: string,
+    realmId?: string,
+  ): Promise<AttachmentItem[]> {
+    const effectiveRealmId = realmId ?? (await this.resolveDefaultRealmId());
+    const { jobId } = await this.resolveSingleJob(projectNumber, effectiveRealmId);
+    if (!jobId) return [];
+
+    const resp = (await this.apiService.query(
+      effectiveRealmId,
+      `SELECT * FROM Attachable WHERE AttachableRef.EntityRef.Type = 'Customer' AND AttachableRef.EntityRef.Value = '${jobId}' STARTPOSITION 1 MAXRESULTS 100`,
+    )) as { QueryResponse?: { Attachable?: Record<string, unknown>[] } };
+
+    return (resp?.QueryResponse?.Attachable ?? []).map((a) => this.mapAttachment(a));
+  }
+
+  /** QuickBooks Profit & Loss report for a specific project, broken down by category. */
+  async getProjectProfitAndLoss(
+    projectNumber: string,
+    realmId?: string,
+  ): Promise<ProjectProfitAndLoss> {
+    const effectiveRealmId = realmId ?? (await this.resolveDefaultRealmId());
+    const { jobId } = await this.resolveSingleJob(projectNumber, effectiveRealmId);
+
+    if (!jobId) {
+      return {
+        projectNumber,
+        found: false,
+        customerId: null,
+        income: { total: 0, categories: [] },
+        costOfGoodsSold: { total: 0, categories: [] },
+        expenses: { total: 0, categories: [] },
+        grossProfit: 0,
+        netProfit: 0,
+      };
+    }
+
+    const report = (await this.apiService.report(
+      effectiveRealmId,
+      'ProfitAndLoss',
+      { customer: jobId },
+    )) as Record<string, unknown>;
+
+    return this.parseProfitAndLoss(projectNumber, jobId, report);
+  }
+
+  /**
+   * Complete QuickBooks data for a single project: job record, financial summary,
+   * all estimates, invoices, payments, expenses, attachments, and P&L report.
+   * Resolves the job once and fires all queries in parallel.
+   */
+  async getProjectFullProfile(
+    projectNumber: string,
+    realmId?: string,
+  ): Promise<ProjectFullProfile> {
+    const effectiveRealmId = realmId ?? (await this.resolveDefaultRealmId());
+    const { jobId, jobObject } = await this.resolveSingleJob(projectNumber, effectiveRealmId);
+
+    if (!jobId) {
+      return {
+        projectNumber,
+        found: false,
+        job: null,
+        financials: this.emptyDetail(projectNumber).financials,
+        estimates: [],
+        invoices: [],
+        payments: [],
+        expenses: [],
+        attachments: [],
+        profitAndLoss: null,
+      };
+    }
+
+    const { estimateQuery, invoiceQuery, paymentQuery } = this.buildTxnQueries([jobId], true);
+
+    const [estimatesResp, invoicesResp, paymentsResp, purchasesResp, attachablesResp, plReport] =
+      await Promise.all([
+        this.apiService.query(effectiveRealmId, estimateQuery) as Promise<QboEstimateResponse>,
+        this.apiService.query(effectiveRealmId, invoiceQuery) as Promise<QboInvoiceResponse>,
+        this.apiService.query(effectiveRealmId, paymentQuery!) as Promise<QboPaymentResponse>,
+        this.apiService.query(
+          effectiveRealmId,
+          `SELECT * FROM Purchase WHERE CustomerRef IN ('${jobId}') STARTPOSITION 1 MAXRESULTS 1000`,
+        ) as Promise<{ QueryResponse?: { Purchase?: Record<string, unknown>[] } }>,
+        this.apiService.query(
+          effectiveRealmId,
+          `SELECT * FROM Attachable WHERE AttachableRef.EntityRef.Type = 'Customer' AND AttachableRef.EntityRef.Value = '${jobId}' STARTPOSITION 1 MAXRESULTS 100`,
+        ) as Promise<{ QueryResponse?: { Attachable?: Record<string, unknown>[] } }>,
+        this.apiService.report(effectiveRealmId, 'ProfitAndLoss', { customer: jobId }),
+      ]);
+
+    const estimates = estimatesResp?.QueryResponse?.Estimate ?? [];
+    const invoices = invoicesResp?.QueryResponse?.Invoice ?? [];
+    const payments = paymentsResp?.QueryResponse?.Payment ?? [];
+    const purchases = purchasesResp?.QueryResponse?.Purchase ?? [];
+    const attachables = attachablesResp?.QueryResponse?.Attachable ?? [];
+
+    const estTotal = estimates.reduce((s, e) => s + (Number(e.TotalAmt) || 0), 0);
+    const invTotal = invoices.reduce((s, i) => s + (Number(i.TotalAmt) || 0), 0);
+    const outstanding = invoices.reduce((s, i) => s + (Number((i as QboInvoice).Balance) || 0), 0);
+    const paidAmount = invTotal - outstanding;
+
+    return {
+      projectNumber,
+      found: true,
+      job: jobObject,
+      financials: {
+        estimatedAmount: estTotal,
+        estimateCount: estimates.length,
+        invoicedAmount: invTotal,
+        invoiceCount: invoices.length,
+        paidAmount,
+        outstandingAmount: outstanding,
+        paidPercentage: invTotal > 0 ? Math.round((paidAmount / invTotal) * 10000) / 100 : 0,
+        estimateVsInvoicedDelta: estTotal - invTotal,
+      },
+      estimates: estimates as Record<string, unknown>[],
+      invoices: invoices as Record<string, unknown>[],
+      payments,
+      expenses: purchases.map((p) => this.mapExpense(p)),
+      attachments: attachables.map((a) => this.mapAttachment(a)),
+      profitAndLoss: this.parseProfitAndLoss(
+        projectNumber,
+        jobId,
+        plReport as Record<string, unknown>,
+      ),
+    };
+  }
+
   // ---------------------------------------------------------------------------
   // Shared private helpers
   // ---------------------------------------------------------------------------
@@ -612,5 +809,89 @@ export class QuickbooksFinancialsService {
       invoices: [],
       payments: [],
     };
+  }
+
+  private mapExpense(p: Record<string, unknown>): ExpenseItem {
+    const lines = ((p['Line'] as Record<string, unknown>[]) ?? [])
+      .filter((l) => l['DetailType'] === 'AccountBasedExpenseLineDetail')
+      .map((l) => {
+        const detail = (l['AccountBasedExpenseLineDetail'] as Record<string, unknown>) ?? {};
+        const account = (detail['AccountRef'] as Record<string, unknown>) ?? {};
+        return {
+          amount: Number(l['Amount']) || 0,
+          description: String(l['Description'] ?? ''),
+          accountName: String(account['name'] ?? ''),
+        };
+      });
+
+    const entityRef = (p['EntityRef'] as Record<string, unknown>) ?? {};
+    return {
+      expenseId: String(p['Id'] ?? ''),
+      txnDate: String(p['TxnDate'] ?? ''),
+      vendorName: String(entityRef['name'] ?? ''),
+      totalAmount: Number(p['TotalAmt']) || 0,
+      memo: String(p['PrivateNote'] ?? p['Memo'] ?? ''),
+      paymentType: String(p['PaymentType'] ?? ''),
+      lines,
+    };
+  }
+
+  private mapAttachment(a: Record<string, unknown>): AttachmentItem {
+    return {
+      attachableId: String(a['Id'] ?? ''),
+      fileName: String(a['FileName'] ?? ''),
+      fileSize: a['Size'] != null ? Number(a['Size']) : null,
+      contentType: String(a['ContentType'] ?? ''),
+      note: String(a['Note'] ?? ''),
+      txnDate: String(a['TxnDate'] ?? ''),
+      downloadUrl: a['TempDownloadUri'] ? String(a['TempDownloadUri']) : null,
+    };
+  }
+
+  private parseProfitAndLoss(
+    projectNumber: string,
+    customerId: string,
+    report: Record<string, unknown>,
+  ): ProjectProfitAndLoss {
+    const rows =
+      ((report['Rows'] as Record<string, unknown>)?.['Row'] as Record<string, unknown>[]) ?? [];
+
+    const result: ProjectProfitAndLoss = {
+      projectNumber,
+      found: true,
+      customerId,
+      income: { total: 0, categories: [] },
+      costOfGoodsSold: { total: 0, categories: [] },
+      expenses: { total: 0, categories: [] },
+      grossProfit: 0,
+      netProfit: 0,
+    };
+
+    for (const row of rows) {
+      const group = String(row['group'] ?? '');
+      const summary = row['Summary'] as Record<string, unknown>;
+      const summaryData = (summary?.['ColData'] as Record<string, unknown>[]) ?? [];
+      const totalVal = Number(summaryData[1]?.['value']) || 0;
+      const innerRows =
+        ((row['Rows'] as Record<string, unknown>)?.['Row'] as Record<string, unknown>[]) ?? [];
+
+      const categories: PnlCategory[] = innerRows
+        .filter((r) => r['type'] === 'Data')
+        .map((r) => {
+          const colData = (r['ColData'] as Record<string, unknown>[]) ?? [];
+          return {
+            name: String(colData[0]?.['value'] ?? ''),
+            amount: Number(colData[1]?.['value']) || 0,
+          };
+        });
+
+      if (group === 'Income') result.income = { total: totalVal, categories };
+      else if (group === 'COGS') result.costOfGoodsSold = { total: totalVal, categories };
+      else if (group === 'Expenses') result.expenses = { total: totalVal, categories };
+      else if (group === 'NetIncome') result.netProfit = totalVal;
+    }
+
+    result.grossProfit = result.income.total - result.costOfGoodsSold.total;
+    return result;
   }
 }
