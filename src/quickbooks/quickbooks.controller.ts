@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
   Logger,
   Param,
+  Post,
   Query,
   Res,
 } from '@nestjs/common';
@@ -12,6 +14,10 @@ import { randomBytes } from 'crypto';
 import type { Response } from 'express';
 import { QuickbooksApiService } from './services/quickbooks-api.service';
 import { QuickbooksAuthService } from './services/quickbooks-auth.service';
+import {
+  ProjectFinancials,
+  QuickbooksFinancialsService,
+} from './services/quickbooks-financials.service';
 
 /** OAuth state tokens expire after this many milliseconds (10 minutes). */
 const STATE_TTL_MS = 10 * 60 * 1000;
@@ -30,6 +36,7 @@ export class QuickbooksController {
   constructor(
     private readonly authService: QuickbooksAuthService,
     private readonly apiService: QuickbooksApiService,
+    private readonly financialsService: QuickbooksFinancialsService,
   ) {}
 
   /**
@@ -117,6 +124,32 @@ export class QuickbooksController {
       connected: true,
       companyName: info?.CompanyInfo?.CompanyName,
     };
+  }
+
+  /**
+   * Migrated from n8n "QuickBooks Job Financials - FAST v3".
+   * Accepts one or more project numbers and returns aggregated financials
+   * (estimated, invoiced, paid, outstanding) per project.
+   *
+   * Body: { projectNumbers: string[] } or { projectNumber: string }
+   */
+  @Post('job-financials')
+  @ApiOperation({ summary: 'Get aggregated financial summary for one or more projects' })
+  async jobFinancials(
+    @Body() body: { projectNumbers?: string | string[]; projectNumber?: string },
+    @Query('realmId') realmId?: string,
+  ): Promise<ProjectFinancials[]> {
+    const raw = body.projectNumbers ?? body.projectNumber ?? [];
+    const projectNumbers = Array.isArray(raw) ? raw : [raw];
+    const cleaned = projectNumbers.map((p) => String(p).trim()).filter(Boolean);
+
+    if (!cleaned.length) {
+      throw new BadRequestException(
+        'Provide at least one project number in projectNumbers or projectNumber',
+      );
+    }
+
+    return this.financialsService.getProjectFinancials(cleaned, realmId);
   }
 
   // ---------------------------------------------------------------------------

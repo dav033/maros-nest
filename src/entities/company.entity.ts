@@ -44,6 +44,29 @@ export class Company {
   @Column({ length: 255, nullable: true })
   submiz?: string;
 
+  @Column({ name: 'qbo_vendor_id', length: 64, nullable: true })
+  qboVendorId?: string;
+
+  @Column({ name: 'qbo_vendor_name', length: 255, nullable: true })
+  qboVendorName?: string;
+
+  @Column({
+    name: 'qbo_vendor_match_confidence',
+    type: 'double precision',
+    nullable: true,
+  })
+  qboVendorMatchConfidence?: number;
+
+  @Column({ name: 'qbo_vendor_matched_at', type: 'timestamptz', nullable: true })
+  qboVendorMatchedAt?: Date;
+
+  @Column({
+    name: 'qbo_vendor_last_synced_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  qboVendorLastSyncedAt?: Date;
+
   @OneToMany(() => Contact, (contact) => contact.company)
   contacts: Contact[];
 }

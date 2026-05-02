@@ -45,7 +45,9 @@ export class LeadToClickUpMapper {
         try {
             const [year, month, day] = dto.startDate.split('-');
             fecha = `${day}/${month}/${year}`;
-        } catch (e) {}
+      } catch {
+        fecha = dto.startDate;
+      }
     }
 
     const contacto = dto.contactId 
@@ -99,7 +101,7 @@ export class LeadToClickUpMapper {
     try {
       const date = new Date(dateString);
       return date.getTime();
-    } catch (e) {
+    } catch {
       return null;
     }
   }

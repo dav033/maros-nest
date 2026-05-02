@@ -18,6 +18,11 @@ export class CompanyMapper {
     entity.phone = dto.phone;
     entity.email = dto.email;
     entity.submiz = dto.submiz;
+    entity.qboVendorId = dto.qboVendorId;
+    entity.qboVendorName = dto.qboVendorName;
+    entity.qboVendorMatchConfidence = dto.qboVendorMatchConfidence;
+    entity.qboVendorMatchedAt = this.toOptionalDate(dto.qboVendorMatchedAt);
+    entity.qboVendorLastSyncedAt = this.toOptionalDate(dto.qboVendorLastSyncedAt);
     return entity;
   }
 
@@ -38,6 +43,17 @@ export class CompanyMapper {
     if (dto.phone !== undefined) entity.phone = dto.phone;
     if (dto.email !== undefined) entity.email = dto.email;
     if (dto.submiz !== undefined) entity.submiz = dto.submiz;
+    if (dto.qboVendorId !== undefined) entity.qboVendorId = dto.qboVendorId;
+    if (dto.qboVendorName !== undefined) entity.qboVendorName = dto.qboVendorName;
+    if (dto.qboVendorMatchConfidence !== undefined) {
+      entity.qboVendorMatchConfidence = dto.qboVendorMatchConfidence;
+    }
+    if (dto.qboVendorMatchedAt !== undefined) {
+      entity.qboVendorMatchedAt = this.toOptionalDate(dto.qboVendorMatchedAt);
+    }
+    if (dto.qboVendorLastSyncedAt !== undefined) {
+      entity.qboVendorLastSyncedAt = this.toOptionalDate(dto.qboVendorLastSyncedAt);
+    }
   }
 
   toDto(entity: Company): any {
@@ -55,6 +71,15 @@ export class CompanyMapper {
       phone: entity.phone,
       email: entity.email,
       submiz: entity.submiz,
+      qboVendorId: entity.qboVendorId,
+      qboVendorName: entity.qboVendorName,
+      qboVendorMatchConfidence: entity.qboVendorMatchConfidence,
+      qboVendorMatchedAt: entity.qboVendorMatchedAt,
+      qboVendorLastSyncedAt: entity.qboVendorLastSyncedAt,
     };
+  }
+
+  private toOptionalDate(value: string | undefined): Date | undefined {
+    return value ? new Date(value) : undefined;
   }
 }

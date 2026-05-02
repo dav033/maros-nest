@@ -3,6 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import axios, { AxiosError, AxiosInstance } from 'axios';
 import { QuickbooksAuthService } from './quickbooks-auth.service';
 
+export interface QueryAllOptions {
+  where?: string;
+  orderBy?: string;
+}
+
 @Injectable()
 export class QuickbooksApiService {
   private readonly logger = new Logger(QuickbooksApiService.name);
@@ -19,16 +24,12 @@ export class QuickbooksApiService {
   }
 
   // ---------------------------------------------------------------------------
-  // Public API methods
+  // Public API methods (existing — kept for backwards compatibility)
   // ---------------------------------------------------------------------------
 
-  /** Runs a QBO SQL-like query (SELECT statements only). */
+  /** Runs a QBO SQL-like query via GET (SELECT statements only). */
   async query(realmId: string, sqlLikeQuery: string): Promise<unknown> {
-    return this.withRetry(realmId, (client) =>
-      client
-        .get<unknown>('/query', { params: { query: sqlLikeQuery } })
-        .then((r) => r.data),
-    );
+    return this.queryRawGet(realmId, sqlLikeQuery);
   }
 
   /** Fetches a single Customer by ID. */
@@ -81,22 +82,127 @@ export class QuickbooksApiService {
     params: Record<string, string | number | undefined> = {},
   ): Promise<unknown> {
     return this.withRetry(realmId, (client) =>
-      client.get<unknown>(`/reports/${reportName}`, { params }).then((r) => r.data),
+      client
+        .get<unknown>(`/reports/${reportName}`, { params })
+        .then((r) => r.data),
+    );
+  }
+
+  /** Runs a raw QBO query via POST. Alias kept for backwards compatibility. */
+  async queryPost(realmId: string, sqlLikeQuery: string): Promise<unknown> {
+    return this.queryRawPost(realmId, sqlLikeQuery);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Safe query helpers
+  // ---------------------------------------------------------------------------
+
+  /** Runs a QBO SQL-like query via GET. Prefer for short queries. */
+  async queryRawGet(realmId: string, sqlLikeQuery: string): Promise<unknown> {
+    return this.withRetry(realmId, (client) =>
+      client
+        .get<unknown>('/query', { params: { query: sqlLikeQuery } })
+        .then((r) => r.data),
     );
   }
 
   /**
-   * Runs a raw QBO query via POST (required when the query string is too long
-   * for a GET query param, e.g. large IN lists).
+   * Runs a QBO query via POST with content-type application/text as required
+   * by the QBO API spec. Use for queries too long to fit in a GET URL.
    */
-  async queryPost(realmId: string, sqlLikeQuery: string): Promise<unknown> {
+  async queryRawPost(realmId: string, sqlLikeQuery: string): Promise<unknown> {
     return this.withRetry(realmId, (client) =>
       client
         .post<unknown>('/query', sqlLikeQuery, {
-          headers: { 'Content-Type': 'text/plain' },
+          headers: { 'Content-Type': 'application/text' },
         })
         .then((r) => r.data),
     );
+  }
+
+  /**
+   * Fetches ALL records of a QBO entity with automatic pagination.
+   * Iterates STARTPOSITION in steps of 1000 until a partial page is returned.
+   * Always uses SELECT * — field trimming must be done in TypeScript.
+   */
+  async queryAll(
+    realmId: string,
+    entityName: string,
+    options: QueryAllOptions = {},
+  ): Promise<unknown[]> {
+    const where = options.where ? ` WHERE ${options.where}` : '';
+    const orderBy = options.orderBy ? ` ORDERBY ${options.orderBy}` : '';
+    const pageSize = 1000;
+    const results: unknown[] = [];
+    let position = 1;
+
+    while (true) {
+      const q = `SELECT * FROM ${entityName}${where}${orderBy} STARTPOSITION ${position} MAXRESULTS ${pageSize}`;
+      const resp = await this.queryRawGet(realmId, q);
+      const page = this.getQueryResponseArray(resp, entityName);
+
+      results.push(...page);
+
+      if (page.length < pageSize) break;
+      position += pageSize;
+    }
+
+    return results;
+  }
+
+  /**
+   * Returns the total record count for an entity (with optional WHERE clause).
+   * Uses SELECT COUNT(*) which QBO supports natively.
+   */
+  async count(
+    realmId: string,
+    entityName: string,
+    where?: string,
+  ): Promise<number> {
+    const whereClause = where ? ` WHERE ${where}` : '';
+    const q = `SELECT COUNT(*) FROM ${entityName}${whereClause}`;
+    const resp = (await this.queryRawGet(realmId, q)) as {
+      QueryResponse?: { totalCount?: number };
+    };
+    return resp?.QueryResponse?.totalCount ?? 0;
+  }
+
+  /**
+   * Extracts the entity array from a raw QBO QueryResponse object.
+   * QBO wraps result arrays under QueryResponse.<PascalCaseEntityName>.
+   */
+  getQueryResponseArray(response: unknown, entityName: string): unknown[] {
+    const qr = (response as Record<string, unknown>)?.['QueryResponse'] as
+      | Record<string, unknown>
+      | undefined;
+    if (!qr) return [];
+    const key = entityName.charAt(0).toUpperCase() + entityName.slice(1);
+    const arr = qr[key];
+    return Array.isArray(arr) ? arr : [];
+  }
+
+  /** Escapes a string value for safe use inside a QBO WHERE clause literal. */
+  escapeQboString(value: string): string {
+    return value.replace(/'/g, "''");
+  }
+
+  /** Extracts a named entity object from a raw QBO API response envelope. */
+  unwrapQboEntity(response: unknown, entityName: string): Record<string, unknown> {
+    const payload = response as Record<string, unknown>;
+    const entity = payload?.[entityName];
+    return entity !== null && typeof entity === 'object' && !Array.isArray(entity)
+      ? (entity as Record<string, unknown>)
+      : {};
+  }
+
+  /** Builds a `{ where }` option for `queryAll` from optional date range params. */
+  buildDateWhereClause(params: { startDate?: string; endDate?: string }): { where?: string } {
+    const filters: string[] = [];
+    if (params.startDate)
+      filters.push(`TxnDate >= '${this.escapeQboString(params.startDate)}'`);
+    if (params.endDate)
+      filters.push(`TxnDate <= '${this.escapeQboString(params.endDate)}'`);
+    return filters.length ? { where: filters.join(' AND ') } : {};
   }
 
   // ---------------------------------------------------------------------------

@@ -1,4 +1,17 @@
-import { IsString, IsNotEmpty, MaxLength, IsOptional, IsEnum, IsBoolean, IsNumber, IsArray, ValidateIf } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsDateString,
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 import { CompanyType } from '../../../common/enums/company-type.enum';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -65,4 +78,33 @@ export class CreateCompanyDto {
   @IsOptional()
   @MaxLength(255)
   submiz?: string;
+
+  @ApiPropertyOptional({ description: 'Linked QuickBooks vendor ID', maxLength: 64 })
+  @IsString()
+  @IsOptional()
+  @MaxLength(64)
+  qboVendorId?: string;
+
+  @ApiPropertyOptional({ description: 'Linked QuickBooks vendor display name', maxLength: 255 })
+  @IsString()
+  @IsOptional()
+  @MaxLength(255)
+  qboVendorName?: string;
+
+  @ApiPropertyOptional({ description: 'QuickBooks vendor match confidence from 0 to 1' })
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @IsOptional()
+  qboVendorMatchConfidence?: number;
+
+  @ApiPropertyOptional({ description: 'Timestamp when the QuickBooks vendor match was made' })
+  @IsDateString()
+  @IsOptional()
+  qboVendorMatchedAt?: string;
+
+  @ApiPropertyOptional({ description: 'Timestamp when the QuickBooks vendor match was last synced' })
+  @IsDateString()
+  @IsOptional()
+  qboVendorLastSyncedAt?: string;
 }

@@ -31,18 +31,18 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     } else if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
-      
+
       if (typeof exceptionResponse === 'object') {
         message = (exceptionResponse as any).message || exception.message;
         errors = (exceptionResponse as any).errors;
       } else {
-        message = exceptionResponse as string;
+        message = exceptionResponse;
       }
     } else if (exception instanceof QueryFailedError) {
       status = HttpStatus.BAD_REQUEST;
       message = 'Database query failed';
       code = 'DATABASE_ERROR';
-      
+
       // Log the actual database error for debugging
       this.logger.error('Database error:', exception);
     } else if (exception instanceof Error) {

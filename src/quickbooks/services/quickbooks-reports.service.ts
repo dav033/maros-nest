@@ -98,6 +98,250 @@ export interface ClientRevenueItem {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 5 — report types
+// ---------------------------------------------------------------------------
+
+export interface ReportParams {
+  realmId?: string;
+  startDate: string;
+  endDate: string;
+  customerId?: string;
+  vendorId?: string;
+  accountingMethod?: 'Cash' | 'Accrual';
+  summarizeColumnBy?: string;
+  includeRaw?: boolean;
+}
+
+export interface DateChunk {
+  start: string;
+  end: string;
+}
+
+export interface ReportCoverage {
+  start: string;
+  end: string;
+  dateChunks: DateChunk[];
+}
+
+export interface ReportRow {
+  reportName: string;
+  section: string;
+  group: string;
+  label: string;
+  columns: Record<string, string>;
+  amount: number;
+  entityId?: string;
+  depth: number;
+  path: string[];
+}
+
+export interface ParsedReport {
+  reportName: string;
+  rows: ReportRow[];
+  summary: Record<string, number>;
+  coverage: ReportCoverage;
+  raw?: unknown;
+}
+
+export interface ProjectReportBundle {
+  customerId?: string;
+  profitAndLoss: ParsedReport;
+  profitAndLossDetail: ParsedReport;
+  vendorExpenses: ParsedReport;
+  agedPayables: ParsedReport;
+  vendorBalanceDetail: ParsedReport;
+  generalLedgerDetail?: ParsedReport;
+  warnings: string[];
+  coverage: ReportCoverage;
+}
+
+// ---------------------------------------------------------------------------
+// Standalone utility functions (exported for testability)
+// ---------------------------------------------------------------------------
+
+/**
+ * Splits a date range into chunks of at most 6 months each.
+ * Returns the original single chunk when the range is ≤ 6 months.
+ */
+export function splitDateRange(start: string, end: string): DateChunk[] {
+  const startMs = Date.parse(`${start}T00:00:00Z`);
+  const endMs = Date.parse(`${end}T00:00:00Z`);
+  if (isNaN(startMs) || isNaN(endMs) || endMs < startMs) return [];
+
+  const chunks: DateChunk[] = [];
+  let chunkStart = new Date(startMs);
+  const endDate = new Date(endMs);
+
+  while (chunkStart <= endDate) {
+    const chunkEnd = new Date(chunkStart);
+    chunkEnd.setUTCMonth(chunkEnd.getUTCMonth() + 6);
+    chunkEnd.setUTCDate(chunkEnd.getUTCDate() - 1);
+
+    const actualEnd = chunkEnd <= endDate ? chunkEnd : endDate;
+    chunks.push({
+      start: chunkStart.toISOString().slice(0, 10),
+      end: actualEnd.toISOString().slice(0, 10),
+    });
+
+    chunkStart = new Date(actualEnd);
+    chunkStart.setUTCDate(chunkStart.getUTCDate() + 1);
+  }
+
+  return chunks;
+}
+
+/** Extracts ordered column titles from a raw QBO report object. */
+export function extractColumnTitles(rawReport: unknown): string[] {
+  const report = rawReport as Record<string, unknown>;
+  const cols = (report?.['Columns'] as Record<string, unknown>)?.['Column'];
+  if (!Array.isArray(cols)) return [];
+  return (cols as Record<string, unknown>[]).map((c) =>
+    String(c?.['ColTitle'] ?? ''),
+  );
+}
+
+/**
+ * Parses a raw QBO report response into flat rows.
+ * Recurses into Section rows, preserving section / group / depth / path context.
+ */
+export function parseQboReportRows(
+  reportName: string,
+  rawReport: unknown,
+): ReportRow[] {
+  const report = rawReport as Record<string, unknown>;
+  const columnTitles = extractColumnTitles(rawReport);
+  const topRows =
+    ((report?.['Rows'] as Record<string, unknown>)?.['Row'] as unknown[]) ?? [];
+  const output: ReportRow[] = [];
+  walkQboRows(reportName, topRows, columnTitles, output, '', '', 0, []);
+  return output;
+}
+
+function walkQboRows(
+  reportName: string,
+  rows: unknown[],
+  columnTitles: string[],
+  output: ReportRow[],
+  currentSection: string,
+  currentGroup: string,
+  depth: number,
+  path: string[],
+): void {
+  for (const rawRow of rows) {
+    const row = rawRow as Record<string, unknown>;
+    const rowType = String(row['type'] ?? '');
+    const rowGroup = String(row['group'] ?? '') || currentGroup;
+
+    if (rowType === 'Section') {
+      const header = row['Header'] as Record<string, unknown> | undefined;
+      const headerData =
+        (header?.['ColData'] as Record<string, unknown>[]) ?? [];
+      const sectionLabel = String(headerData[0]?.['value'] ?? '');
+      const newSection = sectionLabel || currentSection;
+      const newPath = sectionLabel ? [...path, sectionLabel] : [...path];
+
+      const nested =
+        ((row['Rows'] as Record<string, unknown>)?.['Row'] as unknown[]) ?? [];
+      walkQboRows(
+        reportName,
+        nested,
+        columnTitles,
+        output,
+        newSection,
+        rowGroup,
+        depth + 1,
+        newPath,
+      );
+
+      const summaryRaw = row['Summary'] as Record<string, unknown> | undefined;
+      if (summaryRaw) {
+        const colData =
+          (summaryRaw['ColData'] as Record<string, unknown>[]) ?? [];
+        if (colData.length) {
+          output.push(
+            buildQboRow(
+              reportName,
+              colData,
+              columnTitles,
+              newSection,
+              rowGroup,
+              depth,
+              path,
+            ),
+          );
+        }
+      }
+    } else {
+      const colData = (row['ColData'] as Record<string, unknown>[]) ?? [];
+      if (colData.length) {
+        output.push(
+          buildQboRow(
+            reportName,
+            colData,
+            columnTitles,
+            currentSection,
+            currentGroup,
+            depth,
+            path,
+          ),
+        );
+      }
+    }
+  }
+}
+
+function buildQboRow(
+  reportName: string,
+  colData: Record<string, unknown>[],
+  columnTitles: string[],
+  section: string,
+  group: string,
+  depth: number,
+  path: string[],
+): ReportRow {
+  const first = colData[0] ?? {};
+  const label = String(first['value'] ?? '');
+  const entityIdRaw = String(first['id'] ?? '');
+
+  const columns: Record<string, string> = {};
+  let amount = 0;
+
+  for (let i = 0; i < colData.length; i++) {
+    const val = String(colData[i]?.['value'] ?? '');
+    const title = columnTitles[i] || (i === 0 ? 'label' : `col_${i}`);
+    columns[title] = val;
+    if (i > 0) {
+      const n = parseFloat(val.replace(/,/g, ''));
+      if (!isNaN(n)) amount = n;
+    }
+  }
+
+  const row: ReportRow = {
+    reportName,
+    section,
+    group,
+    label,
+    columns,
+    amount,
+    depth,
+    path: [...path],
+  };
+  if (entityIdRaw) row.entityId = entityIdRaw;
+  return row;
+}
+
+/** Builds a summary map from flat rows: sums amount per "section:label" key. */
+export function buildReportSummary(rows: ReportRow[]): Record<string, number> {
+  const summary: Record<string, number> = {};
+  for (const row of rows) {
+    if (!row.label) continue;
+    const key = row.section ? `${row.section}:${row.label}` : row.label;
+    summary[key] = (summary[key] ?? 0) + row.amount;
+  }
+  return summary;
+}
+
+// ---------------------------------------------------------------------------
 // Internal QBO types
 // ---------------------------------------------------------------------------
 
@@ -242,7 +486,7 @@ export class QuickbooksReportsService {
       this.buildJobIndex(rid),
       this.apiService.query(
         rid,
-        `SELECT Id, TotalAmt, Balance, TxnDate, DocNumber, CustomerRef FROM Invoice WHERE Balance > '0' STARTPOSITION 1 MAXRESULTS 1000`,
+        `SELECT * FROM Invoice WHERE Balance > '0' STARTPOSITION 1 MAXRESULTS 1000`,
       ) as Promise<QboInvoiceResponse>,
     ]);
 
@@ -262,7 +506,7 @@ export class QuickbooksReportsService {
       byJob[jobId].outstanding += Number(inv.Balance) || 0;
       byJob[jobId].count += 1;
       const txnDate = inv.TxnDate ?? null;
-      if (txnDate && (!byJob[jobId].oldest || txnDate < byJob[jobId].oldest!)) {
+      if (txnDate && (!byJob[jobId].oldest || txnDate < byJob[jobId].oldest)) {
         byJob[jobId].oldest = txnDate;
       }
     }
@@ -284,10 +528,8 @@ export class QuickbooksReportsService {
    * All QBO jobs that have more estimated than invoiced value — i.e., work
    * that has been quoted/contracted but not yet billed.
    */
-  async getUnbilledCompletedWork(
-    realmId?: string,
-  ): Promise<BacklogItem[]> {
-    return (await this.getBacklog(realmId)).filter((b) => b.backlogAmount > 0);
+  async getUnbilledCompletedWork(realmId?: string): Promise<BacklogItem[]> {
+    return this.getBacklog(realmId);
   }
 
   /**
@@ -326,11 +568,11 @@ export class QuickbooksReportsService {
       this.buildJobIndex(rid),
       this.apiService.query(
         rid,
-        `SELECT Id, TotalAmt, CustomerRef FROM Estimate STARTPOSITION 1 MAXRESULTS 1000`,
+        `SELECT * FROM Estimate STARTPOSITION 1 MAXRESULTS 1000`,
       ) as Promise<QboEstimateResponse>,
       this.apiService.query(
         rid,
-        `SELECT Id, TotalAmt, CustomerRef FROM Invoice STARTPOSITION 1 MAXRESULTS 1000`,
+        `SELECT * FROM Invoice STARTPOSITION 1 MAXRESULTS 1000`,
       ) as Promise<QboInvoiceResponse>,
     ]);
 
@@ -393,11 +635,11 @@ export class QuickbooksReportsService {
       this.buildJobIndex(rid),
       this.apiService.query(
         rid,
-        `SELECT Id, TotalAmt, CustomerRef FROM Estimate STARTPOSITION 1 MAXRESULTS 1000`,
+        `SELECT * FROM Estimate STARTPOSITION 1 MAXRESULTS 1000`,
       ) as Promise<QboEstimateResponse>,
       this.apiService.query(
         rid,
-        `SELECT Id, TotalAmt, Balance, CustomerRef FROM Invoice STARTPOSITION 1 MAXRESULTS 1000`,
+        `SELECT * FROM Invoice STARTPOSITION 1 MAXRESULTS 1000`,
       ) as Promise<QboInvoiceResponse>,
     ]);
 
@@ -470,7 +712,7 @@ export class QuickbooksReportsService {
       this.buildJobIndex(rid),
       this.apiService.query(
         rid,
-        `SELECT Id, TotalAmt, Balance, CustomerRef FROM Invoice STARTPOSITION 1 MAXRESULTS 1000`,
+        `SELECT * FROM Invoice STARTPOSITION 1 MAXRESULTS 1000`,
       ) as Promise<QboInvoiceResponse>,
     ]);
 
@@ -518,7 +760,7 @@ export class QuickbooksReportsService {
   private async buildJobIndex(realmId: string): Promise<JobIndex> {
     const resp = (await this.apiService.query(
       realmId,
-      `SELECT Id, DisplayName FROM Customer WHERE Job = true STARTPOSITION 1 MAXRESULTS 1000`,
+      `SELECT * FROM Customer WHERE Job = true STARTPOSITION 1 MAXRESULTS 1000`,
     )) as QboCustomerResponse;
 
     const customers = resp?.QueryResponse?.Customer ?? [];
@@ -547,5 +789,259 @@ export class QuickbooksReportsService {
     if (!ref) return '';
     if (typeof ref === 'object' && 'name' in ref) return String(ref.name ?? '');
     return '';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 5: QBO financial report methods
+  // ---------------------------------------------------------------------------
+
+  async getProfitAndLossDetail(params: ReportParams): Promise<ParsedReport> {
+    const rid = params.realmId ?? (await this.resolveDefaultRealmId());
+    return this.fetchAndParseReport(rid, 'ProfitAndLossDetail', params, {
+      accounting_method: params.accountingMethod,
+      ...(params.customerId && { customer: params.customerId }),
+      ...(params.summarizeColumnBy && {
+        summarize_column_by: params.summarizeColumnBy,
+      }),
+    }, true);
+  }
+
+  async getCashFlow(params: ReportParams): Promise<ParsedReport> {
+    const rid = params.realmId ?? (await this.resolveDefaultRealmId());
+    return this.fetchAndParseReport(rid, 'CashFlow', params, {
+      accounting_method: params.accountingMethod,
+      ...(params.summarizeColumnBy && {
+        summarize_column_by: params.summarizeColumnBy,
+      }),
+    }, true);
+  }
+
+  async getVendorExpenses(params: ReportParams): Promise<ParsedReport> {
+    const rid = params.realmId ?? (await this.resolveDefaultRealmId());
+    return this.fetchAndParseReport(rid, 'VendorExpenses', params, {
+      accounting_method: params.accountingMethod,
+      ...(params.vendorId && { vendor: params.vendorId }),
+    }, true);
+  }
+
+  async getVendorBalance(params: ReportParams): Promise<ParsedReport> {
+    const rid = params.realmId ?? (await this.resolveDefaultRealmId());
+    return this.fetchAndParseReport(rid, 'VendorBalance', params, {
+      ...(params.vendorId && { vendor: params.vendorId }),
+    }, false);
+  }
+
+  async getVendorBalanceDetail(params: ReportParams): Promise<ParsedReport> {
+    const rid = params.realmId ?? (await this.resolveDefaultRealmId());
+    return this.fetchAndParseReport(rid, 'VendorBalanceDetail', params, {
+      accounting_method: params.accountingMethod,
+      ...(params.vendorId && { vendor: params.vendorId }),
+    }, true);
+  }
+
+  async getAgedPayables(params: ReportParams): Promise<ParsedReport> {
+    const rid = params.realmId ?? (await this.resolveDefaultRealmId());
+    return this.fetchAndParseReport(rid, 'AgedPayables', params, {
+      ...(params.vendorId && { vendor: params.vendorId }),
+    }, false);
+  }
+
+  async getAgedPayableDetail(params: ReportParams): Promise<ParsedReport> {
+    const rid = params.realmId ?? (await this.resolveDefaultRealmId());
+    return this.fetchAndParseReport(rid, 'AgedPayableDetail', params, {
+      ...(params.vendorId && { vendor: params.vendorId }),
+    }, false);
+  }
+
+  async getGeneralLedgerDetail(params: ReportParams): Promise<ParsedReport> {
+    const rid = params.realmId ?? (await this.resolveDefaultRealmId());
+    return this.fetchAndParseReport(rid, 'GeneralLedger', params, {
+      accounting_method: params.accountingMethod,
+      ...(params.customerId && { customer: params.customerId }),
+      ...(params.vendorId && { vendor: params.vendorId }),
+    }, true);
+  }
+
+  /**
+   * Fetches and returns a bundle of QBO report data relevant to a project:
+   * P&L summary, P&L detail, vendor expenses, aged payables, vendor balance
+   * detail, and optionally the general ledger. All reports are fetched in
+   * parallel with automatic date-range splitting applied to each.
+   */
+  async getProjectReportBundle(
+    params: ReportParams,
+  ): Promise<ProjectReportBundle> {
+    const rid = params.realmId ?? (await this.resolveDefaultRealmId());
+    const p: ReportParams = { ...params, realmId: rid };
+    const warnings: string[] = [];
+
+    const safe = async <T>(
+      fn: () => Promise<T>,
+      name: string,
+      fallback: T,
+    ): Promise<T> => {
+      try {
+        return await fn();
+      } catch (e) {
+        warnings.push(`${name}: ${(e as Error).message}`);
+        return fallback;
+      }
+    };
+
+    const plQbo: Record<string, string | undefined> = {
+      accounting_method: p.accountingMethod,
+      ...(p.customerId && { customer: p.customerId }),
+      ...(p.summarizeColumnBy && { summarize_column_by: p.summarizeColumnBy }),
+    };
+    const vendorQbo: Record<string, string | undefined> = {
+      accounting_method: p.accountingMethod,
+      ...(p.vendorId && { vendor: p.vendorId }),
+    };
+    const apQbo: Record<string, string | undefined> = p.vendorId
+      ? { vendor: p.vendorId }
+      : {};
+
+    const [
+      profitAndLoss,
+      profitAndLossDetail,
+      vendorExpenses,
+      agedPayables,
+      vendorBalanceDetail,
+    ] = await Promise.all([
+      safe(
+        () => this.fetchAndParseReport(rid, 'ProfitAndLoss', p, plQbo, true),
+        'ProfitAndLoss',
+        this.emptyParsedReport('ProfitAndLoss', p),
+      ),
+      safe(
+        () =>
+          this.fetchAndParseReport(rid, 'ProfitAndLossDetail', p, plQbo, true),
+        'ProfitAndLossDetail',
+        this.emptyParsedReport('ProfitAndLossDetail', p),
+      ),
+      safe(
+        () =>
+          this.fetchAndParseReport(rid, 'VendorExpenses', p, vendorQbo, true),
+        'VendorExpenses',
+        this.emptyParsedReport('VendorExpenses', p),
+      ),
+      safe(
+        () => this.fetchAndParseReport(rid, 'AgedPayables', p, apQbo, false),
+        'AgedPayables',
+        this.emptyParsedReport('AgedPayables', p),
+      ),
+      safe(
+        () =>
+          this.fetchAndParseReport(
+            rid,
+            'VendorBalanceDetail',
+            p,
+            vendorQbo,
+            true,
+          ),
+        'VendorBalanceDetail',
+        this.emptyParsedReport('VendorBalanceDetail', p),
+      ),
+    ]);
+
+    return {
+      customerId: p.customerId,
+      profitAndLoss,
+      profitAndLossDetail,
+      vendorExpenses,
+      agedPayables,
+      vendorBalanceDetail,
+      warnings,
+      coverage: this.buildCoverage(p),
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 5 private helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Core fetcher for QBO financial reports.
+   * When supportsDateRange is true, the date range is split into 6-month
+   * chunks and results are combined into a single ParsedReport.
+   * When false (point-in-time reports like AgedPayables), the endDate is
+   * passed as report_date and no splitting is performed.
+   */
+  private async fetchAndParseReport(
+    rid: string,
+    qboReportName: string,
+    params: ReportParams,
+    qboParams: Record<string, string | number | undefined>,
+    supportsDateRange: boolean,
+  ): Promise<ParsedReport> {
+    const coverage = this.buildCoverage(params);
+    const include = params.includeRaw === true;
+    const cleaned = this.cleanQboParams(qboParams);
+
+    if (!supportsDateRange) {
+      const raw = await this.apiService.report(rid, qboReportName, {
+        report_date: params.endDate,
+        ...cleaned,
+      });
+      const rows = parseQboReportRows(qboReportName, raw);
+      return {
+        reportName: qboReportName,
+        rows,
+        summary: buildReportSummary(rows),
+        coverage,
+        ...(include ? { raw } : {}),
+      };
+    }
+
+    const allRows: ReportRow[] = [];
+    const rawChunks: unknown[] = [];
+
+    for (const chunk of coverage.dateChunks) {
+      const raw = await this.apiService.report(rid, qboReportName, {
+        start_date: chunk.start,
+        end_date: chunk.end,
+        ...cleaned,
+      });
+      allRows.push(...parseQboReportRows(qboReportName, raw));
+      if (include) rawChunks.push(raw);
+    }
+
+    return {
+      reportName: qboReportName,
+      rows: allRows,
+      summary: buildReportSummary(allRows),
+      coverage,
+      ...(include
+        ? { raw: rawChunks.length === 1 ? rawChunks[0] : rawChunks }
+        : {}),
+    };
+  }
+
+  private cleanQboParams(
+    params: Record<string, string | number | undefined>,
+  ): Record<string, string | number> {
+    return Object.fromEntries(
+      Object.entries(params).filter(([, v]) => v !== undefined),
+    ) as Record<string, string | number>;
+  }
+
+  private buildCoverage(params: ReportParams): ReportCoverage {
+    return {
+      start: params.startDate,
+      end: params.endDate,
+      dateChunks: splitDateRange(params.startDate, params.endDate),
+    };
+  }
+
+  private emptyParsedReport(
+    reportName: string,
+    params: ReportParams,
+  ): ParsedReport {
+    return {
+      reportName,
+      rows: [],
+      summary: {},
+      coverage: this.buildCoverage(params),
+    };
   }
 }
