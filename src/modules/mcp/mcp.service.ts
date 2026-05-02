@@ -1032,24 +1032,6 @@ export class McpService {
     );
 
     server.tool(
-      'get_project_profit_and_loss',
-      'QuickBooks Profit & Loss report for a specific project. ' +
-        'Breaks down Income, Cost of Goods Sold (by category: materials, subcontractors, etc.), ' +
-        'and Expenses, and returns gross profit and net profit.',
-      {
-        projectNumber: z.string().describe('Project number, e.g. "001-0924"'),
-        realmId: realmIdParam,
-      },
-      async ({ projectNumber, realmId }) => {
-        const data = await this.qboFinancials.getProjectProfitAndLoss(
-          projectNumber,
-          realmId,
-        );
-        return { content: [{ type: 'text', text: JSON.stringify(data) }] };
-      },
-    );
-
-    server.tool(
       'get_project_full_profile',
       'Complete QuickBooks data for a single project in one call: ' +
         'QBO job record, aggregated financial summary, normalized estimates with line items, ' +
