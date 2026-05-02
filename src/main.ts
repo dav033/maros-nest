@@ -6,6 +6,29 @@ import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 
+function parseCorsOrigins(value: string): string[] {
+  return value
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+function isAllowedCorsOrigin(
+  origin: string,
+  configuredOrigins: string[],
+): boolean {
+  if (configuredOrigins.includes('*')) return true;
+  if (configuredOrigins.includes(origin)) return true;
+
+  return [
+    /^https?:\/\/localhost(?::\d+)?$/,
+    /^https?:\/\/127\.0\.0\.1(?::\d+)?$/,
+    /^https?:\/\/\[::1\](?::\d+)?$/,
+    /^https:\/\/.*\.marosconstruction\.com$/,
+    /^https:\/\/.*\.netlify\.app$/,
+  ].some((pattern) => pattern.test(origin));
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true,
@@ -22,23 +45,27 @@ async function bootstrap() {
   app.setGlobalPrefix(apiPrefix);
 
   // CORS Configuration (migrated from CorsFilterConfig.java)
-  const corsOrigins = configService
-    .get<string>('CORS_ORIGINS', 'http://localhost:3000')
-    .split(',');
+  const corsOrigins = parseCorsOrigins(
+    configService.get<string>('CORS_ORIGINS', 'http://localhost:3000'),
+  );
 
   app.enableCors({
-    origin: [
-      ...corsOrigins,
-      /^http:\/\/localhost:\d+$/,
-      /^http:\/\/127\.0\.0\.1:\d+$/,
-      /^https:\/\/.*\.marosconstruction\.com$/,
-      'https://maros-app.netlify.app',
-    ],
+    origin: (
+      origin: string | undefined,
+      callback: (error: Error | null, allow?: boolean) => void,
+    ) => {
+      const requestOrigin = typeof origin === 'string' ? origin : undefined;
+      if (!requestOrigin || isAllowedCorsOrigin(requestOrigin, corsOrigins)) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
     exposedHeaders: ['Content-Type'],
     credentials: true,
-    maxAge: 3600,
+    maxAge: 86400,
+    optionsSuccessStatus: 204,
   });
 
   // Global exception filter
@@ -82,7 +109,7 @@ async function bootstrap() {
   // Get port from environment
   const port = configService.get<number>('PORT', 8080);
 
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
 
   console.log(`
   ╔═══════════════════════════════════════════════════════════════╗

@@ -4,7 +4,7 @@ import { Repository, Not } from 'typeorm';
 import { Lead } from '../../../entities/lead.entity';
 import { Project } from '../../../entities/project.entity';
 import { LeadType } from '../../../common/enums/lead-type.enum';
-import { getLeadTypeFromNumber, filterLeadsByType } from '../../../common/utils/lead-type.utils';
+import { filterLeadsByType } from '../../../common/utils/lead-type.utils';
 
 @Injectable()
 export class LeadsRepository {
@@ -14,6 +14,17 @@ export class LeadsRepository {
   ) {}
 
   async findAll(): Promise<Lead[]> {
+    return this.repo
+      .createQueryBuilder('lead')
+      .leftJoinAndSelect('lead.contact', 'contact')
+      .leftJoinAndSelect('contact.company', 'company')
+      .leftJoinAndSelect('lead.projectType', 'projectType')
+      .leftJoinAndSelect('lead.project', 'project')
+      .orderBy('lead.id', 'DESC')
+      .getMany();
+  }
+
+  async findPipeline(): Promise<Lead[]> {
     // Exclude leads that have an associated project
     // The foreign key is in projects table (lead_id), so we check if a project exists for this lead
     // Also exclude leads that are in review (inReview = true)
@@ -29,18 +40,7 @@ export class LeadsRepository {
   }
 
   async findByLeadType(type: LeadType): Promise<Lead[]> {
-    // Obtener todos los leads sin proyecto y filtrar por tipo usando la función utilitaria
-    // The foreign key is in projects table (lead_id), so we check if a project exists for this lead
-    // Also exclude leads that are in review (inReview = true)
-    const allLeads = await this.repo
-      .createQueryBuilder('lead')
-      .leftJoinAndSelect('lead.contact', 'contact')
-      .leftJoinAndSelect('contact.company', 'company')
-      .leftJoinAndSelect('lead.projectType', 'projectType')
-      .leftJoin(Project, 'project', 'project.lead_id = lead.id')
-      .where('project.id IS NULL')
-      .andWhere('lead.in_review = false')
-      .getMany();
+    const allLeads = await this.findAll();
     return filterLeadsByType(allLeads, type);
   }
 
@@ -65,10 +65,12 @@ export class LeadsRepository {
       .where('lead.leadNumber IS NOT NULL')
       .andWhere("lead.leadNumber != ''")
       .getMany();
-    
+
     // Filtrar por tipo usando la función utilitaria
     const filtered = filterLeadsByType(allLeads, leadType);
-    return filtered.map(l => l.leadNumber).filter((n): n is string => n !== undefined);
+    return filtered
+      .map((l) => l.leadNumber)
+      .filter((n): n is string => n !== undefined);
   }
 
   async existsByLeadNumber(leadNumber: string): Promise<boolean> {
@@ -76,16 +78,22 @@ export class LeadsRepository {
     return count > 0;
   }
 
-  async existsByLeadNumberAndIdNot(leadNumber: string, id: number): Promise<boolean> {
+  async existsByLeadNumberAndIdNot(
+    leadNumber: string,
+    id: number,
+  ): Promise<boolean> {
     const count = await this.repo.count({ where: { leadNumber, id: Not(id) } });
     return count > 0;
   }
 
-  async findMaxSequenceForMonth(leadType: LeadType, monthYear: string): Promise<number | null> {
+  async findMaxSequenceForMonth(
+    leadType: LeadType,
+    monthYear: string,
+  ): Promise<number | null> {
     // monthYear format expected: MMYY (e.g., 1123 for Nov 2023)
     // leadNumber format expected: NNN-MMYY (e.g., 001-1123) o NNNR-MMYY, NNNP-MMYY
     // We need to extract the first part (NNN) and find max
-    
+
     // Construir el patrón según el tipo
     let pattern = '';
     if (leadType === LeadType.ROOFING) {
@@ -95,7 +103,7 @@ export class LeadsRepository {
     } else {
       pattern = '%-' + monthYear;
     }
-    
+
     // Using raw query for complex substring/cast logic
     // Postgres specific syntax
     const result = await this.repo.query(
@@ -164,7 +172,9 @@ export class LeadsRepository {
     });
   }
 
-  async findByLeadNumberWithRelations(leadNumber: string): Promise<Lead | null> {
+  async findByLeadNumberWithRelations(
+    leadNumber: string,
+  ): Promise<Lead | null> {
     return this.repo.findOne({
       where: { leadNumber },
       relations: ['contact', 'contact.company', 'projectType'],

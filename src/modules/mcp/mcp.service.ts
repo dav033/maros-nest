@@ -95,7 +95,7 @@ export class McpService {
       'Get all leads from the CRM (excludes leads with projects and in-review leads)',
       {},
       async () => {
-        const data = await this.leadsService.getAllLeads();
+        const data = await this.leadsService.getPipelineLeads();
         return { content: [{ type: 'text', text: JSON.stringify(data) }] };
       },
     );
@@ -2835,7 +2835,7 @@ export class McpService {
       {},
       async () => {
         const [allLeads, inReview] = await Promise.all([
-          this.leadsService.getAllLeads(),
+          this.leadsService.getPipelineLeads(),
           this.leadsService.getLeadsInReview(),
         ]);
         const byStatus: Record<string, { count: number; leads: unknown[] }> =
@@ -2857,7 +2857,7 @@ export class McpService {
       {},
       async () => {
         const [allLeads, inReview, projects] = await Promise.all([
-          this.leadsService.getAllLeads(),
+          this.leadsService.getPipelineLeads(),
           this.leadsService.getLeadsInReview(),
           this.projectsService.findAll(),
         ]);

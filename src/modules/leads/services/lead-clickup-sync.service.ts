@@ -18,57 +18,61 @@ export class LeadClickUpSyncService {
   ) {}
 
   async syncLeadCreate(lead: Lead): Promise<void> {
-    const leadType = getLeadTypeFromNumber(lead.leadNumber) || LeadType.CONSTRUCTION;
-    this.logger.log(`Starting ClickUp sync for lead creation: ${lead.id} - ${lead.leadNumber} (${leadType})`);
+    const leadType =
+      getLeadTypeFromNumber(lead.leadNumber) || LeadType.CONSTRUCTION;
     try {
       const taskRequest = await this.buildClickUpTaskRequest(lead);
-      this.logger.debug(`Task request built: ${JSON.stringify(taskRequest, null, 2)}`);
-      
-      const response = await this.clickUpService.createTask(leadType, taskRequest);
-      
-      this.logger.log(`ClickUp CREATE ok: taskId=${response.id} lead=${lead.leadNumber} type=${leadType}`);
+      await this.clickUpService.createTask(leadType, taskRequest);
     } catch (error: any) {
-      this.logger.error(`Error syncing lead creation ${lead.id} with ClickUp: ${error.message}`, error.stack);
+      this.logger.error(
+        `Error syncing lead creation ${lead.id} with ClickUp: ${error.message}`,
+      );
       // Don't throw - we don't want to fail lead creation if ClickUp sync fails
     }
   }
 
   async syncLeadUpdate(lead: Lead): Promise<void> {
-    const leadType = getLeadTypeFromNumber(lead.leadNumber) || LeadType.CONSTRUCTION;
+    const leadType =
+      getLeadTypeFromNumber(lead.leadNumber) || LeadType.CONSTRUCTION;
     try {
-      const taskId = await this.clickUpService.findTaskIdByLeadNumber(leadType, lead.leadNumber || '');
-      
+      const taskId = await this.clickUpService.findTaskIdByLeadNumber(
+        leadType,
+        lead.leadNumber || '',
+      );
+
       if (!taskId) {
-        this.logger.warn(`ClickUp UPDATE skipped: task not found for lead=${lead.leadNumber} (type=${leadType})`);
         return;
       }
 
       const taskRequest = await this.buildClickUpTaskRequest(lead);
       await this.clickUpService.updateTask(taskId, taskRequest);
-      
-      this.logger.log(`ClickUp UPDATE ok: taskId=${taskId} lead=${lead.leadNumber} type=${leadType}`);
     } catch (error: any) {
-      this.logger.error(`Error syncing lead update ${lead.id} with ClickUp: ${error.message}`, error.stack);
+      this.logger.error(
+        `Error syncing lead update ${lead.id} with ClickUp: ${error.message}`,
+      );
     }
   }
 
   async syncLeadDelete(lead: Lead): Promise<void> {
-    const leadType = getLeadTypeFromNumber(lead.leadNumber) || LeadType.CONSTRUCTION;
+    const leadType =
+      getLeadTypeFromNumber(lead.leadNumber) || LeadType.CONSTRUCTION;
     try {
-      const deleted = await this.clickUpService.deleteTaskByLeadNumber(leadType, lead.leadNumber || '');
-      
-      if (deleted) {
-        this.logger.log(`ClickUp DELETE ok: lead=${lead.leadNumber} type=${leadType}`);
-      } else {
-        this.logger.warn(`ClickUp DELETE skipped: task not found for lead=${lead.leadNumber}`);
-      }
+      await this.clickUpService.deleteTaskByLeadNumber(
+        leadType,
+        lead.leadNumber || '',
+      );
     } catch (error: any) {
-      this.logger.error(`Error syncing lead deletion ${lead.id} with ClickUp: ${error.message}`, error.stack);
+      this.logger.error(
+        `Error syncing lead deletion ${lead.id} with ClickUp: ${error.message}`,
+      );
     }
   }
 
-  private async buildClickUpTaskRequest(lead: Lead): Promise<ClickUpTaskRequestDto> {
-    const leadType = getLeadTypeFromNumber(lead.leadNumber) || LeadType.CONSTRUCTION;
+  private async buildClickUpTaskRequest(
+    lead: Lead,
+  ): Promise<ClickUpTaskRequestDto> {
+    const leadType =
+      getLeadTypeFromNumber(lead.leadNumber) || LeadType.CONSTRUCTION;
     const route = this.routingService.route(leadType);
     const customFields: Array<{ id: string; value: any }> = [];
 
@@ -90,8 +94,10 @@ export class LeadClickUpSyncService {
 
     // Contact fields
     if (lead.contact) {
-      const contact = await this.contactsService.getContactById(lead.contact.id);
-      
+      const contact = await this.contactsService.getContactById(
+        lead.contact.id,
+      );
+
       if (contact && route.fields.contactNameId) {
         customFields.push({
           id: route.fields.contactNameId,
@@ -140,7 +146,10 @@ export class LeadClickUpSyncService {
     // Convert start date to timestamp (milliseconds)
     let startDate: number | undefined;
     if (lead.startDate) {
-      const date = lead.startDate instanceof Date ? lead.startDate : new Date(lead.startDate);
+      const date =
+        lead.startDate instanceof Date
+          ? lead.startDate
+          : new Date(lead.startDate);
       startDate = date.getTime();
     }
 
@@ -168,7 +177,10 @@ export class LeadClickUpSyncService {
     }
 
     if (lead.startDate) {
-      const date = lead.startDate instanceof Date ? lead.startDate : new Date(lead.startDate);
+      const date =
+        lead.startDate instanceof Date
+          ? lead.startDate
+          : new Date(lead.startDate);
       const formatted = date.toLocaleDateString('en-US');
       parts.push(`- **Start Date:** ${formatted}`);
     }
@@ -197,11 +209,11 @@ export class LeadClickUpSyncService {
     // For simplicity, we'll just return the formatted string
     // You can enhance this to parse and format properly
     const cleaned = phone.replace(/\D/g, '');
-    
+
     if (cleaned.length === 10) {
       return `+1${cleaned}`; // Assume US if 10 digits
     }
-    
+
     return phone;
   }
 }

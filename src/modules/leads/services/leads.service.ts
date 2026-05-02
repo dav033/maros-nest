@@ -14,8 +14,13 @@ import { CreateLeadDto } from '../dto/create-lead.dto';
 import { LeadType } from '../../../common/enums/lead-type.enum';
 import { LeadStatus } from '../../../common/enums/lead-status.enum';
 import { LeadNumberValidationResponseDto } from '../dto/lead-number-validation-response.dto';
-import { ValidationException, LeadExceptions, ContactExceptions, ProjectTypeExceptions, DatabaseException } from '../../../common/exceptions';
-import { getLeadTypeFromNumber } from '../../../common/utils/lead-type.utils';
+import {
+  ValidationException,
+  LeadExceptions,
+  ContactExceptions,
+  ProjectTypeExceptions,
+  DatabaseException,
+} from '../../../common/exceptions';
 
 @Injectable()
 export class LeadsService {
@@ -43,12 +48,17 @@ export class LeadsService {
    * Usa setImmediate para ejecutar después de que la respuesta se haya enviado
    * @deprecated Usar executeInBackground de common/utils/background-tasks.util en su lugar
    */
-  private executeInBackground(task: () => Promise<void>, taskName: string): void {
+  private executeInBackground(
+    task: () => Promise<void>,
+    taskName: string,
+  ): void {
     setImmediate(async () => {
       try {
         await task();
       } catch (error: any) {
-        this.logger.error(`Error in background task ${taskName}: ${error.message}`, error.stack);
+        this.logger.error(
+          `Error in background task ${taskName}: ${error.message}`,
+        );
         // No re-throw - las tareas en background no deben afectar la respuesta
       }
     });
@@ -56,6 +66,11 @@ export class LeadsService {
 
   async getAllLeads(): Promise<any[]> {
     const entities = await this.leadsRepository.findAll();
+    return entities.map((entity) => this.leadMapper.toDto(entity));
+  }
+
+  async getPipelineLeads(): Promise<any[]> {
+    const entities = await this.leadsRepository.findPipeline();
     return entities.map((entity) => this.leadMapper.toDto(entity));
   }
 
@@ -84,10 +99,12 @@ export class LeadsService {
     }
 
     // Get project if exists
-    const project = lead.project ? await this.projectRepo.findOne({
-      where: { id: lead.project.id },
-      relations: ['lead'],
-    }) : null;
+    const project = lead.project
+      ? await this.projectRepo.findOne({
+          where: { id: lead.project.id },
+          relations: ['lead'],
+        })
+      : null;
 
     const leadDto = this.leadMapper.toDto(lead);
 
@@ -100,7 +117,9 @@ export class LeadsService {
   private mapProjectToDto(project: Project): any {
     return {
       id: project.id,
-      invoiceAmount: project.invoiceAmount ? parseFloat(project.invoiceAmount.toString()) : null,
+      invoiceAmount: project.invoiceAmount
+        ? parseFloat(project.invoiceAmount.toString())
+        : null,
       payments: project.payments,
       projectProgressStatus: project.projectProgressStatus,
       invoiceStatus: project.invoiceStatus,
@@ -136,7 +155,10 @@ export class LeadsService {
       throw ValidationException.format('Lead number is required');
     }
 
-    const entity = await this.leadsRepository.findByLeadNumberWithRelations(trimmedLeadNumber);
+    const entity =
+      await this.leadsRepository.findByLeadNumberWithRelations(
+        trimmedLeadNumber,
+      );
     if (!entity) {
       throw new LeadExceptions.LeadNotFoundByNumberException(trimmedLeadNumber);
     }
@@ -151,11 +173,18 @@ export class LeadsService {
     leadTypeForGeneration?: LeadType,
   ): Promise<any> {
     const savedContact = await this.contactsService.create(contactDto);
-    const contactEntity = await this.contactRepo.findOne({ where: { id: savedContact.id } });
+    const contactEntity = await this.contactRepo.findOne({
+      where: { id: savedContact.id },
+    });
     if (!contactEntity) {
       throw new ContactExceptions.ContactNotFoundException(savedContact.id);
     }
-    return this.persistLead(leadDto, contactEntity, skipClickUpSync, leadTypeForGeneration);
+    return this.persistLead(
+      leadDto,
+      contactEntity,
+      skipClickUpSync,
+      leadTypeForGeneration,
+    );
   }
 
   async createLeadWithExistingContact(
@@ -164,11 +193,18 @@ export class LeadsService {
     skipClickUpSync: boolean = false,
     leadTypeForGeneration?: LeadType,
   ): Promise<any> {
-    const contactEntity = await this.contactRepo.findOne({ where: { id: contactId } });
+    const contactEntity = await this.contactRepo.findOne({
+      where: { id: contactId },
+    });
     if (!contactEntity) {
       throw new ContactExceptions.ContactNotFoundException(contactId);
     }
-    return this.persistLead(leadDto, contactEntity, skipClickUpSync, leadTypeForGeneration);
+    return this.persistLead(
+      leadDto,
+      contactEntity,
+      skipClickUpSync,
+      leadTypeForGeneration,
+    );
   }
 
   private async persistLead(
@@ -181,7 +217,12 @@ export class LeadsService {
 
     // Auto-generate lead name if empty and we have the necessary data: {leadNumber}-{location}
     // Name can be null if not provided and cannot be auto-generated
-    if ((!leadDto.name || leadDto.name.trim() === '') && leadDto.leadNumber && leadDto.location && leadDto.location.trim() !== '') {
+    if (
+      (!leadDto.name || leadDto.name.trim() === '') &&
+      leadDto.leadNumber &&
+      leadDto.location &&
+      leadDto.location.trim() !== ''
+    ) {
       leadDto.name = `${leadDto.leadNumber}-${leadDto.location.trim()}`;
     }
 
@@ -202,14 +243,6 @@ export class LeadsService {
 
     // Ensure ID is not set (should be auto-generated)
     delete (entity as any).id;
-    
-    this.logger.log(`About to save lead entity: ${JSON.stringify({
-      leadNumber: entity.leadNumber,
-      name: entity.name,
-      location: entity.location,
-      addressLink: entity.addressLink,
-      hasId: !!(entity as any).id
-    })}`);
 
     try {
       const saved = await this.leadRepo.save(entity);
@@ -217,27 +250,22 @@ export class LeadsService {
 
       // Responder al cliente primero, luego sincronizar con ClickUp en background
       if (!skipClickUpSync) {
-        this.executeInBackground(
-          async () => {
-            await this.clickUpSyncService.syncLeadCreate(saved);
-            this.logger.log(`ClickUp sync completed for lead ${dto.id} (${dto.leadNumber})`);
-          },
-          `ClickUp sync for lead ${dto.id} creation`
-        );
-      } else {
-        this.logger.log(`Skip ClickUp sync on create for lead ${dto.id} (${dto.leadNumber})`);
+        this.executeInBackground(async () => {
+          await this.clickUpSyncService.syncLeadCreate(saved);
+        }, `ClickUp sync for lead ${dto.id} creation`);
       }
 
       return dto;
     } catch (error) {
-      this.logger.error(`Error saving lead: ${error.message}`, error.stack);
-      throw new LeadExceptions.LeadCreationException('Data integrity error creating lead', error);
+      this.logger.error(`Error saving lead: ${error.message}`);
+      throw new LeadExceptions.LeadCreationException(
+        'Data integrity error creating lead',
+        error,
+      );
     }
   }
 
   async updateLead(id: number, patchDto: CreateLeadDto): Promise<any> {
-    const startTime = Date.now();
-    
     // Optimización: Si solo se están actualizando las notas, usar método optimizado
     const isNotesOnlyUpdate = this.isNotesOnlyUpdate(patchDto);
     if (isNotesOnlyUpdate) {
@@ -245,53 +273,52 @@ export class LeadsService {
     }
 
     // Verificar existencia primero (sin cargar relaciones si no es necesario)
-    const exists = await this.leadRepo.findOne({ 
+    const exists = await this.leadRepo.findOne({
       where: { id },
-      select: ['id', 'leadNumber']
+      select: ['id', 'leadNumber'],
     });
-    
+
     if (!exists) {
       throw new LeadExceptions.LeadNotFoundException(id);
     }
 
     // Validar leadNumber si está cambiando
     if (patchDto.leadNumber && patchDto.leadNumber !== exists.leadNumber) {
-      const leadNumberExists = await this.leadsRepository.existsByLeadNumberAndIdNot(patchDto.leadNumber, id);
+      const leadNumberExists =
+        await this.leadsRepository.existsByLeadNumberAndIdNot(
+          patchDto.leadNumber,
+          id,
+        );
       if (leadNumberExists) {
-        throw ValidationException.format('Lead number already exists: %s', patchDto.leadNumber);
+        throw ValidationException.format(
+          'Lead number already exists: %s',
+          patchDto.leadNumber,
+        );
       }
     }
 
-    this.logger.log(`Updating lead ${id} with data: ${JSON.stringify(patchDto)}`);
-    
     // Cargar entity completo solo si necesitamos actualizar relaciones
-    const needsRelations = patchDto.contactId !== undefined || patchDto.projectTypeId !== undefined;
-    const entity = await this.leadRepo.findOne({ 
+    const needsRelations =
+      patchDto.contactId !== undefined || patchDto.projectTypeId !== undefined;
+    const entity = await this.leadRepo.findOne({
       where: { id },
-      relations: needsRelations ? ['contact', 'projectType'] : []
+      relations: needsRelations ? ['contact', 'projectType'] : [],
     });
-    
+
     if (!entity) {
       throw new LeadExceptions.LeadNotFoundException(id);
     }
-    
+
     await this.updateEntityFields(patchDto, entity);
     await this.dataSource.manager.save(entity);
 
     const dto = this.leadMapper.toDto(entity);
-    
+
     // Responder al cliente primero, luego sincronizar con ClickUp en background
-    this.executeInBackground(
-      async () => {
-        await this.clickUpSyncService.syncLeadUpdate(entity);
-        this.logger.log(`ClickUp sync completed for lead update ${dto.id}`);
-      },
-      `ClickUp sync for lead ${dto.id} update`
-    );
-    
-    const duration = Date.now() - startTime;
-    this.logger.log(`Lead ${id} updated in ${duration}ms (ClickUp sync in background)`);
-    
+    this.executeInBackground(async () => {
+      await this.clickUpSyncService.syncLeadUpdate(entity);
+    }, `ClickUp sync for lead ${dto.id} update`);
+
     return dto;
   }
 
@@ -300,8 +327,6 @@ export class LeadsService {
    * Usa UPDATE directo sin cargar relaciones antes de la actualización
    */
   private async updateLeadNotesOnly(id: number, notes: string[]): Promise<any> {
-    const startTime = Date.now();
-    
     // UPDATE directo usando query builder (mucho más rápido que save con relaciones)
     // No necesitamos verificar existencia primero, el UPDATE fallará si no existe
     const updateResult = await this.leadRepo
@@ -317,9 +342,9 @@ export class LeadsService {
 
     // Cargar el lead actualizado SOLO después del UPDATE exitoso
     // Cargamos relaciones porque el DTO las necesita, pero solo después del UPDATE
-    const updated = await this.leadRepo.findOne({ 
+    const updated = await this.leadRepo.findOne({
       where: { id },
-      relations: ['contact', 'projectType']
+      relations: ['contact', 'projectType'],
     });
 
     if (!updated) {
@@ -328,9 +353,6 @@ export class LeadsService {
     }
 
     const dto = this.leadMapper.toDto(updated);
-    const duration = Date.now() - startTime;
-    this.logger.log(`Notes updated for lead ${id} (optimized: no pre-load, no ClickUp) in ${duration}ms`);
-    
     return dto;
   }
 
@@ -340,25 +362,34 @@ export class LeadsService {
    */
   private isNotesOnlyUpdate(patchDto: CreateLeadDto): boolean {
     // Verificar si hay algún campo diferente a notes definido
-    if (patchDto.leadNumber !== undefined ||
-        patchDto.name !== undefined ||
-        patchDto.startDate !== undefined ||
-        patchDto.location !== undefined ||
-        patchDto.addressLink !== undefined ||
-        patchDto.status !== undefined ||
-        patchDto.contactId !== undefined ||
-        patchDto.projectTypeId !== undefined ||
-        patchDto.inReview !== undefined) {
+    if (
+      patchDto.leadNumber !== undefined ||
+      patchDto.name !== undefined ||
+      patchDto.startDate !== undefined ||
+      patchDto.location !== undefined ||
+      patchDto.addressLink !== undefined ||
+      patchDto.status !== undefined ||
+      patchDto.contactId !== undefined ||
+      patchDto.projectTypeId !== undefined ||
+      patchDto.inReview !== undefined
+    ) {
       return false;
     }
-    
+
     // Si notes está definido y es el único campo, es una actualización solo de notas
     return patchDto.notes !== undefined;
   }
 
-  private async updateEntityFields(dto: CreateLeadDto, entity: Lead): Promise<void> {
+  private async updateEntityFields(
+    dto: CreateLeadDto,
+    entity: Lead,
+  ): Promise<void> {
     // Lead number should not be cleared once set, only updated to a valid value
-    if (dto.leadNumber !== undefined && dto.leadNumber !== null && dto.leadNumber.trim() !== '') {
+    if (
+      dto.leadNumber !== undefined &&
+      dto.leadNumber !== null &&
+      dto.leadNumber.trim() !== ''
+    ) {
       entity.leadNumber = dto.leadNumber;
     }
     if (dto.name !== undefined) {
@@ -399,9 +430,13 @@ export class LeadsService {
       }
     }
     if (dto.projectTypeId !== undefined) {
-      const projectTypeEntity = await this.projectTypeRepo.findOne({ where: { id: dto.projectTypeId } });
+      const projectTypeEntity = await this.projectTypeRepo.findOne({
+        where: { id: dto.projectTypeId },
+      });
       if (!projectTypeEntity) {
-        throw new ProjectTypeExceptions.ProjectTypeNotFoundException(dto.projectTypeId);
+        throw new ProjectTypeExceptions.ProjectTypeNotFoundException(
+          dto.projectTypeId,
+        );
       }
       entity.projectType = projectTypeEntity;
     }
@@ -415,8 +450,18 @@ export class LeadsService {
 
   async getLeadRejectionInfo(id: number): Promise<{
     lead: { id: number; name: string };
-    contact: { id: number; name: string; canDelete: boolean; otherLeadsCount: number } | null;
-    company: { id: number; name: string; canDelete: boolean; otherLeadsCount: number } | null;
+    contact: {
+      id: number;
+      name: string;
+      canDelete: boolean;
+      otherLeadsCount: number;
+    } | null;
+    company: {
+      id: number;
+      name: string;
+      canDelete: boolean;
+      otherLeadsCount: number;
+    } | null;
   }> {
     const lead = await this.leadRepo.findOne({
       where: { id },
@@ -427,8 +472,18 @@ export class LeadsService {
       throw new LeadExceptions.LeadNotFoundException(id);
     }
 
-    let contactInfo: { id: number; name: string; canDelete: boolean; otherLeadsCount: number } | null = null;
-    let companyInfo: { id: number; name: string; canDelete: boolean; otherLeadsCount: number } | null = null;
+    let contactInfo: {
+      id: number;
+      name: string;
+      canDelete: boolean;
+      otherLeadsCount: number;
+    } | null = null;
+    let companyInfo: {
+      id: number;
+      name: string;
+      canDelete: boolean;
+      otherLeadsCount: number;
+    } | null = null;
 
     if (lead.contact) {
       // Count other leads for this contact (excluding current lead)
@@ -449,7 +504,9 @@ export class LeadsService {
         const otherCompanyLeads = await this.leadRepo
           .createQueryBuilder('lead')
           .innerJoin('lead.contact', 'contact')
-          .where('contact.company_id = :companyId', { companyId: lead.contact.company.id })
+          .where('contact.company_id = :companyId', {
+            companyId: lead.contact.company.id,
+          })
           .getCount();
         const companyOtherLeadsCount = otherCompanyLeads - 1; // Exclude current lead
 
@@ -472,7 +529,11 @@ export class LeadsService {
   async deleteLead(
     id: number,
     options?: { deleteContact?: boolean; deleteCompany?: boolean },
-  ): Promise<{ message: string; deletedContact?: boolean; deletedCompany?: boolean }> {
+  ): Promise<{
+    message: string;
+    deletedContact?: boolean;
+    deletedCompany?: boolean;
+  }> {
     const entity = await this.leadRepo.findOne({
       where: { id },
       relations: ['contact', 'contact.company'],
@@ -489,18 +550,18 @@ export class LeadsService {
     // Guardar referencia para usar en background (antes de eliminar)
     const leadForSync = { ...entity };
     const leadId = entity.id;
-    const leadNumber = entity.leadNumber;
 
     try {
       // Optimización: Usar UPDATE directo con SQL raw para relaciones
       // Clear lead references from projects before deletion
       await this.dataSource.query(
         'UPDATE projects SET lead_id = NULL WHERE lead_id = $1',
-        [id]
+        [id],
       );
 
       // Load entity with all relations
-      const leadWithRelations = await this.leadsRepository.findByIdWithRelations(id);
+      const leadWithRelations =
+        await this.leadsRepository.findByIdWithRelations(id);
       if (!leadWithRelations) {
         throw new LeadExceptions.LeadNotFoundException(id);
       }
@@ -508,13 +569,9 @@ export class LeadsService {
       await this.leadRepo.remove(leadWithRelations);
 
       // Responder al cliente primero, luego sincronizar con ClickUp en background
-      this.executeInBackground(
-        async () => {
-          await this.clickUpSyncService.syncLeadDelete(leadForSync);
-          this.logger.log(`ClickUp sync completed for lead deletion ${leadId} (${leadNumber})`);
-        },
-        `ClickUp sync for lead ${leadId} deletion`
-      );
+      this.executeInBackground(async () => {
+        await this.clickUpSyncService.syncLeadDelete(leadForSync);
+      }, `ClickUp sync for lead ${leadId} deletion`);
 
       let deletedContact = false;
       let deletedCompany = false;
@@ -533,7 +590,10 @@ export class LeadsService {
             where: { company: { id: companyId } },
           });
 
-          if (companyContactsCount === 0 || (companyContactsCount === 1 && options?.deleteContact)) {
+          if (
+            companyContactsCount === 0 ||
+            (companyContactsCount === 1 && options?.deleteContact)
+          ) {
             // Safe to delete company after contact
           }
         }
@@ -548,7 +608,6 @@ export class LeadsService {
         if (contactLeadsCount === 0) {
           await this.contactRepo.delete(contactId);
           deletedContact = true;
-          this.logger.log(`Deleted orphan contact ${contactId}`);
         }
       }
 
@@ -561,7 +620,6 @@ export class LeadsService {
         if (companyContactsCount === 0) {
           await this.dataSource.getRepository(Company).delete(companyId);
           deletedCompany = true;
-          this.logger.log(`Deleted orphan company ${companyId}`);
         }
       }
 
@@ -571,13 +629,19 @@ export class LeadsService {
         deletedCompany,
       };
     } catch (error) {
-      throw new DatabaseException('Cannot delete lead due to existing references', error);
+      throw new DatabaseException(
+        'Cannot delete lead due to existing references',
+        error,
+      );
     }
   }
 
-  private async applyDefaults(leadDto: CreateLeadDto, leadTypeForGeneration?: LeadType): Promise<void> {
+  private async applyDefaults(
+    leadDto: CreateLeadDto,
+    leadTypeForGeneration?: LeadType,
+  ): Promise<void> {
     leadDto.status = leadDto.status || LeadStatus.NOT_EXECUTED;
-    
+
     // startDate can be null, no default assignment
 
     if (!leadDto.leadNumber || leadDto.leadNumber.trim() === '') {
@@ -586,19 +650,27 @@ export class LeadsService {
       leadDto.leadNumber = await this.generateLeadNumber(typeToUse);
     } else {
       // Validate that the provided lead number doesn't already exist
-      const exists = await this.leadsRepository.existsByLeadNumber(leadDto.leadNumber);
+      const exists = await this.leadsRepository.existsByLeadNumber(
+        leadDto.leadNumber,
+      );
       if (exists) {
-        throw ValidationException.format('Lead number already exists: %s', leadDto.leadNumber);
+        throw ValidationException.format(
+          'Lead number already exists: %s',
+          leadDto.leadNumber,
+        );
       }
     }
 
     // Auto-generate name if not provided and we have the necessary data: {leadNumber}-{location}
     // Name can be null if not provided and cannot be auto-generated
-    if ((!leadDto.name || leadDto.name.trim() === '') && leadDto.leadNumber && leadDto.location) {
+    if (
+      (!leadDto.name || leadDto.name.trim() === '') &&
+      leadDto.leadNumber &&
+      leadDto.location
+    ) {
       leadDto.name = `${leadDto.leadNumber}-${leadDto.location}`;
     }
   }
-
 
   private async generateLeadNumber(type: LeadType): Promise<string> {
     const now = new Date();
@@ -607,7 +679,8 @@ export class LeadsService {
     const mmyy = `${month}${year}`;
 
     // Get all lead numbers of this type
-    const allLeadNumbers = await this.leadsRepository.findAllLeadNumbersByType(type);
+    const allLeadNumbers =
+      await this.leadsRepository.findAllLeadNumbersByType(type);
 
     // Extract numeric prefixes and find max
     const max = allLeadNumbers
@@ -647,7 +720,9 @@ export class LeadsService {
     return projectType;
   }
 
-  async validateLeadNumber(leadNumber: string): Promise<LeadNumberValidationResponseDto> {
+  async validateLeadNumber(
+    leadNumber: string,
+  ): Promise<LeadNumberValidationResponseDto> {
     if (!leadNumber || leadNumber.trim() === '') {
       return {
         valid: false,
@@ -656,8 +731,9 @@ export class LeadsService {
     }
 
     const trimmedLeadNumber = leadNumber.trim();
-    const exactExists = await this.leadsRepository.existsByLeadNumber(trimmedLeadNumber);
-    
+    const exactExists =
+      await this.leadsRepository.existsByLeadNumber(trimmedLeadNumber);
+
     if (exactExists) {
       return {
         valid: false,
@@ -688,7 +764,11 @@ export class LeadsService {
   }
 
   private extractNumericPrefix(leadNumber: string): string | null {
-    if (/^\d{3}R-\d{4}$/.test(leadNumber) || /^\d{3}P-\d{4}$/.test(leadNumber) || /^\d{3}-\d{4}$/.test(leadNumber)) {
+    if (
+      /^\d{3}R-\d{4}$/.test(leadNumber) ||
+      /^\d{3}P-\d{4}$/.test(leadNumber) ||
+      /^\d{3}-\d{4}$/.test(leadNumber)
+    ) {
       return leadNumber.substring(0, 3);
     }
     return null;
@@ -696,7 +776,9 @@ export class LeadsService {
 
   private async isNumericPrefixInUse(numericPrefix: string): Promise<boolean> {
     for (const type of Object.values(LeadType)) {
-      const allNumbers = await this.leadsRepository.findAllLeadNumbersByType(type as LeadType);
+      const allNumbers = await this.leadsRepository.findAllLeadNumbersByType(
+        type as LeadType,
+      );
       const prefixExists = allNumbers.some((s) => {
         const existingPrefix = this.extractNumericPrefix(s);
         return numericPrefix === existingPrefix;

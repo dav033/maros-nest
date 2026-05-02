@@ -9,8 +9,7 @@ import { QboReauthorizationRequiredException } from '../exceptions/qbo-reauthori
 
 const TOKEN_ENDPOINT =
   'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
-const AUTHORIZATION_ENDPOINT =
-  'https://appcenter.intuit.com/connect/oauth2';
+const AUTHORIZATION_ENDPOINT = 'https://appcenter.intuit.com/connect/oauth2';
 const QBO_SCOPE = 'com.intuit.quickbooks.accounting';
 /** Refresh the access token when it expires within this many seconds. */
 const EXPIRY_BUFFER_SECONDS = 300;
@@ -39,12 +38,15 @@ export class QuickbooksAuthService {
     private readonly configService: ConfigService,
     private readonly tokenCrypto: TokenCryptoService,
   ) {
-    this.clientId = this.configService.getOrThrow<string>('QB_CLIENT_ID');
-    this.clientSecret = this.configService.getOrThrow<string>('QB_SECRET_KEY');
-    this.redirectUri = this.configService.getOrThrow<string>('QB_REDIRECT_URI');
-    this.basicAuthHeader = `Basic ${Buffer.from(
-      `${this.clientId}:${this.clientSecret}`,
-    ).toString('base64')}`;
+    this.clientId = this.configService.get<string>('QB_CLIENT_ID') ?? '';
+    this.clientSecret = this.configService.get<string>('QB_SECRET_KEY') ?? '';
+    this.redirectUri = this.configService.get<string>('QB_REDIRECT_URI') ?? '';
+    this.basicAuthHeader =
+      this.clientId && this.clientSecret
+        ? `Basic ${Buffer.from(
+            `${this.clientId}:${this.clientSecret}`,
+          ).toString('base64')}`
+        : '';
   }
 
   /**
@@ -52,6 +54,7 @@ export class QuickbooksAuthService {
    * @param state  Random opaque value — caller is responsible for CSRF validation.
    */
   getAuthorizationUrl(state: string): string {
+    this.ensureOAuthConfigured();
     const params = new URLSearchParams({
       client_id: this.clientId,
       scope: QBO_SCOPE,
@@ -68,6 +71,7 @@ export class QuickbooksAuthService {
    * and persists them encrypted in the database (UPSERT by realmId).
    */
   async exchangeCodeForTokens(code: string, realmId: string): Promise<void> {
+    this.ensureOAuthConfigured();
     const body = new URLSearchParams({
       grant_type: 'authorization_code',
       code,
@@ -90,6 +94,7 @@ export class QuickbooksAuthService {
    * is always saved, even if it looks the same.
    */
   async refreshTokens(realmId: string): Promise<void> {
+    this.ensureOAuthConfigured();
     const connection = await this.connectionRepo.findOneBy({ realmId });
     if (!connection) {
       throw new QboReauthorizationRequiredException(realmId);
@@ -114,9 +119,8 @@ export class QuickbooksAuthService {
       await this.persistTokens(realmId, data);
       this.logger.log(`QBO tokens refreshed successfully for realm ${realmId}`);
     } catch (error: unknown) {
-      const errData = (
-        error as { response?: { data?: { error?: string } } }
-      ).response?.data;
+      const errData = (error as { response?: { data?: { error?: string } } })
+        .response?.data;
 
       if (errData?.error === 'invalid_grant') {
         this.logger.error(
@@ -175,10 +179,17 @@ export class QuickbooksAuthService {
   }
 
   private tokenRequestHeaders(): Record<string, string> {
+    this.ensureOAuthConfigured();
     return {
       Authorization: this.basicAuthHeader,
       'Content-Type': 'application/x-www-form-urlencoded',
       Accept: 'application/json',
     };
+  }
+
+  private ensureOAuthConfigured(): void {
+    if (!this.clientId || !this.clientSecret || !this.redirectUri) {
+      throw new Error('QuickBooks OAuth is not configured.');
+    }
   }
 }

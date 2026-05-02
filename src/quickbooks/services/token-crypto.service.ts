@@ -14,8 +14,9 @@ export class TokenCryptoService implements OnModuleInit {
   constructor(private readonly configService: ConfigService) {}
 
   onModuleInit(): void {
-    const hexKey = this.configService.getOrThrow<string>('QB_ENCRYPTION_KEY');
-    if (hexKey.length !== 64) {
+    const hexKey = this.configService.get<string>('QB_ENCRYPTION_KEY');
+    if (!hexKey) return;
+    if (!/^[0-9a-fA-F]{64}$/.test(hexKey)) {
       throw new Error(
         `QB_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes). Got ${hexKey.length}.`,
       );
@@ -24,6 +25,7 @@ export class TokenCryptoService implements OnModuleInit {
   }
 
   encrypt(plaintext: string): string {
+    this.ensureConfigured();
     const iv = crypto.randomBytes(12); // 96-bit IV recommended for GCM
     const cipher = crypto.createCipheriv('aes-256-gcm', this.key, iv);
 
@@ -38,6 +40,7 @@ export class TokenCryptoService implements OnModuleInit {
   }
 
   decrypt(ciphertext: string): string {
+    this.ensureConfigured();
     const parts = ciphertext.split(':');
     if (parts.length !== 3) {
       throw new Error('Invalid ciphertext format — expected iv:authTag:data');
@@ -52,5 +55,11 @@ export class TokenCryptoService implements OnModuleInit {
     decipher.setAuthTag(authTag);
 
     return decipher.update(encrypted).toString('utf8') + decipher.final('utf8');
+  }
+
+  private ensureConfigured(): void {
+    if (!this.key) {
+      throw new Error('QuickBooks token encryption is not configured.');
+    }
   }
 }

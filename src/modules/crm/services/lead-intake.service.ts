@@ -1,16 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike } from 'typeorm';
 import { Company } from '../../../entities/company.entity';
 import { Contact } from '../../../entities/contact.entity';
 import { LeadsService } from '../../leads/services/leads.service';
-import { LeadIntakeRequestDto, LeadIntakeResponseDto } from '../dto/lead-intake-request.dto';
+import {
+  LeadIntakeRequestDto,
+  LeadIntakeResponseDto,
+} from '../dto/lead-intake-request.dto';
 import { LeadType } from '../../../common/enums/lead-type.enum';
 
 @Injectable()
 export class LeadIntakeService {
-  private readonly logger = new Logger(LeadIntakeService.name);
-
   constructor(
     @InjectRepository(Company)
     private readonly companyRepo: Repository<Company>,
@@ -19,14 +20,18 @@ export class LeadIntakeService {
     private readonly leadsService: LeadsService,
   ) {}
 
-  async processLeadIntake(dto: LeadIntakeRequestDto): Promise<LeadIntakeResponseDto> {
+  async processLeadIntake(
+    dto: LeadIntakeRequestDto,
+  ): Promise<LeadIntakeResponseDto> {
     const actions: string[] = [];
     let company: Company | null = null;
     let contact: Contact | null = null;
 
     // Step 1: Find or create company
     if (dto.companyId) {
-      company = await this.companyRepo.findOne({ where: { id: dto.companyId } });
+      company = await this.companyRepo.findOne({
+        where: { id: dto.companyId },
+      });
       if (company) {
         actions.push(`Found existing company by ID: ${company.id}`);
       }
@@ -51,7 +56,9 @@ export class LeadIntakeService {
         ],
       });
       if (company) {
-        actions.push(`Found existing company by email: ${company.email || company.submiz}`);
+        actions.push(
+          `Found existing company by email: ${company.email || company.submiz}`,
+        );
       }
     }
 
@@ -103,19 +110,30 @@ export class LeadIntakeService {
     if (contact && company && !contact.company) {
       contact.company = company;
       await this.contactRepo.save(contact);
-      actions.push(`Associated contact ${contact.id} with company ${company.id}`);
-    } else if (contact && company && contact.company && contact.company.id !== company.id) {
+      actions.push(
+        `Associated contact ${contact.id} with company ${company.id}`,
+      );
+    } else if (
+      contact &&
+      company &&
+      contact.company &&
+      contact.company.id !== company.id
+    ) {
       // Contact is associated with a different company - log but don't change
-      actions.push(`Contact ${contact.id} already associated with company ${contact.company.id}, keeping existing association`);
+      actions.push(
+        `Contact ${contact.id} already associated with company ${contact.company.id}, keeping existing association`,
+      );
     }
 
     // Step 4: Create lead with inReview = true
     if (!contact) {
-      throw new Error('Cannot create lead without a contact. Provide contactId, contactEmail, or contactName.');
+      throw new Error(
+        'Cannot create lead without a contact. Provide contactId, contactEmail, or contactName.',
+      );
     }
 
     const leadType = dto.leadType || LeadType.CONSTRUCTION;
-    
+
     const lead = await this.leadsService.createLeadWithExistingContact(
       {
         location: dto.leadLocation,
@@ -136,18 +154,22 @@ export class LeadIntakeService {
 
     return {
       lead,
-      company: company ? {
-        id: company.id,
-        name: company.name,
-        email: company.email,
-        address: company.address,
-      } : null,
-      contact: finalContact ? {
-        id: finalContact.id,
-        name: finalContact.name,
-        email: finalContact.email,
-        companyId: finalContact.company?.id || null,
-      } : null,
+      company: company
+        ? {
+            id: company.id,
+            name: company.name,
+            email: company.email,
+            address: company.address,
+          }
+        : null,
+      contact: finalContact
+        ? {
+            id: finalContact.id,
+            name: finalContact.name,
+            email: finalContact.email,
+            companyId: finalContact.company?.id || null,
+          }
+        : null,
       actions,
     };
   }

@@ -151,12 +151,15 @@ export class EnvironmentVariables {
 
   // QuickBooks Online
   @IsString()
+  @IsOptional()
   QB_CLIENT_ID: string;
 
   @IsString()
+  @IsOptional()
   QB_SECRET_KEY: string;
 
   @IsUrl({ require_tld: false })
+  @IsOptional()
   QB_REDIRECT_URI: string;
 
   @IsEnum(['sandbox', 'production'])
@@ -165,11 +168,22 @@ export class EnvironmentVariables {
 
   /** 64 hex characters = 32 bytes for AES-256-GCM. Generate with: openssl rand -hex 32 */
   @IsString()
+  @IsOptional()
   QB_ENCRYPTION_KEY: string;
 }
 
 export function validate(config: Record<string, unknown>) {
-  const validatedConfig = plainToClass(EnvironmentVariables, config, {
+  const normalizedConfig = { ...config };
+  for (const key of [
+    'QB_CLIENT_ID',
+    'QB_SECRET_KEY',
+    'QB_REDIRECT_URI',
+    'QB_ENCRYPTION_KEY',
+  ]) {
+    if (normalizedConfig[key] === '') delete normalizedConfig[key];
+  }
+
+  const validatedConfig = plainToClass(EnvironmentVariables, normalizedConfig, {
     enableImplicitConversion: true,
   });
 
@@ -179,6 +193,20 @@ export function validate(config: Record<string, unknown>) {
 
   if (errors.length > 0) {
     throw new Error(errors.toString());
+  }
+
+  const isProduction = validatedConfig.NODE_ENV === Environment.Production;
+  const missingQboConfig = [
+    'QB_CLIENT_ID',
+    'QB_SECRET_KEY',
+    'QB_REDIRECT_URI',
+    'QB_ENCRYPTION_KEY',
+  ].filter((key) => !normalizedConfig[key]);
+
+  if (isProduction && missingQboConfig.length > 0) {
+    throw new Error(
+      `Missing required QuickBooks configuration: ${missingQboConfig.join(', ')}`,
+    );
   }
 
   return validatedConfig;

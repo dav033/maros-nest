@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Contact } from '../../../entities/contact.entity';
@@ -10,8 +10,6 @@ import { getLeadTypeFromNumber } from '../../../common/utils/lead-type.utils';
 
 @Injectable()
 export class CustomFieldsBuilder {
-  private readonly logger = new Logger(CustomFieldsBuilder.name);
-
   constructor(
     private readonly routingService: ClickUpRoutingService,
     @InjectRepository(Contact)
@@ -23,10 +21,11 @@ export class CustomFieldsBuilder {
 
     const type = getLeadTypeFromNumber(dto.leadNumber) || LeadType.CONSTRUCTION;
     const number = dto.leadNumber;
-    
+
     const route = this.routingService.route(type);
     const f = route.fields;
-    const leadNumberFieldId = this.routingService.resolveLeadNumberFieldId(type);
+    const leadNumberFieldId =
+      this.routingService.resolveLeadNumberFieldId(type);
 
     if (!number) {
       throw new Error(`LeadNumber empty when creating task (leadType=${type})`);
@@ -36,12 +35,13 @@ export class CustomFieldsBuilder {
     }
 
     fields.push({ id: leadNumberFieldId, value: number });
-    this.logger.debug(`FIELD -> ${leadNumberFieldId} = ${number} (leadNumber)`);
 
     let contact: Contact | null = null;
     if (dto.contactId) {
       try {
-        contact = await this.contactRepository.findOne({ where: { id: dto.contactId } });
+        contact = await this.contactRepository.findOne({
+          where: { id: dto.contactId },
+        });
       } catch (e) {
         // Ignore error
       }
@@ -75,7 +75,12 @@ export class CustomFieldsBuilder {
     return fields;
   }
 
-  private addField(out: ClickUpCustomFieldDto[], fieldId: string | undefined, value: any, clearIfMissing: boolean) {
+  private addField(
+    out: ClickUpCustomFieldDto[],
+    fieldId: string | undefined,
+    value: any,
+    clearIfMissing: boolean,
+  ) {
     if (!fieldId) return;
 
     if (value === null || value === undefined) {
@@ -121,7 +126,6 @@ export class CustomFieldsBuilder {
       return '+1' + cleaned;
     }
 
-    this.logger.warn(`Invalid phone format for ClickUp: '${phone}'. Sending as null.`);
     return null;
   }
 }
