@@ -4,11 +4,11 @@ import { Contact } from '../../entities/contact.entity';
 import { Company } from '../../entities/company.entity';
 import { Lead } from '../../entities/lead.entity';
 import { Project } from '../../entities/project.entity';
-import { ContactsRepository } from './repositories/contacts.repository';
-import { ContactsService } from './services/contacts.service';
-import { ContactsController } from './contacts.controller';
-import { ContactMapper } from './mappers/contact.mapper';
-import { ContactInfoFormatter } from './services/contact-info-formatter.service';
+import { ContactsRepository } from './contact-management/repositories/contacts.repository';
+import { ContactsService } from './contact-management/services/contacts.service';
+import { ContactsController } from './contact-management/contacts.controller';
+import { ContactMapper } from './contact-management/mappers/contact.mapper';
+import { ContactInfoFormatter } from './contact-management/services/contact-info-formatter.service';
 
 @Module({
   imports: [

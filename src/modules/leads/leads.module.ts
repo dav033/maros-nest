@@ -4,11 +4,13 @@ import { Lead } from '../../entities/lead.entity';
 import { Contact } from '../../entities/contact.entity';
 import { ProjectType } from '../../entities/project-type.entity';
 import { Project } from '../../entities/project.entity';
-import { LeadsRepository } from './repositories/leads.repository';
-import { LeadsService } from './services/leads.service';
-import { LeadClickUpSyncService } from './services/lead-clickup-sync.service';
-import { LeadsController } from './leads.controller';
-import { LeadMapper } from './mappers/lead.mapper';
+import { LeadsRepository } from './lead-management/repositories/leads.repository';
+import { LeadsService } from './lead-management/leads.service';
+import { LeadClickUpSyncService } from './clickup-sync/lead-clickup-sync.service';
+import { LeadsController } from './lead-management/leads.controller';
+import { LeadMapper } from './lead-management/mappers/lead.mapper';
+import { LeadNumberingService } from './lead-management/services/lead-numbering.service';
+import { LeadMutationService } from './lead-management/services/lead-mutation.service';
 import { ContactsModule } from '../contacts/contacts.module';
 import { ClickUpModule } from '../clickup/clickup.module';
 
@@ -19,7 +21,14 @@ import { ClickUpModule } from '../clickup/clickup.module';
     ClickUpModule,
   ],
   controllers: [LeadsController],
-  providers: [LeadsRepository, LeadsService, LeadMapper, LeadClickUpSyncService],
+  providers: [
+    LeadsRepository,
+    LeadsService,
+    LeadMapper,
+    LeadClickUpSyncService,
+    LeadNumberingService,
+    LeadMutationService,
+  ],
   exports: [LeadsRepository, LeadsService],
 })
 export class LeadsModule {}

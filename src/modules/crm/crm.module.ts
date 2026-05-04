@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CrmController } from './crm.controller';
-import { LeadIntakeService } from './services/lead-intake.service';
+import { LeadIntakeService } from './lead-intake/lead-intake.service';
 import { ContactsModule } from '../contacts/contacts.module';
 import { CompaniesModule } from '../companies/companies.module';
 import { LeadsModule } from '../leads/leads.module';

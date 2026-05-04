@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
-import { ReportsController } from './reports.controller';
-import { ReportsService } from './services/reports.service';
+import { ReportsController } from './restoration-visit/restoration-visit.controller';
+import { ReportsService } from './restoration-visit/restoration-visit.service';
 import { ProjectsModule } from '../projects/projects.module';
 
 @Module({

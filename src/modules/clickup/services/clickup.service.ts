@@ -71,12 +71,15 @@ export class ClickUpService {
       this.logger.log(`Task created successfully in ClickUp → id=${response.data.id}`);
       return response.data;
     } catch (error: unknown) {
-      const err = error as any;
-      const errorDetails = err.response?.data || err.message;
-      const statusCode = err.response?.status || 'unknown';
+      const err = this.toError(error);
+      const errorWithResponse = err as Error & {
+        response?: { data?: unknown; status?: number };
+      };
+      const errorDetails = errorWithResponse.response?.data ?? err?.message;
+      const statusCode = errorWithResponse.response?.status ?? 'unknown';
       this.logger.error(
         `Error creating ClickUp task [${statusCode}]: ${JSON.stringify(errorDetails)}`,
-        err.stack,
+        err?.stack,
       );
       throw new ClickUpException(
         `Failed to create ClickUp task: ${JSON.stringify(errorDetails)}`,
@@ -99,9 +102,15 @@ export class ClickUpService {
       );
       
       return response.data.tasks || [];
-    } catch (error: any) {
-      this.logger.error(`Error listing ClickUp tasks: ${error.message}`);
-      throw new ClickUpException(`Failed to list ClickUp tasks: ${error.message}`, error);
+    } catch (error: unknown) {
+      const err = this.toError(error);
+      this.logger.error(
+        `Error listing ClickUp tasks: ${err?.message ?? 'Unknown error'}`,
+      );
+      throw new ClickUpException(
+        `Failed to list ClickUp tasks: ${err?.message ?? 'Unknown error'}`,
+        err,
+      );
     }
   }
 
@@ -143,9 +152,15 @@ export class ClickUpService {
       
       this.logger.log(`Task deleted successfully in ClickUp → id=${taskId}`);
       return true;
-    } catch (error: any) {
-      this.logger.error(`Error deleting ClickUp task: ${error.message}`);
-      throw new ClickUpException(`Failed to delete ClickUp task: ${error.message}`, error);
+    } catch (error: unknown) {
+      const err = this.toError(error);
+      this.logger.error(
+        `Error deleting ClickUp task: ${err?.message ?? 'Unknown error'}`,
+      );
+      throw new ClickUpException(
+        `Failed to delete ClickUp task: ${err?.message ?? 'Unknown error'}`,
+        err,
+      );
     }
   }
 
@@ -174,9 +189,21 @@ export class ClickUpService {
       }
 
       this.logger.log(`Task updated successfully in ClickUp → id=${taskId}`);
-    } catch (error: any) {
-      this.logger.error(`Error updating ClickUp task: ${error.message}`);
-      throw new ClickUpException(`Failed to update ClickUp task: ${error.message}`, error);
+    } catch (error: unknown) {
+      const err = this.toError(error);
+      this.logger.error(
+        `Error updating ClickUp task: ${err?.message ?? 'Unknown error'}`,
+      );
+      throw new ClickUpException(
+        `Failed to update ClickUp task: ${err?.message ?? 'Unknown error'}`,
+        err,
+      );
     }
+  }
+
+  private toError(error: unknown): Error | undefined {
+    if (error instanceof Error) return error;
+    if (error === undefined || error === null) return undefined;
+    return new Error(String(error));
   }
 }

@@ -13,19 +13,27 @@ export function executeInBackground(
   taskName: string,
   logger?: Logger,
 ): void {
-  setImmediate(async () => {
-    try {
-      await task();
-    } catch (error: any) {
-      const errorMessage = error?.message || 'Unknown error';
-      const errorStack = error?.stack;
-      
-      if (logger) {
-        logger.error(`Error in background task ${taskName}: ${errorMessage}`, errorStack);
-      } else {
-        console.error(`Error in background task ${taskName}: ${errorMessage}`, errorStack);
+  setImmediate(() => {
+    void (async () => {
+      try {
+        await task();
+      } catch (error: any) {
+        const errorMessage = error?.message || 'Unknown error';
+        const errorStack = error?.stack;
+
+        if (logger) {
+          logger.error(
+            `Error in background task ${taskName}: ${errorMessage}`,
+            errorStack,
+          );
+        } else {
+          console.error(
+            `Error in background task ${taskName}: ${errorMessage}`,
+            errorStack,
+          );
+        }
+        // No re-throw - las tareas en background no deben afectar la respuesta
       }
-      // No re-throw - las tareas en background no deben afectar la respuesta
-    }
+    })();
   });
 }

@@ -38,7 +38,8 @@ export abstract class BaseService<D, ID, E extends ObjectLiteral> implements Cru
   }
 
   async delete(id: ID): Promise<void> {
-    await this.repository.delete(id as any);
+    const criteria = id as Parameters<Repository<E>['delete']>[0];
+    await this.repository.delete(criteria);
   }
 
   async saveAll(dtos: D[]): Promise<D[]> {

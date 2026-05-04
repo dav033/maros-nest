@@ -3,7 +3,6 @@ import { HttpService } from '@nestjs/axios';
 import type { ConfigType } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import n8nConfig from '../../../config/n8n.config';
-import { N8nProjectFinancialRequestDto } from '../dto/n8n-project-financial-request.dto';
 import { N8nProjectFinancialResponseDto } from '../dto/n8n-project-financial-response.dto';
 
 @Injectable()

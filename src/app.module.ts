@@ -19,7 +19,7 @@ import { CrmModule } from './modules/crm/crm.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { McpModule } from './modules/mcp/mcp.module';
-import { QuickbooksModule } from './quickbooks/quickbooks.module';
+import { QuickbooksModule } from './modules/quickbooks/quickbooks.module';
 
 @Module({
   imports: [

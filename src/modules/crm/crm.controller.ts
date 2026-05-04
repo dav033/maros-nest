@@ -1,10 +1,13 @@
 import { Controller, Get, Post, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { ContactsService } from '../contacts/services/contacts.service';
-import { CompaniesService } from '../companies/services/companies.service';
-import { LeadIntakeService } from './services/lead-intake.service';
+import { ContactsService } from '../contacts/contact-management/services/contacts.service';
+import { CompaniesService } from '../companies/company-management/services/companies.service';
+import { LeadIntakeService } from './lead-intake/lead-intake.service';
 import { ContactsCompaniesResponseDto } from './dto/contacts-companies-response.dto';
-import { LeadIntakeRequestDto, LeadIntakeResponseDto } from './dto/lead-intake-request.dto';
+import {
+  LeadIntakeRequestDto,
+  LeadIntakeResponseDto,
+} from './lead-intake/dto/lead-intake-request.dto';
 
 @ApiTags('crm')
 @Controller('crm')
