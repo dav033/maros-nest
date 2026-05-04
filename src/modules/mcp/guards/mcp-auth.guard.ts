@@ -9,12 +9,19 @@ export class McpAuthGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<Request>();
     const authHeader = request.headers['authorization'];
+    const queryToken = this.readQueryToken(request);
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Missing or invalid Authorization header');
+    let token: string | null = null;
+    if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+      token = authHeader.slice(7);
+    } else if (queryToken) {
+      token = queryToken;
     }
 
-    const token = authHeader.slice(7);
+    if (!token) {
+      throw new UnauthorizedException('Missing or invalid Authorization header (or token query param)');
+    }
+
     const expectedToken = this.configService.get<string>('MCP_TOKEN');
 
     if (!expectedToken) {
@@ -26,5 +33,13 @@ export class McpAuthGuard implements CanActivate {
     }
 
     return true;
+  }
+
+  private readQueryToken(request: Request): string | null {
+    const token = request.query.token;
+    if (typeof token === 'string' && token.trim().length > 0) return token;
+    if (Array.isArray(token) && typeof token[0] === 'string' && token[0].trim().length > 0)
+      return token[0];
+    return null;
   }
 }
