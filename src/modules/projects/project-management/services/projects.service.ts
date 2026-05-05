@@ -14,10 +14,99 @@ import {
 import { BaseService } from '../../../../common/services/base.service';
 import { N8nService } from '../../../n8n/services/n8n.service';
 import { ProjectProgressStatus } from '../../../../common/enums/project-progress-status.enum';
+import { InvoiceStatus } from '../../../../common/enums/invoice-status.enum';
+import { QuickbooksFinancialsService } from '../../../quickbooks/services/financials/quickbooks-financials.service';
 
 @Injectable()
 export class ProjectsService extends BaseService<any, number, Project> {
   private readonly logger = new Logger(ProjectsService.name);
+
+  private async getQuickbooksPayments(projectNumber: string): Promise<
+    | Array<{
+        id?: string;
+        date?: string;
+        amount: number;
+        method?: string;
+        reference?: string;
+        linkedInvoice?: string;
+      }>
+    | undefined
+  > {
+    try {
+      const txns = await this.quickbooksFinancialsService.getPaymentsByProject(
+        projectNumber,
+      );
+
+      if (!Array.isArray(txns) || txns.length === 0) {
+        return undefined;
+      }
+
+      return txns
+        .map((txn) => {
+          const linkedInvoice = txn.linkedTxn.find(
+            (linked) => linked.txnType?.toLowerCase() === 'invoice',
+          )?.txnId;
+
+          return {
+            id: txn.entityId || undefined,
+            date: txn.txnDate || undefined,
+            amount: typeof txn.totalAmount === 'number' ? txn.totalAmount : 0,
+            method: txn.account?.name || undefined,
+            reference: txn.docNumber || undefined,
+            linkedInvoice,
+          };
+        })
+        .filter((payment) => Number.isFinite(payment.amount));
+    } catch (error: any) {
+      this.logger.error(
+        `Error fetching payment list from QuickBooks for project ${projectNumber}: ${error.message}`,
+      );
+      return undefined;
+    }
+  }
+
+  private deriveInvoiceStatus(financial: any): InvoiceStatus | undefined {
+    if (!financial) return undefined;
+
+    const invoicedAmount =
+      typeof financial.invoicedAmount === 'number' ? financial.invoicedAmount : 0;
+    const outstandingAmount =
+      typeof financial.outstandingAmount === 'number'
+        ? financial.outstandingAmount
+        : 0;
+
+    if (invoicedAmount <= 0) {
+      return InvoiceStatus.NOT_EXECUTED;
+    }
+
+    if (outstandingAmount <= 0) {
+      return InvoiceStatus.PAID;
+    }
+
+    return InvoiceStatus.PENDING;
+  }
+
+  private attachFinancialData(
+    dto: any,
+    financial: any | null,
+    payments?: Array<{
+      id?: string;
+      date?: string;
+      amount: number;
+      method?: string;
+      reference?: string;
+      linkedInvoice?: string;
+    }>,
+  ): void {
+    dto.financial = financial
+      ? {
+          ...financial,
+          payments: payments ?? financial.payments,
+        }
+      : null;
+    const status = this.deriveInvoiceStatus(financial);
+    dto.invoiceStatus = status;
+  }
 
   constructor(
     private readonly projectsRepository: ProjectsRepository,
@@ -27,6 +116,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
     private readonly leadRepo: Repository<Lead>,
     private readonly projectMapper: ProjectMapper,
     private readonly n8nService: N8nService,
+    private readonly quickbooksFinancialsService: QuickbooksFinancialsService,
   ) {
     super(projectRepo, projectMapper);
   }
@@ -121,7 +211,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
         dtos.forEach((dto, i) => {
           const leadNumber = entities[i].lead?.leadNumber;
           if (leadNumber) {
-            dto.financial = financialMap.get(leadNumber) ?? null;
+            this.attachFinancialData(dto, financialMap.get(leadNumber) ?? null);
           }
         });
 
@@ -153,8 +243,11 @@ export class ProjectsService extends BaseService<any, number, Project> {
     const leadNumber = entity.lead?.leadNumber;
     if (leadNumber) {
       try {
-        const financial = await this.n8nService.getProjectFinancial(leadNumber);
-        dto.financial = financial ?? null;
+        const [financial, payments] = await Promise.all([
+          this.n8nService.getProjectFinancial(leadNumber),
+          this.getQuickbooksPayments(leadNumber),
+        ]);
+        this.attachFinancialData(dto, financial ?? null, payments);
         this.logger.log(`Retrieved financial data from n8n for project ${id}`);
       } catch (error: any) {
         this.logger.error(`Error fetching financial data from n8n for project ${id}: ${error.message}`);
@@ -216,10 +309,28 @@ export class ProjectsService extends BaseService<any, number, Project> {
       } : null,
     } : null;
 
-    return {
+    const dto = {
       ...projectDto,
       lead: leadDto,
     };
+
+    const leadNumber = project.lead?.leadNumber;
+    if (leadNumber) {
+      try {
+        const [financial, payments] = await Promise.all([
+          this.n8nService.getProjectFinancial(leadNumber),
+          this.getQuickbooksPayments(leadNumber),
+        ]);
+        this.attachFinancialData(dto, financial ?? null, payments);
+        this.logger.log(`Retrieved financial data from n8n for project details ${id}`);
+      } catch (error: any) {
+        this.logger.error(
+          `Error fetching financial data from n8n for project details ${id}: ${error.message}`,
+        );
+      }
+    }
+
+    return dto;
   }
 
   async findByStatus(status: ProjectProgressStatus): Promise<any[]> {
@@ -255,8 +366,11 @@ export class ProjectsService extends BaseService<any, number, Project> {
     const dto = this.projectMapper.toDto(entity);
 
     try {
-      const financial = await this.n8nService.getProjectFinancial(leadNumber);
-      dto.financial = financial ?? null;
+      const [financial, payments] = await Promise.all([
+        this.n8nService.getProjectFinancial(leadNumber),
+        this.getQuickbooksPayments(leadNumber),
+      ]);
+      this.attachFinancialData(dto, financial ?? null, payments);
       this.logger.log(`Retrieved financial data from n8n for lead number ${leadNumber}`);
     } catch (error: any) {
       this.logger.error(`Error fetching financial data from n8n for lead number ${leadNumber}: ${error.message}`);

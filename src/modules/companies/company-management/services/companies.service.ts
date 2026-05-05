@@ -175,8 +175,6 @@ export class CompaniesService extends BaseService<any, number, Company> {
           project: lead.project ? {
             id: lead.project.id,
             projectProgressStatus: lead.project.projectProgressStatus,
-            invoiceStatus: lead.project.invoiceStatus,
-            invoiceAmount: lead.project.invoiceAmount ? parseFloat(lead.project.invoiceAmount.toString()) : null,
           } : null,
         })),
       };

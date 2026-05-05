@@ -314,10 +314,7 @@ export class ContactsService extends BaseService<any, number, Contact> {
   private mapProjectToDto(project: Project): any {
     return {
       id: project.id,
-      invoiceAmount: project.invoiceAmount ? parseFloat(project.invoiceAmount.toString()) : null,
-      payments: project.payments,
       projectProgressStatus: project.projectProgressStatus,
-      invoiceStatus: project.invoiceStatus,
       quickbooks: project.quickbooks,
       overview: project.overview,
       notes: project.notes,

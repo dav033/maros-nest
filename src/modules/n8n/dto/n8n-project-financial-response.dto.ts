@@ -1,4 +1,24 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+class N8nProjectPaymentDto {
+  @ApiPropertyOptional({ description: 'Payment transaction id', example: '9732' })
+  id?: string;
+
+  @ApiPropertyOptional({ description: 'Payment date', example: '2026-05-01' })
+  date?: string;
+
+  @ApiProperty({ description: 'Payment amount', example: 1800.5 })
+  amount: number;
+
+  @ApiPropertyOptional({ description: 'Payment method', example: 'Credit Card' })
+  method?: string;
+
+  @ApiPropertyOptional({ description: 'Payment reference/number', example: 'PMT-2281' })
+  reference?: string;
+
+  @ApiPropertyOptional({ description: 'Linked invoice number', example: 'INV-1021' })
+  linkedInvoice?: string;
+}
 
 export class N8nProjectFinancialResponseDto {
   @ApiProperty({
@@ -54,6 +74,12 @@ export class N8nProjectFinancialResponseDto {
     example: -457.3,
   })
   estimateVsInvoicedDelta: number;
+
+  @ApiPropertyOptional({
+    description: 'Optional payment transactions list from QuickBooks',
+    type: [N8nProjectPaymentDto],
+  })
+  payments?: N8nProjectPaymentDto[];
 }
 
 

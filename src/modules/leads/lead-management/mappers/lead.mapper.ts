@@ -101,6 +101,11 @@ export class LeadMapper {
         name: entity.projectType.name,
         color: entity.projectType.color,
       } : null,
+      project: entity.project
+        ? {
+            id: entity.project.id,
+          }
+        : null,
     };
   }
 }

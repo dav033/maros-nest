@@ -7,11 +7,7 @@ import { Project } from '../../../../entities/project.entity';
 export class ProjectMapper {
   toEntity(dto: CreateProjectDto): Project {
     const entity = new Project();
-    entity.invoiceAmount = dto.invoiceAmount;
-    entity.payments = dto.payments;
     entity.projectProgressStatus = dto.projectProgressStatus;
-    entity.invoiceStatus = dto.invoiceStatus;
-    entity.quickbooks = dto.quickbooks ?? false;
     entity.overview = dto.overview;
     entity.notes = dto.notes ?? [];
     
@@ -19,34 +15,15 @@ export class ProjectMapper {
   }
 
   updateEntity(dto: UpdateProjectDto, entity: Project): void {
-    if (dto.invoiceAmount !== undefined) entity.invoiceAmount = dto.invoiceAmount;
-    if (dto.payments !== undefined) entity.payments = dto.payments;
     if (dto.projectProgressStatus !== undefined) entity.projectProgressStatus = dto.projectProgressStatus;
-    if (dto.invoiceStatus !== undefined) entity.invoiceStatus = dto.invoiceStatus;
-    if (dto.quickbooks !== undefined) entity.quickbooks = dto.quickbooks;
     if (dto.overview !== undefined) entity.overview = dto.overview;
     if (dto.notes !== undefined) entity.notes = dto.notes;
   }
 
   toDto(entity: Project): any {
-    // Convert invoiceAmount from decimal (string) to number if needed
-    let invoiceAmount: number | undefined = undefined;
-    if (entity.invoiceAmount !== null && entity.invoiceAmount !== undefined) {
-      if (typeof entity.invoiceAmount === 'number') {
-        invoiceAmount = entity.invoiceAmount;
-      } else if (typeof entity.invoiceAmount === 'string') {
-        const parsed = parseFloat(entity.invoiceAmount);
-        invoiceAmount = isNaN(parsed) ? undefined : parsed;
-      }
-    }
-    
     const dto: any = {
       id: entity.id,
-      invoiceAmount: invoiceAmount,
-      payments: entity.payments,
       projectProgressStatus: entity.projectProgressStatus,
-      invoiceStatus: entity.invoiceStatus,
-      quickbooks: entity.quickbooks,
       overview: entity.overview,
       notes: entity.notes || [],
       leadId: entity.lead ? entity.lead.id : undefined,
