@@ -14,7 +14,7 @@ export class LeadNumberingService {
     leadDto: CreateLeadDto,
     leadTypeForGeneration?: LeadType,
   ): Promise<void> {
-    leadDto.status = leadDto.status || LeadStatus.NOT_EXECUTED;
+    leadDto.status = leadDto.status || LeadStatus.NEW_LEAD;
 
     if (!leadDto.leadNumber || leadDto.leadNumber.trim() === '') {
       const typeToUse = leadTypeForGeneration || LeadType.CONSTRUCTION;

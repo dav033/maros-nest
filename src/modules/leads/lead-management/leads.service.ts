@@ -136,6 +136,12 @@ export class LeadsService {
     skipClickUpSync: boolean = false,
     leadTypeForGeneration?: LeadType,
   ): Promise<any> {
+    if (!contactDto.address && leadDto.location) {
+      contactDto.address = leadDto.location;
+    }
+    if (!contactDto.addressLink && leadDto.addressLink) {
+      contactDto.addressLink = leadDto.addressLink;
+    }
     const savedContact = await this.contactsService.create(contactDto);
     const savedContactId = (savedContact as { id?: unknown }).id;
     if (typeof savedContactId !== 'number') {
@@ -292,6 +298,21 @@ export class LeadsService {
 
     await this.leadMutationService.updateEntityFields(patchDto, entity);
     await this.dataSource.manager.save(entity);
+
+    // Auto-create project when status becomes WON
+    if (entity.status === LeadStatus.WON) {
+      const existingProject = await this.projectRepo.findOne({
+        where: { lead: { id } },
+      });
+      if (!existingProject) {
+        const project = this.projectRepo.create();
+        project.lead = entity;
+        const savedProject = await this.projectRepo.save(project);
+        entity.project = savedProject;
+      } else {
+        entity.project = existingProject;
+      }
+    }
 
     const dto = this.leadMapper.toDto(entity);
 

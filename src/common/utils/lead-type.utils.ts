@@ -16,7 +16,10 @@ export function getLeadTypeFromNumber(leadNumber: string | null | undefined): Le
     return null;
   }
 
-  const trimmed = leadNumber.trim();
+  const trimmed = leadNumber.trim().toUpperCase();
+  if (!trimmed) {
+    return null;
+  }
   
   // Patrón para ROOFING: número seguido de 'R-' y más números
   // Ejemplo: 053R-1025
@@ -30,14 +33,10 @@ export function getLeadTypeFromNumber(leadNumber: string | null | undefined): Le
     return LeadType.PLUMBING;
   }
 
-  // Patrón para CONSTRUCTION: número seguido de '-' y más números (sin prefijo)
-  // Ejemplo: 053-1025
-  if (/^\d+-\d+$/.test(trimmed)) {
-    return LeadType.CONSTRUCTION;
-  }
-
-  // Si no coincide con ningún patrón, retornar null
-  return null;
+  // Todo lo que no sea ROOFING o PLUMBING se considera CONSTRUCTION.
+  // Esto mantiene compatibilidad con números legacy que no siguen
+  // exactamente el formato NNN-NNNN.
+  return LeadType.CONSTRUCTION;
 }
 
 /**
