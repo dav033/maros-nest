@@ -46,6 +46,12 @@ export class Lead {
   @Column({ type: 'jsonb', nullable: true, name: 'notes' })
   notes?: string[];
 
+  @Column({ type: 'jsonb', nullable: true, name: 'attachments', default: [] })
+  attachments?: string[];
+
+  @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true, name: 'estimate' })
+  estimate?: number;
+
   @Column({ name: 'in_review', type: 'boolean', default: false })
   inReview: boolean;
 

@@ -18,6 +18,8 @@ export class LeadMapper {
     if (dto.status) entity.status = dto.status;
     // leadType ya no se almacena, se determina desde leadNumber
     if (dto.notes) entity.notes = dto.notes;
+    if (dto.attachments) entity.attachments = dto.attachments;
+    if (dto.estimate !== undefined) entity.estimate = dto.estimate;
     entity.inReview = dto.inReview ?? false;
     
     // Relations (contact, projectType) are usually handled by the service
@@ -37,6 +39,8 @@ export class LeadMapper {
     if (dto.status !== undefined) entity.status = dto.status;
     // leadType ya no se almacena, se determina desde leadNumber
     if (dto.notes !== undefined) entity.notes = dto.notes;
+    if (dto.attachments !== undefined) entity.attachments = dto.attachments;
+    if (dto.estimate !== undefined) entity.estimate = dto.estimate;
     if (dto.inReview !== undefined) entity.inReview = dto.inReview;
   }
 
@@ -60,6 +64,17 @@ export class LeadMapper {
     }
     notes = Array.isArray(notes) ? notes : [];
 
+    // Parse attachments if it's a string (JSONB sometimes comes as string)
+    let attachments = entity.attachments;
+    if (typeof attachments === 'string') {
+      try {
+        attachments = JSON.parse(attachments);
+      } catch {
+        attachments = [];
+      }
+    }
+    attachments = Array.isArray(attachments) ? attachments : [];
+
     return {
       id: entity.id,
       leadNumber: entity.leadNumber,
@@ -70,6 +85,8 @@ export class LeadMapper {
       status: entity.status,
       leadType: getLeadTypeFromNumber(entity.leadNumber),
       notes: notes,
+      attachments: attachments,
+      estimate: entity.estimate != null ? Number(entity.estimate) : null,
       inReview: entity.inReview ?? false,
       contact: entity.contact ? {
         id: entity.contact.id,

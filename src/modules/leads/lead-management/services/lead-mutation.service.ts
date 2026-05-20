@@ -133,8 +133,14 @@ export class LeadMutationService {
     if (dto.notes !== undefined) {
       entity.notes = dto.notes;
     }
+    if (dto.attachments !== undefined) {
+      entity.attachments = dto.attachments;
+    }
     if (dto.inReview !== undefined) {
       entity.inReview = dto.inReview;
+    }
+    if (dto.estimate !== undefined) {
+      entity.estimate = dto.estimate;
     }
   }
 

@@ -55,6 +55,17 @@ export class CreateLeadDto {
   @IsOptional()
   notes?: string[];
 
+  @ApiPropertyOptional({ description: 'Attachment S3 keys for the lead', type: [String] })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  attachments?: string[];
+
+  @ApiPropertyOptional({ description: 'Estimated value of the lead' })
+  @IsNumber()
+  @IsOptional()
+  estimate?: number;
+
   @ApiPropertyOptional({ description: 'Whether the lead is in review', default: false })
   @IsBoolean()
   @IsOptional()
