@@ -12,6 +12,16 @@ export interface QueryAllOptions {
 export class QuickbooksApiService {
   private readonly logger = new Logger(QuickbooksApiService.name);
   private readonly environment: string;
+  private readonly readCacheTtlMs = 90_000;
+  private readonly readCacheMaxEntries = 1_500;
+  private readonly readCache = new Map<
+    string,
+    {
+      expiresAt: number;
+      value: unknown;
+    }
+  >();
+  private readonly inFlightReadRequests = new Map<string, Promise<unknown>>();
 
   constructor(
     private readonly authService: QuickbooksAuthService,
@@ -34,8 +44,12 @@ export class QuickbooksApiService {
 
   /** Fetches a single Customer by ID. */
   async getCustomer(realmId: string, customerId: string): Promise<unknown> {
-    return this.withRetry(realmId, (client) =>
-      client.get<unknown>(`/customer/${customerId}`).then((r) => r.data),
+    return this.getOrSetReadCache(
+      this.buildReadCacheKey('customer', realmId, customerId),
+      () =>
+        this.withRetry(realmId, (client) =>
+          client.get<unknown>(`/customer/${customerId}`).then((r) => r.data),
+        ),
     );
   }
 
@@ -65,10 +79,14 @@ export class QuickbooksApiService {
     entityType: string,
     id: string,
   ): Promise<unknown> {
-    return this.withRetry(realmId, (client) =>
-      client
-        .get<unknown>(`/${entityType.toLowerCase()}/${id}`)
-        .then((r) => r.data),
+    return this.getOrSetReadCache(
+      this.buildReadCacheKey('entity', realmId, entityType.toLowerCase(), id),
+      () =>
+        this.withRetry(realmId, (client) =>
+          client
+            .get<unknown>(`/${entityType.toLowerCase()}/${id}`)
+            .then((r) => r.data),
+        ),
     );
   }
 
@@ -81,10 +99,14 @@ export class QuickbooksApiService {
     reportName: string,
     params: Record<string, string | number | undefined> = {},
   ): Promise<unknown> {
-    return this.withRetry(realmId, (client) =>
-      client
-        .get<unknown>(`/reports/${reportName}`, { params })
-        .then((r) => r.data),
+    return this.getOrSetReadCache(
+      this.buildReadCacheKey('report', realmId, reportName, JSON.stringify(params)),
+      () =>
+        this.withRetry(realmId, (client) =>
+          client
+            .get<unknown>(`/reports/${reportName}`, { params })
+            .then((r) => r.data),
+        ),
     );
   }
 
@@ -99,10 +121,14 @@ export class QuickbooksApiService {
 
   /** Runs a QBO SQL-like query via GET. Prefer for short queries. */
   async queryRawGet(realmId: string, sqlLikeQuery: string): Promise<unknown> {
-    return this.withRetry(realmId, (client) =>
-      client
-        .get<unknown>('/query', { params: { query: sqlLikeQuery } })
-        .then((r) => r.data),
+    return this.getOrSetReadCache(
+      this.buildReadCacheKey('query:get', realmId, sqlLikeQuery),
+      () =>
+        this.withRetry(realmId, (client) =>
+          client
+            .get<unknown>('/query', { params: { query: sqlLikeQuery } })
+            .then((r) => r.data),
+        ),
     );
   }
 
@@ -111,12 +137,16 @@ export class QuickbooksApiService {
    * by the QBO API spec. Use for queries too long to fit in a GET URL.
    */
   async queryRawPost(realmId: string, sqlLikeQuery: string): Promise<unknown> {
-    return this.withRetry(realmId, (client) =>
-      client
-        .post<unknown>('/query', sqlLikeQuery, {
-          headers: { 'Content-Type': 'application/text' },
-        })
-        .then((r) => r.data),
+    return this.getOrSetReadCache(
+      this.buildReadCacheKey('query:post', realmId, sqlLikeQuery),
+      () =>
+        this.withRetry(realmId, (client) =>
+          client
+            .post<unknown>('/query', sqlLikeQuery, {
+              headers: { 'Content-Type': 'application/text' },
+            })
+            .then((r) => r.data),
+        ),
     );
   }
 
@@ -239,20 +269,127 @@ export class QuickbooksApiService {
     request: (client: AxiosInstance) => Promise<T>,
   ): Promise<T> {
     let client = await this.buildClient(realmId);
+    let tokenRefreshAttempted = false;
+    const maxRateLimitRetries = 3;
+    let rateLimitRetries = 0;
 
-    try {
-      return await request(client);
-    } catch (error) {
-      const axiosErr = error as AxiosError;
-      if (axiosErr.response?.status === 401) {
-        this.logger.warn(
-          `QBO 401 for realm ${realmId} — refreshing token and retrying`,
-        );
-        await this.authService.refreshTokens(realmId);
-        client = await this.buildClient(realmId);
+    while (true) {
+      try {
         return await request(client);
+      } catch (error) {
+        const axiosErr = error as AxiosError;
+        const status = axiosErr.response?.status;
+
+        if (status === 401 && !tokenRefreshAttempted) {
+          tokenRefreshAttempted = true;
+          this.logger.warn(
+            `QBO 401 for realm ${realmId} — refreshing token and retrying`,
+          );
+          await this.authService.refreshTokens(realmId);
+          client = await this.buildClient(realmId);
+          continue;
+        }
+
+        if (status === 429 && rateLimitRetries < maxRateLimitRetries) {
+          const waitMs = this.resolveRateLimitDelayMs(axiosErr, rateLimitRetries);
+          rateLimitRetries += 1;
+          this.logger.warn(
+            `QBO 429 for realm ${realmId} — retry ${rateLimitRetries}/${maxRateLimitRetries} in ${waitMs}ms`,
+          );
+          await this.sleep(waitMs);
+          continue;
+        }
+
+        throw error;
       }
-      throw error;
+    }
+  }
+
+  private resolveRateLimitDelayMs(error: AxiosError, attempt: number): number {
+    const retryAfterRaw = error.response?.headers?.['retry-after'];
+    const retryAfterHeader = Array.isArray(retryAfterRaw)
+      ? retryAfterRaw[0]
+      : retryAfterRaw;
+    const retryAfterSeconds = Number(retryAfterHeader);
+
+    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+      return Math.min(30_000, Math.ceil(retryAfterSeconds * 1_000));
+    }
+
+    const baseDelayMs = 600;
+    const backoffDelayMs = baseDelayMs * 2 ** attempt;
+    const jitterMs = Math.floor(Math.random() * 300);
+    return Math.min(10_000, backoffDelayMs + jitterMs);
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  clearReadCache(): void {
+    this.readCache.clear();
+    this.inFlightReadRequests.clear();
+  }
+
+  private buildReadCacheKey(...parts: Array<string>): string {
+    return parts.join('::');
+  }
+
+  private async getOrSetReadCache<T>(
+    key: string,
+    load: () => Promise<T>,
+  ): Promise<T> {
+    this.pruneReadCacheIfNeeded();
+
+    const now = Date.now();
+    const cached = this.readCache.get(key);
+    if (cached && cached.expiresAt > now) {
+      return cached.value as T;
+    }
+
+    const inFlight = this.inFlightReadRequests.get(key);
+    if (inFlight) {
+      return (await inFlight) as T;
+    }
+
+    const requestPromise = load()
+      .then((value) => {
+        this.readCache.set(key, {
+          value,
+          expiresAt: Date.now() + this.readCacheTtlMs,
+        });
+        return value;
+      })
+      .finally(() => {
+        this.inFlightReadRequests.delete(key);
+      });
+
+    this.inFlightReadRequests.set(key, requestPromise as Promise<unknown>);
+    return requestPromise;
+  }
+
+  private pruneReadCacheIfNeeded(): void {
+    const now = Date.now();
+
+    for (const [key, value] of this.readCache.entries()) {
+      if (value.expiresAt <= now) {
+        this.readCache.delete(key);
+      }
+    }
+
+    if (this.readCache.size <= this.readCacheMaxEntries) {
+      return;
+    }
+
+    const excess = this.readCache.size - this.readCacheMaxEntries;
+    let removed = 0;
+
+    for (const key of this.readCache.keys()) {
+      this.readCache.delete(key);
+      removed += 1;
+      if (removed >= excess) {
+        break;
+      }
     }
   }
 }

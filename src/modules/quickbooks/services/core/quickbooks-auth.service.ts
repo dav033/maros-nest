@@ -94,7 +94,12 @@ export class QuickbooksAuthService {
    * is always saved, even if it looks the same.
    */
   async refreshTokens(realmId: string): Promise<void> {
-    this.ensureOAuthConfigured();
+    if (!this.isOAuthConfigured()) {
+      this.logger.error(
+        `QBO refresh requested for realm ${realmId} but OAuth credentials are not configured — manual reauthorization required`,
+      );
+      throw new QboReauthorizationRequiredException(realmId);
+    }
     const connection = await this.connectionRepo.findOneBy({ realmId });
     if (!connection) {
       throw new QboReauthorizationRequiredException(realmId);
@@ -187,8 +192,12 @@ export class QuickbooksAuthService {
     };
   }
 
+  private isOAuthConfigured(): boolean {
+    return Boolean(this.clientId && this.clientSecret && this.redirectUri);
+  }
+
   private ensureOAuthConfigured(): void {
-    if (!this.clientId || !this.clientSecret || !this.redirectUri) {
+    if (!this.isOAuthConfigured()) {
       throw new Error('QuickBooks OAuth is not configured.');
     }
   }

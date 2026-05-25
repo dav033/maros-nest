@@ -178,6 +178,11 @@ export interface QboPaymentResponse {
   QueryResponse?: { Payment?: Record<string, unknown>[] };
 }
 
+export interface RevenueByMonthPoint {
+  month: string;
+  revenue: number;
+}
+
 export interface JobIndex {
   byId: Record<string, QboCustomer>;
   projectNumberById: Record<string, string | null>;

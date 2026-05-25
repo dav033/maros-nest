@@ -14,6 +14,7 @@ import {
   QboEstimateResponse,
   QboInvoiceResponse,
   QboPaymentResponse,
+  RevenueByMonthPoint,
   RevenueByPeriodResult,
 } from './quickbooks-reports.types';
 
@@ -138,6 +139,34 @@ export class QuickbooksReportsOperationalService {
     );
 
     return { period: { start, end }, totalRevenue, paymentCount: payments.length, payments };
+  }
+
+  async getRevenueByMonth(
+    start: string,
+    end: string,
+    realmId?: string,
+  ): Promise<RevenueByMonthPoint[]> {
+    const rid = await this.contextService.resolveRealmId(realmId);
+    const escapedStart = this.apiService.escapeQboString(start);
+    const escapedEnd = this.apiService.escapeQboString(end);
+    const payments = (await this.apiService.queryAll(rid, 'Payment', {
+      where: `TxnDate >= '${escapedStart}' AND TxnDate <= '${escapedEnd}'`,
+      orderBy: 'TxnDate ASC',
+    })) as Record<string, unknown>[];
+
+    const totals = new Map<string, number>();
+
+    for (const payment of payments) {
+      const txnDate = String(payment['TxnDate'] ?? '');
+      if (!txnDate || txnDate.length < 7) continue;
+      const month = txnDate.slice(0, 7);
+      const amount = Number(payment['TotalAmt']) || 0;
+      totals.set(month, (totals.get(month) ?? 0) + amount);
+    }
+
+    return [...totals.entries()]
+      .map(([month, revenue]) => ({ month, revenue }))
+      .sort((a, b) => a.month.localeCompare(b.month));
   }
 
   async getBacklog(realmId?: string): Promise<BacklogItem[]> {

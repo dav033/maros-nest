@@ -6,10 +6,11 @@ import * as crypto from 'crypto';
  * AES-256-GCM encryption for QBO tokens at rest.
  * Ciphertext format: {iv_hex}:{authTag_hex}:{encrypted_hex}
  * Key source: QB_ENCRYPTION_KEY env var (64 hex chars = 32 bytes).
+ * If the key is not configured, tokens are stored/read as plaintext (passthrough).
  */
 @Injectable()
 export class TokenCryptoService implements OnModuleInit {
-  private key!: Buffer;
+  private key?: Buffer;
 
   constructor(private readonly configService: ConfigService) {}
 
@@ -25,7 +26,7 @@ export class TokenCryptoService implements OnModuleInit {
   }
 
   encrypt(plaintext: string): string {
-    this.ensureConfigured();
+    if (!this.key) return plaintext;
     const iv = crypto.randomBytes(12); // 96-bit IV recommended for GCM
     const cipher = crypto.createCipheriv('aes-256-gcm', this.key, iv);
 
@@ -40,10 +41,11 @@ export class TokenCryptoService implements OnModuleInit {
   }
 
   decrypt(ciphertext: string): string {
-    this.ensureConfigured();
+    if (!this.key) return ciphertext;
     const parts = ciphertext.split(':');
     if (parts.length !== 3) {
-      throw new Error('Invalid ciphertext format — expected iv:authTag:data');
+      // Stored as plaintext (key was added later) — return as-is.
+      return ciphertext;
     }
 
     const [ivHex, authTagHex, encryptedHex] = parts;
@@ -55,11 +57,5 @@ export class TokenCryptoService implements OnModuleInit {
     decipher.setAuthTag(authTag);
 
     return decipher.update(encrypted).toString('utf8') + decipher.final('utf8');
-  }
-
-  private ensureConfigured(): void {
-    if (!this.key) {
-      throw new Error('QuickBooks token encryption is not configured.');
-    }
   }
 }

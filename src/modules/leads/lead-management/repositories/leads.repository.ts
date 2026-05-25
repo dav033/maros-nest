@@ -130,6 +130,32 @@ export class LeadsRepository {
       .getMany();
   }
 
+  async getStatusCounts(): Promise<
+    Array<{ status: string; count: number; estimatedValue: number }>
+  > {
+    const rows: Array<{
+      status: string | null;
+      count: string;
+      estimate: string | null;
+    }> = await this.repo
+      .createQueryBuilder('lead')
+      .select('lead.status', 'status')
+      .addSelect('COUNT(lead.id)', 'count')
+      .addSelect('COALESCE(SUM(lead.estimate), 0)', 'estimate')
+      .groupBy('lead.status')
+      .getRawMany();
+
+    return rows.map((row) => ({
+      status: row.status ?? 'UNKNOWN',
+      count: Number(row.count) || 0,
+      estimatedValue: Number(row.estimate) || 0,
+    }));
+  }
+
+  async getTotalCount(): Promise<number> {
+    return this.repo.count();
+  }
+
   async findByContactId(contactId: number): Promise<Lead[]> {
     return this.repo
       .createQueryBuilder('lead')

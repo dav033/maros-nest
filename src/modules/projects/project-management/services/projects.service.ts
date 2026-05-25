@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { Project } from '../../../../entities/project.entity';
 import { Lead } from '../../../../entities/lead.entity';
 import { ProjectsRepository } from '../repositories/projects.repository';
@@ -185,9 +185,48 @@ export class ProjectsService extends BaseService<any, number, Project> {
       entity.lead = newLead;
     }
 
+    if (dto.leadName !== undefined) {
+      const trimmedLeadName = this.normalizeLeadName(dto.leadName);
+      if (!trimmedLeadName) {
+        throw ValidationException.format('Lead name cannot be empty');
+      }
+      entity.lead.name = trimmedLeadName;
+    }
+
+    if (dto.leadNumber !== undefined) {
+      const trimmedLeadNumber = this.normalizeLeadNumber(dto.leadNumber);
+      if (!trimmedLeadNumber) {
+        throw ValidationException.format('Lead number cannot be empty');
+      }
+
+      const existingLeadWithNumber = await this.leadRepo.count({
+        where: {
+          leadNumber: trimmedLeadNumber,
+          id: Not(entity.lead.id),
+        },
+      });
+
+      if (existingLeadWithNumber > 0) {
+        throw ValidationException.format(
+          'Lead number already exists: %s',
+          trimmedLeadNumber,
+        );
+      }
+
+      entity.lead.leadNumber = trimmedLeadNumber;
+    }
+
     this.projectMapper.updateEntity(dto, entity);
     const saved = await this.projectRepo.save(entity);
     return this.projectMapper.toDto(saved);
+  }
+
+  private normalizeLeadName(value: string): string {
+    return value.trim();
+  }
+
+  private normalizeLeadNumber(value: string): string {
+    return value.trim();
   }
 
   async findAll(): Promise<any[]> {
@@ -339,6 +378,27 @@ export class ProjectsService extends BaseService<any, number, Project> {
       relations: ['lead', 'lead.contact', 'lead.contact.company', 'lead.projectType'],
     });
     return entities.map((entity) => this.projectMapper.toDto(entity));
+  }
+
+  async getStatusCounts(): Promise<Array<{ status: string; count: number }>> {
+    return this.projectsRepository.getStatusCounts();
+  }
+
+  async findAnalyticsProjectSeed(
+    limit: number = 200,
+  ): Promise<
+    Array<{
+      id: number;
+      projectProgressStatus?: ProjectProgressStatus;
+      leadNumber?: string;
+      leadName?: string;
+    }>
+  > {
+    return this.projectsRepository.findAnalyticsProjectSeed(limit);
+  }
+
+  async countAll(): Promise<number> {
+    return this.projectsRepository.countAll();
   }
 
   async findByContactId(contactId: number): Promise<any[]> {
