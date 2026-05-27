@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { LeadStatus } from '../../../common/enums/lead-status.enum';
+import { LeadType } from '../../../common/enums/lead-type.enum';
 import { ProjectProgressStatus } from '../../../common/enums/project-progress-status.enum';
 import { LeadsService } from '../../leads/lead-management/leads.service';
 import { ProjectsService } from '../../projects/project-management/services/projects.service';
@@ -13,8 +14,8 @@ export class AnalyticsPipelineService {
     private readonly projectsService: ProjectsService,
   ) {}
 
-  async getPipeline(): Promise<PipelineBucketDto[]> {
-    const rows = await this.leadsService.getStatusCounts();
+  async getPipeline(leadType?: LeadType): Promise<PipelineBucketDto[]> {
+    const rows = await this.leadsService.getStatusCounts(leadType);
     const byStatus = new Map(rows.map((row) => [row.status, row]));
 
     return Object.values(LeadStatus).map((status) => {
@@ -27,8 +28,10 @@ export class AnalyticsPipelineService {
     });
   }
 
-  async getProjectsStatus(): Promise<ProjectsStatusBucketDto[]> {
-    const rows = await this.projectsService.getStatusCounts();
+  async getProjectsStatus(
+    leadType?: LeadType,
+  ): Promise<ProjectsStatusBucketDto[]> {
+    const rows = await this.projectsService.getStatusCounts(leadType);
     const knownStatuses = new Set(Object.values(ProjectProgressStatus));
     const byStatus = new Map<string, number>();
 

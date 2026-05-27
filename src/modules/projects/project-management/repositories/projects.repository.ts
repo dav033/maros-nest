@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Project } from '../../../../entities/project.entity';
 import { ProjectProgressStatus } from '../../../../common/enums/project-progress-status.enum';
+import { LeadType } from '../../../../common/enums/lead-type.enum';
+import { leadNumberSqlFilter } from '../../../../common/utils/lead-type.utils';
 
 @Injectable()
 export class ProjectsRepository {
@@ -15,13 +17,24 @@ export class ProjectsRepository {
     return this.repo.find({ where: { projectProgressStatus: status } });
   }
 
-  async getStatusCounts(): Promise<Array<{ status: string; count: number }>> {
-    const rows: Array<{ status: string | null; count: string }> = await this.repo
+  async getStatusCounts(
+    leadType?: LeadType,
+  ): Promise<Array<{ status: string; count: number }>> {
+    const qb = this.repo
       .createQueryBuilder('project')
       .select('project.projectProgressStatus', 'status')
       .addSelect('COUNT(project.id)', 'count')
-      .groupBy('project.projectProgressStatus')
-      .getRawMany();
+      .groupBy('project.projectProgressStatus');
+
+    if (leadType) {
+      qb.innerJoin('project.lead', 'lead');
+      const filter = leadNumberSqlFilter(leadType, 'lead.lead_number', 'leadNumberPattern');
+      if (filter) {
+        qb.andWhere(filter.clause, filter.parameters);
+      }
+    }
+
+    const rows: Array<{ status: string | null; count: string }> = await qb.getRawMany();
 
     return rows.map((row) => ({
       status: row.status ?? 'UNKNOWN',
@@ -29,12 +42,23 @@ export class ProjectsRepository {
     }));
   }
 
-  async countAll(): Promise<number> {
-    return this.repo.count();
+  async countAll(leadType?: LeadType): Promise<number> {
+    if (!leadType) {
+      return this.repo.count();
+    }
+    const qb = this.repo
+      .createQueryBuilder('project')
+      .innerJoin('project.lead', 'lead');
+    const filter = leadNumberSqlFilter(leadType, 'lead.lead_number', 'leadNumberPattern');
+    if (filter) {
+      qb.andWhere(filter.clause, filter.parameters);
+    }
+    return qb.getCount();
   }
 
   async findAnalyticsProjectSeed(
     limit: number = 200,
+    leadType?: LeadType,
   ): Promise<
     Array<{
       id: number;
@@ -44,7 +68,7 @@ export class ProjectsRepository {
     }>
   > {
     const safeLimit = Math.max(1, Math.min(1_000, Math.trunc(limit)));
-    const rows = await this.repo
+    const qb = this.repo
       .createQueryBuilder('project')
       .innerJoin('project.lead', 'lead')
       .select('project.id', 'id')
@@ -53,13 +77,19 @@ export class ProjectsRepository {
       .addSelect('lead.name', 'leadName')
       .where('lead.leadNumber IS NOT NULL')
       .orderBy('project.id', 'DESC')
-      .limit(safeLimit)
-      .getRawMany<{
-        id: number | string;
-        projectProgressStatus?: string | null;
-        leadNumber?: string | null;
-        leadName?: string | null;
-      }>();
+      .limit(safeLimit);
+
+    const filter = leadNumberSqlFilter(leadType, 'lead.lead_number', 'leadNumberPattern');
+    if (filter) {
+      qb.andWhere(filter.clause, filter.parameters);
+    }
+
+    const rows = await qb.getRawMany<{
+      id: number | string;
+      projectProgressStatus?: string | null;
+      leadNumber?: string | null;
+      leadName?: string | null;
+    }>();
 
     return rows.map((row) => {
       const status = row.projectProgressStatus;

@@ -20,10 +20,11 @@ import { QuickbooksApiService } from '../quickbooks/services/core/quickbooks-api
 import { DateRangeQueryDto } from './dto/queries/date-range-query.dto';
 import { RevenueTrendQueryDto } from './dto/queries/revenue-trend-query.dto';
 import { TopClientsQueryDto } from './dto/queries/top-clients-query.dto';
+import { LeadTypeQueryDto } from './dto/queries/lead-type-query.dto';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
 
-class ListLimitQueryDto {
+class ListLimitQueryDto extends LeadTypeQueryDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt({ message: '"limit" must be an integer' })
@@ -47,31 +48,35 @@ export class AnalyticsController {
   @Get('overview')
   @CacheTTL(300)
   getOverview(@Query() query: DateRangeQueryDto) {
-    return this.overviewService.getOverview({ from: query.from, to: query.to });
+    return this.overviewService.getOverview({
+      from: query.from,
+      to: query.to,
+      leadType: query.leadType,
+    });
   }
 
   @Get('pipeline')
   @CacheTTL(300)
-  getPipeline() {
-    return this.pipelineService.getPipeline();
+  getPipeline(@Query() query: LeadTypeQueryDto) {
+    return this.pipelineService.getPipeline(query.leadType);
   }
 
   @Get('projects-status')
   @CacheTTL(300)
-  getProjectsStatus() {
-    return this.pipelineService.getProjectsStatus();
+  getProjectsStatus(@Query() query: LeadTypeQueryDto) {
+    return this.pipelineService.getProjectsStatus(query.leadType);
   }
 
   @Get('financial-snapshot')
   @CacheTTL(300)
-  getFinancialSnapshot() {
-    return this.financialService.getFinancialSnapshot();
+  getFinancialSnapshot(@Query() query: LeadTypeQueryDto) {
+    return this.financialService.getFinancialSnapshot(query.leadType);
   }
 
   @Get('aging')
   @CacheTTL(300)
-  getAging() {
-    return this.financialService.getAging();
+  getAging(@Query() query: LeadTypeQueryDto) {
+    return this.financialService.getAging(query.leadType);
   }
 
   @Get('revenue-trend')
@@ -81,6 +86,7 @@ export class AnalyticsController {
     return this.financialService.getRevenueTrend(months, {
       from: query.from,
       to: query.to,
+      leadType: query.leadType,
     });
   }
 
@@ -89,19 +95,22 @@ export class AnalyticsController {
   getTopClients(@Query() query: TopClientsQueryDto) {
     const limit = query.limit ?? 5;
     const by = query.by ?? 'revenue';
-    return this.financialService.getTopClients(limit, by);
+    return this.financialService.getTopClients(limit, by, query.leadType);
   }
 
   @Get('outstanding-balances')
   @CacheTTL(300)
   getOutstandingBalances(@Query() query: ListLimitQueryDto) {
-    return this.financialService.getOutstandingBalances(query.limit ?? 100);
+    return this.financialService.getOutstandingBalances(
+      query.limit ?? 100,
+      query.leadType,
+    );
   }
 
   @Get('backlog')
   @CacheTTL(300)
   getBacklog(@Query() query: ListLimitQueryDto) {
-    return this.financialService.getBacklog(query.limit ?? 100);
+    return this.financialService.getBacklog(query.limit ?? 100, query.leadType);
   }
 
   @Get('quickbooks-revenue-report')
@@ -116,13 +125,16 @@ export class AnalyticsController {
   @Get('project-financials')
   @CacheTTL(300)
   getProjectFinancials(@Query() query: ListLimitQueryDto) {
-    return this.financialService.getProjectFinancials(query.limit ?? 200);
+    return this.financialService.getProjectFinancials(
+      query.limit ?? 200,
+      query.leadType,
+    );
   }
 
   @Get('project-health')
   @CacheTTL(300)
-  getProjectHealth() {
-    return this.projectsService.getProjectHealth();
+  getProjectHealth(@Query() query: LeadTypeQueryDto) {
+    return this.projectsService.getProjectHealth(query.leadType);
   }
 
   @Post('refresh')

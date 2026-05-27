@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { LeadType } from '../../../common/enums/lead-type.enum';
 import { ProjectsService } from '../../projects/project-management/services/projects.service';
 import { QuickbooksFinancialsService } from '../../quickbooks/services/financials/quickbooks-financials.service';
 import { QuickbooksReportsService } from '../../quickbooks/services/reports/quickbooks-reports.service';
@@ -8,6 +9,7 @@ import {
 } from '../dto/financial-snapshot.dto';
 import { RevenueTrendDto, TopClientDto } from '../dto/revenue-trend.dto';
 import {
+  AgingBucket,
   BacklogItem,
   OutstandingBalanceItem,
   ParsedReport,
@@ -20,6 +22,7 @@ import {
   toDateString,
 } from '../utils/analytics-date-range.util';
 import { isActiveProjectStatus } from '../utils/active-project-status.util';
+import { matchesLeadType } from '../utils/lead-type-filter.util';
 
 @Injectable()
 export class AnalyticsFinancialService {
@@ -29,8 +32,8 @@ export class AnalyticsFinancialService {
     private readonly quickbooksFinancialsService: QuickbooksFinancialsService,
   ) {}
 
-  async getFinancialSnapshot(): Promise<FinancialSnapshotDto> {
-    const projectNumbers = await this.getActiveProjectNumbers();
+  async getFinancialSnapshot(leadType?: LeadType): Promise<FinancialSnapshotDto> {
+    const projectNumbers = await this.getActiveProjectNumbers(leadType);
     if (projectNumbers.length === 0) {
       return {
         projectCount: 0,
@@ -54,39 +57,37 @@ export class AnalyticsFinancialService {
     };
   }
 
-  async getAging(): Promise<AgingBucketDto[]> {
+  async getAging(leadType?: LeadType): Promise<AgingBucketDto[]> {
     const report = await this.quickbooksReportsService.getAgingReport();
+    const filterBucket = (bucket: AgingBucket) => {
+      if (!leadType) {
+        return { count: bucket.count, totalBalance: bucket.totalBalance };
+      }
+      const invoices = bucket.invoices.filter((inv) =>
+        matchesLeadType(inv.projectNumber, leadType),
+      );
+      return {
+        count: invoices.length,
+        totalBalance: invoices.reduce(
+          (sum, inv) => sum + (Number(inv.balance) || 0),
+          0,
+        ),
+      };
+    };
 
     return [
-      {
-        label: 'Current',
-        count: report.current.count,
-        totalBalance: report.current.totalBalance,
-      },
-      {
-        label: '1-30',
-        count: report.days1to30.count,
-        totalBalance: report.days1to30.totalBalance,
-      },
-      {
-        label: '31-60',
-        count: report.days31to60.count,
-        totalBalance: report.days31to60.totalBalance,
-      },
-      {
-        label: '61-90',
-        count: report.days61to90.count,
-        totalBalance: report.days61to90.totalBalance,
-      },
-      {
-        label: '90+',
-        count: report.over90.count,
-        totalBalance: report.over90.totalBalance,
-      },
+      { label: 'Current', ...filterBucket(report.current) },
+      { label: '1-30', ...filterBucket(report.days1to30) },
+      { label: '31-60', ...filterBucket(report.days31to60) },
+      { label: '61-90', ...filterBucket(report.days61to90) },
+      { label: '90+', ...filterBucket(report.over90) },
     ];
   }
 
-  async getRevenueTrend(months: number, range?: OptionalDateRange): Promise<RevenueTrendDto[]> {
+  async getRevenueTrend(
+    months: number,
+    range?: OptionalDateRange & { leadType?: LeadType },
+  ): Promise<RevenueTrendDto[]> {
     const normalizedRange = normalizeOptionalDateRange(range);
     const safeMonths = Number.isFinite(months)
       ? Math.max(1, Math.min(24, Math.trunc(months)))
@@ -99,13 +100,31 @@ export class AnalyticsFinancialService {
 
     const rangeStart = requests[0].from;
     const rangeEnd = requests[requests.length - 1].to;
-    const monthlyRevenue = await this.quickbooksReportsService.getRevenueByMonth(
-      rangeStart,
-      rangeEnd,
-    );
-    const revenueByMonth = new Map(
-      monthlyRevenue.map((item) => [item.month, Number(item.revenue) || 0]),
-    );
+    const revenueByMonth = new Map<string, number>();
+
+    if (range?.leadType) {
+      const payments = await this.quickbooksReportsService.getRevenuePayments(
+        rangeStart,
+        rangeEnd,
+      );
+      for (const payment of payments) {
+        if (!matchesLeadType(payment.projectNumber, range.leadType)) {
+          continue;
+        }
+        revenueByMonth.set(
+          payment.month,
+          (revenueByMonth.get(payment.month) ?? 0) + (Number(payment.amount) || 0),
+        );
+      }
+    } else {
+      const monthlyRevenue = await this.quickbooksReportsService.getRevenueByMonth(
+        rangeStart,
+        rangeEnd,
+      );
+      for (const item of monthlyRevenue) {
+        revenueByMonth.set(item.month, Number(item.revenue) || 0);
+      }
+    }
 
     return requests.map(({ month }) => ({
       month,
@@ -113,13 +132,24 @@ export class AnalyticsFinancialService {
     }));
   }
 
-  async getTopClients(limit: number, by: 'revenue' | 'volume'): Promise<TopClientDto[]> {
+  async getTopClients(
+    limit: number,
+    by: 'revenue' | 'volume',
+    leadType?: LeadType,
+  ): Promise<TopClientDto[]> {
     const safeLimit = Math.max(1, Math.min(20, Math.trunc(limit || 5)));
-    const base = await this.quickbooksReportsService.getTopClientsByRevenue(
-      by === 'volume' ? Math.max(10, safeLimit * 4) : safeLimit,
-    );
+    const fetchSize = leadType
+      ? Math.max(50, safeLimit * 10)
+      : by === 'volume'
+        ? Math.max(10, safeLimit * 4)
+        : safeLimit;
+    const base = await this.quickbooksReportsService.getTopClientsByRevenue(fetchSize);
 
-    const sorted = [...base].sort((a, b) => {
+    const filtered = leadType
+      ? base.filter((item) => matchesLeadType(item.projectNumber, leadType))
+      : base;
+
+    const sorted = [...filtered].sort((a, b) => {
       if (by === 'volume') {
         return b.invoiceCount - a.invoiceCount;
       }
@@ -129,18 +159,27 @@ export class AnalyticsFinancialService {
     return sorted.slice(0, safeLimit);
   }
 
-  async getOutstandingBalances(limit: number = 100): Promise<OutstandingBalanceItem[]> {
+  async getOutstandingBalances(
+    limit: number = 100,
+    leadType?: LeadType,
+  ): Promise<OutstandingBalanceItem[]> {
     const safeLimit = Math.max(1, Math.min(500, Math.trunc(limit || 100)));
     const rows = await this.quickbooksReportsService.getOutstandingBalances();
+    const filtered = leadType
+      ? rows.filter((row) => matchesLeadType(row.projectNumber, leadType))
+      : rows;
 
-    return rows.slice(0, safeLimit);
+    return filtered.slice(0, safeLimit);
   }
 
-  async getBacklog(limit: number = 100): Promise<BacklogItem[]> {
+  async getBacklog(limit: number = 100, leadType?: LeadType): Promise<BacklogItem[]> {
     const safeLimit = Math.max(1, Math.min(500, Math.trunc(limit || 100)));
     const rows = await this.quickbooksReportsService.getBacklog();
+    const filtered = leadType
+      ? rows.filter((row) => matchesLeadType(row.projectNumber, leadType))
+      : rows;
 
-    return rows.slice(0, safeLimit);
+    return filtered.slice(0, safeLimit);
   }
 
   async getQuickbooksRevenueReport(range?: OptionalDateRange): Promise<ParsedReport> {
@@ -156,9 +195,12 @@ export class AnalyticsFinancialService {
     });
   }
 
-  async getProjectFinancials(limit: number = 200): Promise<ProjectFinancials[]> {
+  async getProjectFinancials(
+    limit: number = 200,
+    leadType?: LeadType,
+  ): Promise<ProjectFinancials[]> {
     const safeLimit = Math.max(1, Math.min(500, Math.trunc(limit || 200)));
-    const projectNumbers = await this.getActiveProjectNumbers();
+    const projectNumbers = await this.getActiveProjectNumbers(leadType);
 
     if (!projectNumbers.length) {
       return [];
@@ -172,8 +214,8 @@ export class AnalyticsFinancialService {
       .slice(0, safeLimit);
   }
 
-  private async getActiveProjectNumbers(): Promise<string[]> {
-    const projects = await this.projectsService.findAnalyticsProjectSeed(500);
+  private async getActiveProjectNumbers(leadType?: LeadType): Promise<string[]> {
+    const projects = await this.projectsService.findAnalyticsProjectSeed(500, leadType);
 
     return projects
       .filter((project) => isActiveProjectStatus(project.projectProgressStatus))

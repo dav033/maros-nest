@@ -49,5 +49,45 @@ export function filterLeadsByType<T extends { leadNumber?: string | null }>(
   return leads.filter((lead) => getLeadTypeFromNumber(lead.leadNumber) === type);
 }
 
+export function matchesLeadType(
+  leadNumber: string | null | undefined,
+  leadType: LeadType | undefined,
+): boolean {
+  if (!leadType) return true;
+  return getLeadTypeFromNumber(leadNumber) === leadType;
+}
+
+export type LeadNumberSqlFilter = {
+  clause: string;
+  parameters: Record<string, string>;
+};
+
+export function leadNumberSqlFilter(
+  leadType: LeadType | undefined,
+  column: string,
+  paramKey: string,
+): LeadNumberSqlFilter | null {
+  if (!leadType) return null;
+
+  if (leadType === LeadType.ROOFING) {
+    return {
+      clause: `${column} ~ :${paramKey}`,
+      parameters: { [paramKey]: '^\\d+R-\\d+$' },
+    };
+  }
+
+  if (leadType === LeadType.PLUMBING) {
+    return {
+      clause: `${column} ~ :${paramKey}`,
+      parameters: { [paramKey]: '^\\d+P-\\d+$' },
+    };
+  }
+
+  return {
+    clause: `${column} IS NOT NULL AND ${column} !~ :${paramKey}`,
+    parameters: { [paramKey]: '^\\d+[RP]-\\d+$' },
+  };
+}
+
 
 

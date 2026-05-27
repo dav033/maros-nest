@@ -11,6 +11,7 @@ import {
   ParsedReport,
   ProjectReportBundle,
   ReportParams,
+  RevenuePaymentItem,
   RevenueByMonthPoint,
   RevenueByPeriodResult,
   OutstandingBalanceItem,
@@ -29,6 +30,7 @@ export type {
   AgingReport,
   OutstandingBalanceItem,
   RevenueByMonthPoint,
+  RevenuePaymentItem,
   RevenueByPeriodResult,
   BacklogItem,
   FinancialSearchCriteria,
@@ -76,6 +78,14 @@ export class QuickbooksReportsService {
     realmId?: string,
   ): Promise<RevenueByMonthPoint[]> {
     return this.operationalService.getRevenueByMonth(start, end, realmId);
+  }
+
+  async getRevenuePayments(
+    start: string,
+    end: string,
+    realmId?: string,
+  ): Promise<RevenuePaymentItem[]> {
+    return this.operationalService.getRevenuePayments(start, end, realmId);
   }
 
   async getBacklog(realmId?: string): Promise<BacklogItem[]> {

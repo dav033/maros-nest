@@ -15,6 +15,7 @@ import { BaseService } from '../../../../common/services/base.service';
 import { N8nService } from '../../../n8n/services/n8n.service';
 import { ProjectProgressStatus } from '../../../../common/enums/project-progress-status.enum';
 import { InvoiceStatus } from '../../../../common/enums/invoice-status.enum';
+import { LeadType } from '../../../../common/enums/lead-type.enum';
 import { QuickbooksFinancialsService } from '../../../quickbooks/services/financials/quickbooks-financials.service';
 
 @Injectable()
@@ -380,12 +381,15 @@ export class ProjectsService extends BaseService<any, number, Project> {
     return entities.map((entity) => this.projectMapper.toDto(entity));
   }
 
-  async getStatusCounts(): Promise<Array<{ status: string; count: number }>> {
-    return this.projectsRepository.getStatusCounts();
+  async getStatusCounts(
+    leadType?: LeadType,
+  ): Promise<Array<{ status: string; count: number }>> {
+    return this.projectsRepository.getStatusCounts(leadType);
   }
 
   async findAnalyticsProjectSeed(
     limit: number = 200,
+    leadType?: LeadType,
   ): Promise<
     Array<{
       id: number;
@@ -394,11 +398,11 @@ export class ProjectsService extends BaseService<any, number, Project> {
       leadName?: string;
     }>
   > {
-    return this.projectsRepository.findAnalyticsProjectSeed(limit);
+    return this.projectsRepository.findAnalyticsProjectSeed(limit, leadType);
   }
 
-  async countAll(): Promise<number> {
-    return this.projectsRepository.countAll();
+  async countAll(leadType?: LeadType): Promise<number> {
+    return this.projectsRepository.countAll(leadType);
   }
 
   async findByContactId(contactId: number): Promise<any[]> {

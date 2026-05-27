@@ -13,7 +13,7 @@ import {
   OutstandingBalanceItem,
   QboEstimateResponse,
   QboInvoiceResponse,
-  QboPaymentResponse,
+  RevenuePaymentItem,
   RevenueByMonthPoint,
   RevenueByPeriodResult,
 } from './quickbooks-reports.types';
@@ -126,17 +126,8 @@ export class QuickbooksReportsOperationalService {
     end: string,
     realmId?: string,
   ): Promise<RevenueByPeriodResult> {
-    const rid = await this.contextService.resolveRealmId(realmId);
-    const resp = (await this.apiService.query(
-      rid,
-      `SELECT * FROM Payment WHERE TxnDate >= '${start}' AND TxnDate <= '${end}' STARTPOSITION 1 MAXRESULTS 1000`,
-    )) as QboPaymentResponse;
-
-    const payments = resp?.QueryResponse?.Payment ?? [];
-    const totalRevenue = payments.reduce(
-      (sum, payment) => sum + (Number(payment['TotalAmt']) || 0),
-      0,
-    );
+    const payments = await this.getRevenuePayments(start, end, realmId);
+    const totalRevenue = payments.reduce((sum, payment) => sum + payment.amount, 0);
 
     return { period: { start, end }, totalRevenue, paymentCount: payments.length, payments };
   }
@@ -146,27 +137,63 @@ export class QuickbooksReportsOperationalService {
     end: string,
     realmId?: string,
   ): Promise<RevenueByMonthPoint[]> {
-    const rid = await this.contextService.resolveRealmId(realmId);
-    const escapedStart = this.apiService.escapeQboString(start);
-    const escapedEnd = this.apiService.escapeQboString(end);
-    const payments = (await this.apiService.queryAll(rid, 'Payment', {
-      where: `TxnDate >= '${escapedStart}' AND TxnDate <= '${escapedEnd}'`,
-      orderBy: 'TxnDate ASC',
-    })) as Record<string, unknown>[];
+    const payments = await this.getRevenuePayments(start, end, realmId);
 
     const totals = new Map<string, number>();
 
     for (const payment of payments) {
-      const txnDate = String(payment['TxnDate'] ?? '');
-      if (!txnDate || txnDate.length < 7) continue;
-      const month = txnDate.slice(0, 7);
-      const amount = Number(payment['TotalAmt']) || 0;
-      totals.set(month, (totals.get(month) ?? 0) + amount);
+      totals.set(payment.month, (totals.get(payment.month) ?? 0) + payment.amount);
     }
 
     return [...totals.entries()]
       .map(([month, revenue]) => ({ month, revenue }))
       .sort((a, b) => a.month.localeCompare(b.month));
+  }
+
+  async getRevenuePayments(
+    start: string,
+    end: string,
+    realmId?: string,
+  ): Promise<RevenuePaymentItem[]> {
+    const rid = await this.contextService.resolveRealmId(realmId);
+    const escapedStart = this.apiService.escapeQboString(start);
+    const escapedEnd = this.apiService.escapeQboString(end);
+
+    const [jobIndex, payments] = await Promise.all([
+      this.contextService.buildJobIndex(rid),
+      this.apiService.queryAll(rid, 'Payment', {
+        where: `TxnDate >= '${escapedStart}' AND TxnDate <= '${escapedEnd}'`,
+        orderBy: 'TxnDate ASC',
+      }) as Promise<Record<string, unknown>[]>,
+    ]);
+
+    return payments
+      .map((payment) => {
+        const txnDate = String(payment['TxnDate'] ?? '');
+        if (txnDate.length < 7) {
+          return null;
+        }
+
+        const amount = Number(payment['TotalAmt']) || 0;
+        const customerRef = payment['CustomerRef'];
+        const jobId =
+          typeof customerRef === 'string'
+            ? this.contextService.refId(customerRef)
+            : customerRef &&
+                typeof customerRef === 'object' &&
+                'value' in customerRef &&
+                typeof customerRef.value === 'string'
+              ? this.contextService.refId({ value: customerRef.value })
+              : '';
+
+        return {
+          txnDate,
+          month: txnDate.slice(0, 7),
+          amount,
+          projectNumber: jobId ? (jobIndex.projectNumberById[jobId] ?? null) : null,
+        } satisfies RevenuePaymentItem;
+      })
+      .filter((item): item is RevenuePaymentItem => item !== null);
   }
 
   async getBacklog(realmId?: string): Promise<BacklogItem[]> {

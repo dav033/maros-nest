@@ -4,7 +4,10 @@ import { Repository, Not } from 'typeorm';
 import { Lead } from '../../../../entities/lead.entity';
 import { Project } from '../../../../entities/project.entity';
 import { LeadType } from '../../../../common/enums/lead-type.enum';
-import { filterLeadsByType } from '../../../../common/utils/lead-type.utils';
+import {
+  filterLeadsByType,
+  leadNumberSqlFilter,
+} from '../../../../common/utils/lead-type.utils';
 
 @Injectable()
 export class LeadsRepository {
@@ -130,20 +133,26 @@ export class LeadsRepository {
       .getMany();
   }
 
-  async getStatusCounts(): Promise<
-    Array<{ status: string; count: number; estimatedValue: number }>
-  > {
-    const rows: Array<{
-      status: string | null;
-      count: string;
-      estimate: string | null;
-    }> = await this.repo
+  async getStatusCounts(
+    leadType?: LeadType,
+  ): Promise<Array<{ status: string; count: number; estimatedValue: number }>> {
+    const qb = this.repo
       .createQueryBuilder('lead')
       .select('lead.status', 'status')
       .addSelect('COUNT(lead.id)', 'count')
       .addSelect('COALESCE(SUM(lead.estimate), 0)', 'estimate')
-      .groupBy('lead.status')
-      .getRawMany();
+      .groupBy('lead.status');
+
+    const filter = leadNumberSqlFilter(leadType, 'lead.lead_number', 'leadNumberPattern');
+    if (filter) {
+      qb.andWhere(filter.clause, filter.parameters);
+    }
+
+    const rows: Array<{
+      status: string | null;
+      count: string;
+      estimate: string | null;
+    }> = await qb.getRawMany();
 
     return rows.map((row) => ({
       status: row.status ?? 'UNKNOWN',
@@ -152,8 +161,13 @@ export class LeadsRepository {
     }));
   }
 
-  async getTotalCount(): Promise<number> {
-    return this.repo.count();
+  async getTotalCount(leadType?: LeadType): Promise<number> {
+    const qb = this.repo.createQueryBuilder('lead');
+    const filter = leadNumberSqlFilter(leadType, 'lead.lead_number', 'leadNumberPattern');
+    if (filter) {
+      qb.andWhere(filter.clause, filter.parameters);
+    }
+    return qb.getCount();
   }
 
   async findByContactId(contactId: number): Promise<Lead[]> {

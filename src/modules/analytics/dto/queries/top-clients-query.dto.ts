@@ -1,9 +1,10 @@
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { LeadTypeQueryDto } from './lead-type-query.dto';
 
 export type TopClientsSortBy = 'revenue' | 'volume';
 
-export class TopClientsQueryDto {
+export class TopClientsQueryDto extends LeadTypeQueryDto {
   @IsOptional()
   @Type(() => Number)
   @IsInt({ message: '"limit" must be an integer' })

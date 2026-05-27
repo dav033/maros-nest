@@ -183,6 +183,13 @@ export interface RevenueByMonthPoint {
   revenue: number;
 }
 
+export interface RevenuePaymentItem {
+  txnDate: string;
+  month: string;
+  amount: number;
+  projectNumber: string | null;
+}
+
 export interface JobIndex {
   byId: Record<string, QboCustomer>;
   projectNumberById: Record<string, string | null>;

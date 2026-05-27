@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { LeadType } from '../../../common/enums/lead-type.enum';
 import { ProjectProgressStatus } from '../../../common/enums/project-progress-status.enum';
 import { ProjectsService } from '../../projects/project-management/services/projects.service';
 import { QuickbooksJobCostingService } from '../../quickbooks/services/job-costing/quickbooks-job-costing.service';
@@ -18,8 +19,8 @@ export class AnalyticsProjectsService {
     private readonly quickbooksJobCostingService: QuickbooksJobCostingService,
   ) {}
 
-  async getProjectHealth(): Promise<ProjectHealthDto[]> {
-    const projects = await this.projectsService.findAnalyticsProjectSeed(300);
+  async getProjectHealth(leadType?: LeadType): Promise<ProjectHealthDto[]> {
+    const projects = await this.projectsService.findAnalyticsProjectSeed(300, leadType);
     const activeProjects = projects
       .filter((project) => isActiveProjectStatus(project.projectProgressStatus))
       .filter((project) => Boolean(project.leadNumber))

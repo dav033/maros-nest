@@ -96,14 +96,14 @@ export class LeadsService {
     return this.mapLeadList(this.leadsRepository.findByStatus(status));
   }
 
-  async getStatusCounts(): Promise<
-    Array<{ status: string; count: number; estimatedValue: number }>
-  > {
-    return this.leadsRepository.getStatusCounts();
+  async getStatusCounts(
+    leadType?: LeadType,
+  ): Promise<Array<{ status: string; count: number; estimatedValue: number }>> {
+    return this.leadsRepository.getStatusCounts(leadType);
   }
 
-  async getTotalCount(): Promise<number> {
-    return this.leadsRepository.getTotalCount();
+  async getTotalCount(leadType?: LeadType): Promise<number> {
+    return this.leadsRepository.getTotalCount(leadType);
   }
 
   async getLeadsByContactId(contactId: number): Promise<any[]> {
