@@ -4,6 +4,7 @@ import { LeadType } from '../../../common/enums/lead-type.enum';
 import { LeadsService } from '../../leads/lead-management/leads.service';
 import { ProjectsService } from '../../projects/project-management/services/projects.service';
 import { QuickbooksReportsService } from '../../quickbooks/services/reports/quickbooks-reports.service';
+import { AnalyticsFinancialService } from './analytics-financial.service';
 import { KpiOverviewDto } from '../dto/overview.dto';
 import {
   OptionalDateRange,
@@ -22,6 +23,7 @@ export class AnalyticsOverviewService {
     private readonly leadsService: LeadsService,
     private readonly projectsService: ProjectsService,
     private readonly quickbooksReportsService: QuickbooksReportsService,
+    private readonly financialService: AnalyticsFinancialService,
   ) {}
 
   async getOverview(params?: OverviewParams): Promise<KpiOverviewDto> {
@@ -42,11 +44,11 @@ export class AnalyticsOverviewService {
     );
 
     const { from, to } = this.resolveDateRange(params);
-    const [revenue, outstanding, backlog, revenuePayments] = await Promise.all([
-      this.quickbooksReportsService.getRevenueByPeriod(from, to),
+    const [revenueTotal, revenuePipelineTotal, outstanding, backlog] = await Promise.all([
+      this.financialService.getRevenueAccrual({ from, to }, leadType),
+      this.financialService.getRevenueCash({ from, to }, leadType),
       this.quickbooksReportsService.getOutstandingBalances(),
       this.quickbooksReportsService.getBacklog(),
-      leadType ? this.quickbooksReportsService.getRevenuePayments(from, to) : Promise.resolve([]),
     ]);
 
     const winRateBase = totals.won + totals.lost;
@@ -58,11 +60,6 @@ export class AnalyticsOverviewService {
     const backlogTotal = backlog
       .filter((item) => matchesLeadType(item.projectNumber, leadType))
       .reduce((sum, item) => sum + (Number(item.backlogAmount) || 0), 0);
-    const revenueTotal = leadType
-      ? revenuePayments
-          .filter((item) => matchesLeadType(item.projectNumber, leadType))
-          .reduce((sum, item) => sum + (Number(item.amount) || 0), 0)
-      : revenue.totalRevenue;
 
     return {
       leadsCount: totals.total,
@@ -73,6 +70,7 @@ export class AnalyticsOverviewService {
       revenueTotal,
       outstandingTotal,
       backlogTotal,
+      revenuePipelineTotal,
     };
   }
 

@@ -196,6 +196,42 @@ export class QuickbooksReportsOperationalService {
       .filter((item): item is RevenuePaymentItem => item !== null);
   }
 
+  async getInvoicesByPeriod(
+    start: string,
+    end: string,
+    realmId?: string,
+  ): Promise<Array<{ amount: number; projectNumber: string | null }>> {
+    const rid = await this.contextService.resolveRealmId(realmId);
+    const escapedStart = this.apiService.escapeQboString(start);
+    const escapedEnd = this.apiService.escapeQboString(end);
+
+    const [jobIndex, invoices] = await Promise.all([
+      this.contextService.buildJobIndex(rid),
+      this.apiService.queryAll(rid, 'Invoice', {
+        where: `TxnDate >= '${escapedStart}' AND TxnDate <= '${escapedEnd}'`,
+        orderBy: 'TxnDate ASC',
+      }) as Promise<Record<string, unknown>[]>,
+    ]);
+
+    return invoices.map((inv) => {
+      const customerRef = inv['CustomerRef'];
+      const jobId =
+        typeof customerRef === 'string'
+          ? this.contextService.refId(customerRef)
+          : customerRef &&
+              typeof customerRef === 'object' &&
+              'value' in customerRef &&
+              typeof customerRef.value === 'string'
+            ? this.contextService.refId({ value: customerRef.value })
+            : '';
+
+      return {
+        amount: Number(inv['TotalAmt']) || 0,
+        projectNumber: jobId ? (jobIndex.projectNumberById[jobId] ?? null) : null,
+      };
+    });
+  }
+
   async getBacklog(realmId?: string): Promise<BacklogItem[]> {
     const rid = await this.contextService.resolveRealmId(realmId);
     const [jobIndex, estResp, invResp] = await Promise.all([

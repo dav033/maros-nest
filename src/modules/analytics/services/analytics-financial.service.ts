@@ -7,6 +7,7 @@ import {
   AgingBucketDto,
   FinancialSnapshotDto,
 } from '../dto/financial-snapshot.dto';
+import { CashPositionDto } from '../dto/cash-position.dto';
 import { RevenueTrendDto, TopClientDto } from '../dto/revenue-trend.dto';
 import {
   AgingBucket,
@@ -18,6 +19,7 @@ import { ProjectFinancials } from '../../quickbooks/services/financials/quickboo
 import {
   DateRange,
   OptionalDateRange,
+  buildDefaultLast12MonthsRange,
   normalizeOptionalDateRange,
   toDateString,
 } from '../utils/analytics-date-range.util';
@@ -180,6 +182,100 @@ export class AnalyticsFinancialService {
       : rows;
 
     return filtered.slice(0, safeLimit);
+  }
+
+  async getRevenueAccrual(
+    range: { from: string; to: string },
+    leadType?: LeadType,
+  ): Promise<number> {
+    if (leadType) {
+      const invoices = await this.quickbooksReportsService.getInvoicesByPeriod(
+        range.from,
+        range.to,
+      );
+      return invoices
+        .filter((item) => matchesLeadType(item.projectNumber, leadType))
+        .reduce((sum, item) => sum + item.amount, 0);
+    }
+
+    const report = await this.quickbooksReportsService.getProfitAndLoss({
+      startDate: range.from,
+      endDate: range.to,
+      accountingMethod: 'Accrual',
+    });
+
+    let totalIncome = 0;
+    for (const row of report.rows) {
+      const section = row.section.toLowerCase();
+      const label = row.label.toLowerCase().trim();
+      if (section === 'income' && /^total(\s+for)?\s+income$/.test(label)) {
+        totalIncome += row.amount;
+      }
+    }
+
+    return totalIncome;
+  }
+
+  async getRevenueCash(
+    range: { from: string; to: string },
+    leadType?: LeadType,
+  ): Promise<number> {
+    if (leadType) {
+      const payments = await this.quickbooksReportsService.getRevenuePayments(
+        range.from,
+        range.to,
+      );
+      return payments
+        .filter((item) => matchesLeadType(item.projectNumber, leadType))
+        .reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+    }
+
+    const report = await this.quickbooksReportsService.getProfitAndLoss({
+      startDate: range.from,
+      endDate: range.to,
+      accountingMethod: 'Cash',
+    });
+
+    let totalIncome = 0;
+    for (const row of report.rows) {
+      const section = row.section.toLowerCase();
+      const label = row.label.toLowerCase().trim();
+      if (section === 'income' && /^total(\s+for)?\s+income$/.test(label)) {
+        totalIncome += row.amount;
+      }
+    }
+
+    return totalIncome;
+  }
+
+  async getCashPosition(range?: OptionalDateRange): Promise<CashPositionDto> {
+    const period =
+      normalizeOptionalDateRange(range) ?? buildDefaultLast12MonthsRange();
+
+    const report = await this.quickbooksReportsService.getCashFlow({
+      startDate: period.from,
+      endDate: period.to,
+      accountingMethod: 'Accrual',
+    });
+
+    let cashAtEnd: number | null = null;
+    let netCash: number | null = null;
+
+    for (const row of report.rows) {
+      const label = row.label.toLowerCase();
+      if (label.includes('cash at end')) {
+        cashAtEnd = row.amount;
+      } else if (label.includes('net cash')) {
+        netCash = (netCash ?? 0) + row.amount;
+      }
+    }
+
+    return {
+      cashPosition: cashAtEnd ?? netCash ?? 0,
+      cashAtEnd,
+      netCash,
+      period,
+    };
   }
 
   async getQuickbooksRevenueReport(range?: OptionalDateRange): Promise<ParsedReport> {

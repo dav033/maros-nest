@@ -113,6 +113,15 @@ export class AnalyticsController {
     return this.financialService.getBacklog(query.limit ?? 100, query.leadType);
   }
 
+  @Get('cash-position')
+  @CacheTTL(300)
+  getCashPosition(@Query() query: DateRangeQueryDto) {
+    return this.financialService.getCashPosition({
+      from: query.from,
+      to: query.to,
+    });
+  }
+
   @Get('quickbooks-revenue-report')
   @CacheTTL(300)
   getQuickbooksRevenueReport(@Query() query: DateRangeQueryDto) {

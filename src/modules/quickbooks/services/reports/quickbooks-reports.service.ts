@@ -92,6 +92,14 @@ export class QuickbooksReportsService {
     return this.operationalService.getBacklog(realmId);
   }
 
+  async getInvoicesByPeriod(
+    start: string,
+    end: string,
+    realmId?: string,
+  ): Promise<Array<{ amount: number; projectNumber: string | null }>> {
+    return this.operationalService.getInvoicesByPeriod(start, end, realmId);
+  }
+
   async searchByFinancialCriteria(
     criteria: FinancialSearchCriteria,
     realmId?: string,
@@ -104,6 +112,10 @@ export class QuickbooksReportsService {
     realmId?: string,
   ): Promise<ClientRevenueItem[]> {
     return this.operationalService.getTopClientsByRevenue(limit, realmId);
+  }
+
+  async getProfitAndLoss(params: ReportParams): Promise<ParsedReport> {
+    return this.financialService.getProfitAndLoss(params);
   }
 
   async getProfitAndLossDetail(params: ReportParams): Promise<ParsedReport> {
