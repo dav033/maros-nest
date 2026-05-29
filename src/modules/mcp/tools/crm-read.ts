@@ -6,66 +6,98 @@ import { CompanyType } from '../../../common/enums/company-type.enum';
 import { ProjectProgressStatus } from '../../../common/enums/project-progress-status.enum';
 import { enumFromTsEnum } from './zod-utils';
 
+  const includeQboList = z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      'If true, attach a QBO summary (estimated/invoiced/paid/outstanding + payments) per item. Defaults to false on list calls for speed.',
+    );
+  const includeQboSingle = z
+    .boolean()
+    .optional()
+    .default(true)
+    .describe(
+      'If true (default), attach the QBO block. Set to false to skip the QuickBooks call.',
+    );
+
   export function registerLeadTools(server: McpServer, deps: McpToolDeps) {
     server.tool(
       'get_all_leads',
-      'Get all leads from the CRM (excludes leads with projects and in-review leads)',
-      {},
-      async () => {
-        const data = await deps.leadsService.getPipelineLeads();
+      'Get all leads from the CRM (excludes leads with projects and in-review leads). ' +
+        'When includeQbo=true, each lead gains a "qbo" block with estimated/invoiced/paid/outstanding from QuickBooks.',
+      { includeQbo: includeQboList },
+      async ({ includeQbo }) => {
+        const data = await deps.leadsService.getPipelineLeads({ includeQbo });
         return jsonContent(data);
       },
     );
 
     server.tool(
       'get_lead_by_id',
-      'Get a lead by its numeric ID',
-      { leadId: z.number().describe('The lead ID') },
-      async ({ leadId }) => {
-        const data = await deps.leadsService.getLeadById(leadId);
+      'Get a lead by its numeric ID. Response includes a "qbo" block with the QuickBooks financial summary (estimated, invoiced, paid, outstanding, payments) unless includeQbo=false.',
+      {
+        leadId: z.number().describe('The lead ID'),
+        includeQbo: includeQboSingle,
+      },
+      async ({ leadId, includeQbo }) => {
+        const data = await deps.leadsService.getLeadById(leadId, { includeQbo });
         return jsonContent(data);
       },
     );
 
     server.tool(
       'get_lead_by_number',
-      'Get a lead by its lead number (e.g. C-001, P-002)',
-      { leadNumber: z.string().describe('The lead number') },
-      async ({ leadNumber }) => {
-        const data = await deps.leadsService.getLeadByNumber(leadNumber);
+      'Get a lead by its lead number (e.g. C-001, P-002). Response includes a "qbo" block with the QuickBooks financial summary unless includeQbo=false.',
+      {
+        leadNumber: z.string().describe('The lead number'),
+        includeQbo: includeQboSingle,
+      },
+      async ({ leadNumber, includeQbo }) => {
+        const data = await deps.leadsService.getLeadByNumber(leadNumber, {
+          includeQbo,
+        });
         return jsonContent(data);
       },
     );
 
     server.tool(
       'get_lead_details',
-      'Get full lead details including project information',
-      { leadId: z.number().describe('The lead ID') },
-      async ({ leadId }) => {
-        const data = await deps.leadsService.getLeadDetails(leadId);
+      'Get full lead details including project information. Response includes a "qbo" block with the full QuickBooks profile (estimates, invoices, payments, expenses, attachments, profit & loss) unless includeQbo=false.',
+      {
+        leadId: z.number().describe('The lead ID'),
+        includeQbo: includeQboSingle,
+      },
+      async ({ leadId, includeQbo }) => {
+        const data = await deps.leadsService.getLeadDetails(leadId, {
+          includeQbo,
+        });
         return jsonContent(data);
       },
     );
 
     server.tool(
       'get_leads_in_review',
-      'Get all leads currently in review',
-      {},
-      async () => {
-        const data = await deps.leadsService.getLeadsInReview();
+      'Get all leads currently in review. When includeQbo=true, each lead gains a "qbo" summary.',
+      { includeQbo: includeQboList },
+      async ({ includeQbo }) => {
+        const data = await deps.leadsService.getLeadsInReview({ includeQbo });
         return jsonContent(data);
       },
     );
 
     server.tool(
       'get_leads_by_status',
-      `Get all leads filtered by status. Valid statuses: ${Object.values(LeadStatus).join(', ')}`,
+      `Get all leads filtered by status. Valid statuses: ${Object.values(LeadStatus).join(', ')}. ` +
+        'When includeQbo=true, each lead gains a "qbo" summary.',
       {
         status: enumFromTsEnum(LeadStatus).describe('Lead status to filter by'),
+        includeQbo: includeQboList,
       },
-      async ({ status }) => {
+      async ({ status, includeQbo }) => {
         const data = await deps.leadsService.getLeadsByStatus(
           status as LeadStatus,
+          { includeQbo },
         );
         return jsonContent(data);
       },
@@ -73,38 +105,47 @@ import { enumFromTsEnum } from './zod-utils';
 
     server.tool(
       'get_leads_by_contact_id',
-      'Get all leads associated with a specific contact by their ID',
-      { contactId: z.number().describe('The contact ID') },
-      async ({ contactId }) => {
-        const data = await deps.leadsService.getLeadsByContactId(contactId);
+      'Get all leads associated with a specific contact by their ID. When includeQbo=true, each lead gains a "qbo" summary.',
+      {
+        contactId: z.number().describe('The contact ID'),
+        includeQbo: includeQboList,
+      },
+      async ({ contactId, includeQbo }) => {
+        const data = await deps.leadsService.getLeadsByContactId(contactId, {
+          includeQbo,
+        });
         return jsonContent(data);
       },
     );
 
     server.tool(
       'get_leads_by_contact_name',
-      'Get all leads associated with a contact by the contact name (partial match)',
+      'Get all leads associated with a contact by the contact name (partial match). When includeQbo=true, each lead gains a "qbo" summary.',
       {
         name: z
           .string()
           .describe('Contact name to search for (partial match supported)'),
+        includeQbo: includeQboList,
       },
-      async ({ name }) => {
-        const data = await deps.leadsService.getLeadsByContactName(name);
+      async ({ name, includeQbo }) => {
+        const data = await deps.leadsService.getLeadsByContactName(name, {
+          includeQbo,
+        });
         return jsonContent(data);
       },
     );
 
     server.tool(
       'search_leads',
-      'Search leads by name, location, or lead number (partial match)',
+      'Search leads by name, location, or lead number (partial match). When includeQbo=true, each lead gains a "qbo" summary.',
       {
         query: z
           .string()
           .describe('Text to search in lead name, location, or lead number'),
+        includeQbo: includeQboList,
       },
-      async ({ query }) => {
-        const data = await deps.leadsService.searchLeads(query);
+      async ({ query, includeQbo }) => {
+        const data = await deps.leadsService.searchLeads(query, { includeQbo });
         return jsonContent(data);
       },
     );
@@ -322,7 +363,7 @@ import { enumFromTsEnum } from './zod-utils';
   export function registerProjectTools(server: McpServer, deps: McpToolDeps) {
     server.tool(
       'get_all_projects',
-      'Get all projects from the CRM with lead and contact information',
+      'Get all projects from the CRM with lead and contact information. Each project includes a "qbo" summary block (estimated, invoiced, paid, outstanding) from QuickBooks.',
       {},
       async () => {
         const data = await deps.projectsService.findAll();
@@ -332,7 +373,7 @@ import { enumFromTsEnum } from './zod-utils';
 
     server.tool(
       'get_project_by_id',
-      'Get a project by its numeric ID',
+      'Get a project by its numeric ID. Response includes a "qbo" summary block (estimated, invoiced, paid, outstanding, payments) from QuickBooks.',
       { id: z.number().describe('The project ID') },
       async ({ id }) => {
         const data = await deps.projectsService.findById(id);
@@ -342,7 +383,8 @@ import { enumFromTsEnum } from './zod-utils';
 
     server.tool(
       'get_project_details',
-      'Get full project details including lead, contact, and company information',
+      'Get full project details including lead, contact, and company information. ' +
+        'Response includes a "qbo" block with the full QuickBooks profile (estimates with line items, invoices, payments, expenses, attachments, profit & loss).',
       { id: z.number().describe('The project ID') },
       async ({ id }) => {
         const data = await deps.projectsService.getProjectDetails(id);
@@ -352,7 +394,7 @@ import { enumFromTsEnum } from './zod-utils';
 
     server.tool(
       'get_project_by_lead_number',
-      'Get a project by its associated lead number (e.g. 001-0425)',
+      'Get a project by its associated lead number (e.g. 001-0425). Response includes a "qbo" summary block.',
       {
         leadNumber: z
           .string()
@@ -366,7 +408,7 @@ import { enumFromTsEnum } from './zod-utils';
 
     server.tool(
       'get_projects_by_status',
-      `Get all projects filtered by progress status. Valid statuses: ${Object.values(ProjectProgressStatus).join(', ')}`,
+      `Get all projects filtered by progress status. Valid statuses: ${Object.values(ProjectProgressStatus).join(', ')}.`,
       {
         status: enumFromTsEnum(ProjectProgressStatus).describe(
           'Project progress status to filter by',
@@ -382,7 +424,7 @@ import { enumFromTsEnum } from './zod-utils';
 
     server.tool(
       'get_projects_by_contact_id',
-      'Get all projects associated with a specific contact by their ID',
+      'Get all projects associated with a specific contact by their ID.',
       { contactId: z.number().describe('The contact ID') },
       async ({ contactId }) => {
         const data = await deps.projectsService.findByContactId(contactId);

@@ -12,102 +12,13 @@ import {
   ResourceNotFoundException,
 } from '../../../../common/exceptions';
 import { BaseService } from '../../../../common/services/base.service';
-import { N8nService } from '../../../n8n/services/n8n.service';
 import { ProjectProgressStatus } from '../../../../common/enums/project-progress-status.enum';
-import { InvoiceStatus } from '../../../../common/enums/invoice-status.enum';
 import { LeadType } from '../../../../common/enums/lead-type.enum';
-import { QuickbooksFinancialsService } from '../../../quickbooks/services/financials/quickbooks-financials.service';
+import { ProjectQboEnrichmentService } from '../../../quickbooks/services/crm-bridge/project-qbo-enrichment.service';
 
 @Injectable()
 export class ProjectsService extends BaseService<any, number, Project> {
   private readonly logger = new Logger(ProjectsService.name);
-
-  private async getQuickbooksPayments(projectNumber: string): Promise<
-    | Array<{
-        id?: string;
-        date?: string;
-        amount: number;
-        method?: string;
-        reference?: string;
-        linkedInvoice?: string;
-      }>
-    | undefined
-  > {
-    try {
-      const txns = await this.quickbooksFinancialsService.getPaymentsByProject(
-        projectNumber,
-      );
-
-      if (!Array.isArray(txns) || txns.length === 0) {
-        return undefined;
-      }
-
-      return txns
-        .map((txn) => {
-          const linkedInvoice = txn.linkedTxn.find(
-            (linked) => linked.txnType?.toLowerCase() === 'invoice',
-          )?.txnId;
-
-          return {
-            id: txn.entityId || undefined,
-            date: txn.txnDate || undefined,
-            amount: typeof txn.totalAmount === 'number' ? txn.totalAmount : 0,
-            method: txn.account?.name || undefined,
-            reference: txn.docNumber || undefined,
-            linkedInvoice,
-          };
-        })
-        .filter((payment) => Number.isFinite(payment.amount));
-    } catch (error: any) {
-      this.logger.error(
-        `Error fetching payment list from QuickBooks for project ${projectNumber}: ${error.message}`,
-      );
-      return undefined;
-    }
-  }
-
-  private deriveInvoiceStatus(financial: any): InvoiceStatus | undefined {
-    if (!financial) return undefined;
-
-    const invoicedAmount =
-      typeof financial.invoicedAmount === 'number' ? financial.invoicedAmount : 0;
-    const outstandingAmount =
-      typeof financial.outstandingAmount === 'number'
-        ? financial.outstandingAmount
-        : 0;
-
-    if (invoicedAmount <= 0) {
-      return InvoiceStatus.NOT_EXECUTED;
-    }
-
-    if (outstandingAmount <= 0) {
-      return InvoiceStatus.PAID;
-    }
-
-    return InvoiceStatus.PENDING;
-  }
-
-  private attachFinancialData(
-    dto: any,
-    financial: any | null,
-    payments?: Array<{
-      id?: string;
-      date?: string;
-      amount: number;
-      method?: string;
-      reference?: string;
-      linkedInvoice?: string;
-    }>,
-  ): void {
-    dto.financial = financial
-      ? {
-          ...financial,
-          payments: payments ?? financial.payments,
-        }
-      : null;
-    const status = this.deriveInvoiceStatus(financial);
-    dto.invoiceStatus = status;
-  }
 
   constructor(
     private readonly projectsRepository: ProjectsRepository,
@@ -116,8 +27,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
     @InjectRepository(Lead)
     private readonly leadRepo: Repository<Lead>,
     private readonly projectMapper: ProjectMapper,
-    private readonly n8nService: N8nService,
-    private readonly quickbooksFinancialsService: QuickbooksFinancialsService,
+    private readonly qboEnrichment: ProjectQboEnrichmentService,
   ) {
     super(projectRepo, projectMapper);
   }
@@ -238,28 +148,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
     });
 
     const dtos = entities.map((entity) => this.projectMapper.toDto(entity));
-
-    const projectNumbers = entities
-      .map((entity) => entity.lead?.leadNumber)
-      .filter((number): number is string => !!number);
-
-    if (projectNumbers.length > 0) {
-      try {
-        const financials = await this.n8nService.getProjectFinancials(projectNumbers);
-        const financialMap = new Map(financials.map((f) => [f.projectNumber, f]));
-
-        dtos.forEach((dto, i) => {
-          const leadNumber = entities[i].lead?.leadNumber;
-          if (leadNumber) {
-            this.attachFinancialData(dto, financialMap.get(leadNumber) ?? null);
-          }
-        });
-
-        this.logger.log(`Retrieved financial data for ${financials.length} projects from n8n`);
-      } catch (error: any) {
-        this.logger.error(`Error fetching financial data from n8n: ${error.message}`);
-      }
-    }
+    await this.qboEnrichment.enrichProjectsSummary(dtos);
 
     const duration = Date.now() - startTime;
     this.logger.log(`Projects findAll completed in ${duration}ms`);
@@ -269,7 +158,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
 
   async findById(id: number): Promise<any> {
     const startTime = Date.now();
-    
+
     const entity = await this.projectRepo.findOne({
       where: { id },
       relations: ['lead', 'lead.contact', 'lead.projectType'],
@@ -277,22 +166,9 @@ export class ProjectsService extends BaseService<any, number, Project> {
     if (!entity) {
       throw new ResourceNotFoundException(`Project not found with id: ${id}`);
     }
-    
-    const dto = this.projectMapper.toDto(entity);
 
-    const leadNumber = entity.lead?.leadNumber;
-    if (leadNumber) {
-      try {
-        const [financial, payments] = await Promise.all([
-          this.n8nService.getProjectFinancial(leadNumber),
-          this.getQuickbooksPayments(leadNumber),
-        ]);
-        this.attachFinancialData(dto, financial ?? null, payments);
-        this.logger.log(`Retrieved financial data from n8n for project ${id}`);
-      } catch (error: any) {
-        this.logger.error(`Error fetching financial data from n8n for project ${id}: ${error.message}`);
-      }
-    }
+    const dto = this.projectMapper.toDto(entity);
+    await this.qboEnrichment.enrichProjectSummary(dto);
 
     const duration = Date.now() - startTime;
     this.logger.log(`Project ${id} findById completed in ${duration}ms`);
@@ -354,21 +230,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
       lead: leadDto,
     };
 
-    const leadNumber = project.lead?.leadNumber;
-    if (leadNumber) {
-      try {
-        const [financial, payments] = await Promise.all([
-          this.n8nService.getProjectFinancial(leadNumber),
-          this.getQuickbooksPayments(leadNumber),
-        ]);
-        this.attachFinancialData(dto, financial ?? null, payments);
-        this.logger.log(`Retrieved financial data from n8n for project details ${id}`);
-      } catch (error: any) {
-        this.logger.error(
-          `Error fetching financial data from n8n for project details ${id}: ${error.message}`,
-        );
-      }
-    }
+    await this.qboEnrichment.enrichProjectFullProfile(dto);
 
     return dto;
   }
@@ -419,26 +281,16 @@ export class ProjectsService extends BaseService<any, number, Project> {
 
   async findByLeadNumber(leadNumber: string): Promise<any> {
     const startTime = Date.now();
-    
+
     const entity = await this.projectsRepository.findByLeadNumber(leadNumber);
     if (!entity) {
       throw new ResourceNotFoundException(
         `Project not found with leadNumber: ${leadNumber}`,
       );
     }
-    
-    const dto = this.projectMapper.toDto(entity);
 
-    try {
-      const [financial, payments] = await Promise.all([
-        this.n8nService.getProjectFinancial(leadNumber),
-        this.getQuickbooksPayments(leadNumber),
-      ]);
-      this.attachFinancialData(dto, financial ?? null, payments);
-      this.logger.log(`Retrieved financial data from n8n for lead number ${leadNumber}`);
-    } catch (error: any) {
-      this.logger.error(`Error fetching financial data from n8n for lead number ${leadNumber}: ${error.message}`);
-    }
+    const dto = this.projectMapper.toDto(entity);
+    await this.qboEnrichment.enrichProjectSummary(dto);
 
     const duration = Date.now() - startTime;
     this.logger.log(`Project findByLeadNumber ${leadNumber} completed in ${duration}ms`);

@@ -23,6 +23,7 @@ import {
   DatabaseException,
 } from '../../../common/exceptions';
 import { executeInBackground } from '../../../common/utils/background-tasks.util';
+import { ProjectQboEnrichmentService } from '../../quickbooks/services/crm-bridge/project-qbo-enrichment.service';
 
 @Injectable()
 export class LeadsService {
@@ -42,33 +43,44 @@ export class LeadsService {
     private readonly leadNumberingService: LeadNumberingService,
     private readonly leadMutationService: LeadMutationService,
     private readonly dataSource: DataSource,
+    private readonly qboEnrichment: ProjectQboEnrichmentService,
   ) {}
 
-  async getAllLeads(): Promise<any[]> {
-    return this.mapLeadList(this.leadsRepository.findAll());
+  async getAllLeads(options: { includeQbo?: boolean } = {}): Promise<any[]> {
+    return this.mapLeadList(this.leadsRepository.findAll(), options);
   }
 
-  async getPipelineLeads(): Promise<any[]> {
-    return this.mapLeadList(this.leadsRepository.findPipeline());
+  async getPipelineLeads(options: { includeQbo?: boolean } = {}): Promise<any[]> {
+    return this.mapLeadList(this.leadsRepository.findPipeline(), options);
   }
 
-  async getLeadsByType(type: LeadType): Promise<any[]> {
-    return this.mapLeadList(this.leadsRepository.findByLeadType(type));
+  async getLeadsByType(
+    type: LeadType,
+    options: { includeQbo?: boolean } = {},
+  ): Promise<any[]> {
+    return this.mapLeadList(this.leadsRepository.findByLeadType(type), options);
   }
 
-  async getLeadsInReview(): Promise<any[]> {
-    return this.mapLeadList(this.leadsRepository.findInReview());
+  async getLeadsInReview(options: { includeQbo?: boolean } = {}): Promise<any[]> {
+    return this.mapLeadList(this.leadsRepository.findInReview(), options);
   }
 
-  async getLeadById(id: number): Promise<any> {
+  async getLeadById(id: number, options: { includeQbo?: boolean } = {}): Promise<any> {
     const entity = await this.leadsRepository.findByIdWithRelations(id);
     if (!entity) {
       throw new LeadExceptions.LeadNotFoundException(id);
     }
-    return this.leadMapper.toDto(entity);
+    const dto = this.leadMapper.toDto(entity);
+    if (options.includeQbo !== false) {
+      await this.qboEnrichment.enrichLead(dto);
+    }
+    return dto;
   }
 
-  async getLeadDetails(id: number): Promise<any> {
+  async getLeadDetails(
+    id: number,
+    options: { includeQbo?: boolean } = {},
+  ): Promise<any> {
     const lead = await this.leadsRepository.findByIdWithRelations(id);
     if (!lead) {
       throw new LeadExceptions.LeadNotFoundException(id);
@@ -83,17 +95,25 @@ export class LeadsService {
       : null;
 
     const leadDto = this.leadMapper.toDto(lead);
-
-    return {
+    const dto = {
       ...leadDto,
       project: project
         ? this.leadMutationService.mapProjectToDto(project)
         : null,
     };
+
+    if (options.includeQbo !== false) {
+      await this.qboEnrichment.enrichLead(dto, { depth: 'full' });
+    }
+
+    return dto;
   }
 
-  async getLeadsByStatus(status: LeadStatus): Promise<any[]> {
-    return this.mapLeadList(this.leadsRepository.findByStatus(status));
+  async getLeadsByStatus(
+    status: LeadStatus,
+    options: { includeQbo?: boolean } = {},
+  ): Promise<any[]> {
+    return this.mapLeadList(this.leadsRepository.findByStatus(status), options);
   }
 
   async getStatusCounts(
@@ -106,24 +126,49 @@ export class LeadsService {
     return this.leadsRepository.getTotalCount(leadType);
   }
 
-  async getLeadsByContactId(contactId: number): Promise<any[]> {
-    return this.mapLeadList(this.leadsRepository.findByContactId(contactId));
+  async getLeadsByContactId(
+    contactId: number,
+    options: { includeQbo?: boolean } = {},
+  ): Promise<any[]> {
+    return this.mapLeadList(
+      this.leadsRepository.findByContactId(contactId),
+      options,
+    );
   }
 
-  async getLeadsByContactName(name: string): Promise<any[]> {
-    return this.mapLeadList(this.leadsRepository.findByContactName(name));
+  async getLeadsByContactName(
+    name: string,
+    options: { includeQbo?: boolean } = {},
+  ): Promise<any[]> {
+    return this.mapLeadList(
+      this.leadsRepository.findByContactName(name),
+      options,
+    );
   }
 
-  async searchLeads(query: string): Promise<any[]> {
-    return this.mapLeadList(this.leadsRepository.searchByName(query));
+  async searchLeads(
+    query: string,
+    options: { includeQbo?: boolean } = {},
+  ): Promise<any[]> {
+    return this.mapLeadList(this.leadsRepository.searchByName(query), options);
   }
 
-  private async mapLeadList(source: Promise<Lead[]>): Promise<any[]> {
+  private async mapLeadList(
+    source: Promise<Lead[]>,
+    options: { includeQbo?: boolean } = {},
+  ): Promise<any[]> {
     const entities = await source;
-    return entities.map((entity) => this.leadMapper.toDto(entity));
+    const dtos = entities.map((entity) => this.leadMapper.toDto(entity));
+    if (options.includeQbo) {
+      await this.qboEnrichment.enrichLeads(dtos);
+    }
+    return dtos;
   }
 
-  async getLeadByNumber(leadNumber: string): Promise<any> {
+  async getLeadByNumber(
+    leadNumber: string,
+    options: { includeQbo?: boolean } = {},
+  ): Promise<any> {
     const trimmedLeadNumber = leadNumber?.trim();
     if (!trimmedLeadNumber) {
       throw ValidationException.format('Lead number is required');
@@ -137,7 +182,11 @@ export class LeadsService {
       throw new LeadExceptions.LeadNotFoundByNumberException(trimmedLeadNumber);
     }
 
-    return this.leadMapper.toDto(entity);
+    const dto = this.leadMapper.toDto(entity);
+    if (options.includeQbo !== false) {
+      await this.qboEnrichment.enrichLead(dto);
+    }
+    return dto;
   }
 
   async createLeadWithNewContact(

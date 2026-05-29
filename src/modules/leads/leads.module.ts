@@ -13,12 +13,14 @@ import { LeadNumberingService } from './lead-management/services/lead-numbering.
 import { LeadMutationService } from './lead-management/services/lead-mutation.service';
 import { ContactsModule } from '../contacts/contacts.module';
 import { ClickUpModule } from '../clickup/clickup.module';
+import { QuickbooksModule } from '../quickbooks/quickbooks.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Lead, Contact, ProjectType, Project]),
     ContactsModule,
     ClickUpModule,
+    QuickbooksModule,
   ],
   controllers: [LeadsController],
   providers: [
