@@ -29,6 +29,23 @@ export interface TrelloCard {
   idMembers: string[];
   url: string;
   shortUrl: string;
+  attachments?: TrelloAttachment[];
+}
+
+export interface TrelloAttachment {
+  id: string;
+  name: string;
+  url: string;
+  bytes?: number;
+  mimeType?: string;
+  isUpload?: boolean;
+  date?: string;
+}
+
+export interface CreateTrelloCardAttachmentInput {
+  url: string;
+  name?: string;
+  setCover?: boolean;
 }
 
 export interface CreateTrelloCardInput {
@@ -38,6 +55,7 @@ export interface CreateTrelloCardInput {
   due?: string;
   idMembers?: string[];
   pos?: 'top' | 'bottom';
+  attachments?: CreateTrelloCardAttachmentInput[];
 }
 
 export interface UpdateTrelloCardInput {

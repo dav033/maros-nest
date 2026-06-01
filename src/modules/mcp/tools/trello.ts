@@ -170,15 +170,52 @@ export function registerTrelloTools(server: McpServer, deps: McpToolDeps) {
           'Trello member ids to assign. Resolve names -> ids via trello_list_members.',
         ),
       pos: z.enum(['top', 'bottom']).optional().describe('Position in list'),
+      attachments: z
+        .array(
+          z.object({
+            url: z.string().url().describe('Attachment URL (publicly reachable)'),
+            name: z.string().optional().describe('Attachment display name'),
+            setCover: z
+              .boolean()
+              .optional()
+              .describe('Set this attachment as card cover when possible'),
+          }),
+        )
+        .optional()
+        .describe('Optional attachments added immediately after card creation'),
     },
     async (input) => jsonContent(await deps.trelloService.createCard(input)),
   );
 
   server.tool(
     'trello_get_card',
-    'Get a Trello card by id.',
+    'Get a Trello card by id, including attachments.',
     { cardId: z.string() },
     async ({ cardId }) => jsonContent(await deps.trelloService.getCard(cardId)),
+  );
+
+  server.tool(
+    'trello_add_card_attachment',
+    'Add a URL attachment to an existing Trello card.',
+    {
+      cardId: z.string().describe('Target Trello card id'),
+      url: z.string().url().describe('Attachment URL (publicly reachable)'),
+      name: z.string().optional().describe('Attachment display name'),
+      setCover: z
+        .boolean()
+        .optional()
+        .describe('Set this attachment as card cover when possible'),
+    },
+    async ({ cardId, ...input }) =>
+      jsonContent(await deps.trelloService.addAttachmentToCard(cardId, input)),
+  );
+
+  server.tool(
+    'trello_list_card_attachments',
+    'List all attachments in a Trello card.',
+    { cardId: z.string().describe('Target Trello card id') },
+    async ({ cardId }) =>
+      jsonContent(await deps.trelloService.listCardAttachments(cardId)),
   );
 
   server.tool(

@@ -8,8 +8,10 @@ import { ExternalServiceException } from '../../../common/exceptions';
 import trelloConfig from '../../../config/trello.config';
 import {
   CreateTrelloBoardInput,
+  CreateTrelloCardAttachmentInput,
   CreateTrelloCardInput,
   CreateTrelloListInput,
+  TrelloAttachment,
   TrelloBoard,
   TrelloCard,
   TrelloList,
@@ -108,7 +110,7 @@ export class TrelloService {
   }
 
   async createCard(input: CreateTrelloCardInput): Promise<TrelloCard> {
-    return this.post<TrelloCard>('/cards', {
+    const createdCard = await this.post<TrelloCard>('/cards', {
       idList: input.idList,
       name: input.name,
       desc: input.desc,
@@ -116,10 +118,38 @@ export class TrelloService {
       idMembers: input.idMembers?.join(','),
       pos: input.pos ?? 'bottom',
     });
+
+    if (input.attachments && input.attachments.length > 0) {
+      await this.addAttachmentsToCard(createdCard.id, input.attachments);
+      return this.getCard(createdCard.id);
+    }
+
+    return createdCard;
   }
 
   async getCard(cardId: string): Promise<TrelloCard> {
-    return this.get<TrelloCard>(`/cards/${cardId}`);
+    return this.get<TrelloCard>(`/cards/${cardId}`, {
+      fields: 'id,name,desc,idList,idBoard,due,idMembers,url,shortUrl',
+      attachments: true,
+      attachment_fields: 'id,name,url,bytes,mimeType,isUpload,date',
+    });
+  }
+
+  async addAttachmentToCard(
+    cardId: string,
+    input: CreateTrelloCardAttachmentInput,
+  ): Promise<TrelloAttachment> {
+    return this.post<TrelloAttachment>(`/cards/${cardId}/attachments`, {
+      url: input.url,
+      name: input.name,
+      setCover: input.setCover,
+    });
+  }
+
+  async listCardAttachments(cardId: string): Promise<TrelloAttachment[]> {
+    return this.get<TrelloAttachment[]>(`/cards/${cardId}/attachments`, {
+      fields: 'id,name,url,bytes,mimeType,isUpload,date',
+    });
   }
 
   async updateCard(
@@ -138,6 +168,15 @@ export class TrelloService {
 
   async listCardsByList(listId: string): Promise<TrelloCard[]> {
     return this.get<TrelloCard[]>(`/lists/${listId}/cards`);
+  }
+
+  private async addAttachmentsToCard(
+    cardId: string,
+    attachments: CreateTrelloCardAttachmentInput[],
+  ): Promise<TrelloAttachment[]> {
+    return Promise.all(
+      attachments.map((attachment) => this.addAttachmentToCard(cardId, attachment)),
+    );
   }
 
   private authParams(): { key: string; token: string } {
