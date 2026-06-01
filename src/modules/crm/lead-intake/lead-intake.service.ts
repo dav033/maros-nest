@@ -131,7 +131,6 @@ export class LeadIntakeService {
         inReview: true,
       },
       contact.id,
-      true,
       leadType,
     );
     actions.push(`Created lead in review: ${lead.leadNumber} (ID: ${lead.id})`);

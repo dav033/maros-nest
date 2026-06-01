@@ -54,58 +54,40 @@ export class LeadsController {
 
   @Post('new-contact')
   @ApiOperation({ summary: 'Create lead with new contact' })
-  @ApiQuery({ 
-    name: 'skipClickUpSync', 
-    required: false, 
-    type: Boolean,
-    description: 'Skip ClickUp synchronization'
-  })
-  @ApiQuery({ 
-    name: 'leadType', 
-    required: false, 
+  @ApiQuery({
+    name: 'leadType',
+    required: false,
     enum: LeadType,
     description: 'Lead type for number generation if leadNumber is not provided'
   })
   @ApiResponse({ status: 200, description: 'Lead created successfully' })
   async createLeadByNewContact(
     @Body() request: CreateLeadByNewContactDto,
-    @Query('skipClickUpSync') skipClickUpSync?: string,
     @Query('leadType') leadType?: LeadType,
   ) {
-    const skip = skipClickUpSync === 'true';
     return this.leadsService.createLeadWithNewContact(
       request.lead,
       request.contact,
-      skip,
       leadType,
     );
   }
 
   @Post('existing-contact')
   @ApiOperation({ summary: 'Create lead with existing contact' })
-  @ApiQuery({ 
-    name: 'skipClickUpSync', 
-    required: false, 
-    type: Boolean,
-    description: 'Skip ClickUp synchronization'
-  })
-  @ApiQuery({ 
-    name: 'leadType', 
-    required: false, 
+  @ApiQuery({
+    name: 'leadType',
+    required: false,
     enum: LeadType,
     description: 'Lead type for number generation if leadNumber is not provided'
   })
   @ApiResponse({ status: 200, description: 'Lead created successfully' })
   async createLeadByExistingContact(
     @Body() request: CreateLeadByExistingContactDto,
-    @Query('skipClickUpSync') skipClickUpSync?: string,
     @Query('leadType') leadType?: LeadType,
   ) {
-    const skip = skipClickUpSync === 'true';
     return this.leadsService.createLeadWithExistingContact(
       request.lead,
       request.contactId,
-      skip,
       leadType,
     );
   }

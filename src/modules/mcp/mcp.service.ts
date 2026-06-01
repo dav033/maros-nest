@@ -11,6 +11,7 @@ import { QuickbooksJobCostingService } from '../quickbooks/services/job-costing/
 import { QuickbooksAttachmentsService } from '../quickbooks/services/attachments/quickbooks-attachments.service';
 import { QuickbooksVendorMatchingService } from '../quickbooks/services/vendor/quickbooks-vendor-matching.service';
 import { QuickbooksNormalizerService } from '../quickbooks/services/core/quickbooks-normalizer.service';
+import { TrelloService } from '../trello/services/trello.service';
 import {
   registerLeadTools,
   registerCompanyTools,
@@ -35,6 +36,7 @@ import {
   registerQboCrmReports,
 } from './tools/qbo-reports';
 import { registerQboProxyTools } from './tools/qbo-proxy';
+import { registerTrelloTools } from './tools/trello';
 import { McpToolDeps } from './tools/shared';
 
 @Injectable()
@@ -51,6 +53,7 @@ export class McpService {
     private readonly qboAttachments: QuickbooksAttachmentsService,
     private readonly qboVendorMatching: QuickbooksVendorMatchingService,
     private readonly qboNormalizer: QuickbooksNormalizerService,
+    private readonly trelloService: TrelloService,
   ) {}
 
   createServer(): McpServer {
@@ -71,6 +74,7 @@ export class McpService {
       qboAttachments: this.qboAttachments,
       qboVendorMatching: this.qboVendorMatching,
       qboNormalizer: this.qboNormalizer,
+      trelloService: this.trelloService,
     };
 
     registerLeadTools(server, deps);
@@ -89,6 +93,7 @@ export class McpService {
     registerQboFinancialReportTools(server, deps);
     registerQboCrmReports(server, deps);
     registerQboProxyTools(server, deps);
+    registerTrelloTools(server, deps);
 
     return server;
   }

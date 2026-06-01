@@ -9,8 +9,8 @@ import { AppService } from './app.service';
 import { getDatabaseConfig } from './config/database.config';
 import { getLoggerConfig } from './config/logger.config';
 import { validate } from './config/env.validation';
-import clickupConfig from './config/clickup.config';
 import n8nConfig from './config/n8n.config';
+import trelloConfig from './config/trello.config';
 import { CompaniesModule } from './modules/companies/companies.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { LeadsModule } from './modules/leads/leads.module';
@@ -29,7 +29,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
       isGlobal: true,
       envFilePath: ['.env.local', '.env'],
       validate,
-      load: [clickupConfig, n8nConfig],
+      load: [n8nConfig, trelloConfig],
     }),
 
     // Global scheduling (cron jobs) — after Config so providers can inject ConfigService

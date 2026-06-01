@@ -9,7 +9,6 @@ import { LeadsRepository } from './repositories/leads.repository';
 import { LeadMapper } from './mappers/lead.mapper';
 import { ContactsService } from '../../contacts/contact-management/services/contacts.service';
 import { CreateContactDto } from '../../contacts/contact-management/dto/create-contact.dto';
-import { LeadClickUpSyncService } from '../clickup-sync/lead-clickup-sync.service';
 import { CreateLeadDto } from './dto/create-lead.dto';
 import { LeadType } from '../../../common/enums/lead-type.enum';
 import { LeadStatus } from '../../../common/enums/lead-status.enum';
@@ -22,7 +21,6 @@ import {
   ContactExceptions,
   DatabaseException,
 } from '../../../common/exceptions';
-import { executeInBackground } from '../../../common/utils/background-tasks.util';
 import { ProjectQboEnrichmentService } from '../../quickbooks/services/crm-bridge/project-qbo-enrichment.service';
 
 @Injectable()
@@ -39,7 +37,6 @@ export class LeadsService {
     private readonly projectRepo: Repository<Project>,
     private readonly leadMapper: LeadMapper,
     private readonly contactsService: ContactsService,
-    private readonly clickUpSyncService: LeadClickUpSyncService,
     private readonly leadNumberingService: LeadNumberingService,
     private readonly leadMutationService: LeadMutationService,
     private readonly dataSource: DataSource,
@@ -192,7 +189,6 @@ export class LeadsService {
   async createLeadWithNewContact(
     leadDto: CreateLeadDto,
     contactDto: CreateContactDto,
-    skipClickUpSync: boolean = false,
     leadTypeForGeneration?: LeadType,
   ): Promise<any> {
     if (!contactDto.address && leadDto.location) {
@@ -212,18 +208,12 @@ export class LeadsService {
     if (!contactEntity) {
       throw new ContactExceptions.ContactNotFoundException(savedContactId);
     }
-    return this.persistLead(
-      leadDto,
-      contactEntity,
-      skipClickUpSync,
-      leadTypeForGeneration,
-    );
+    return this.persistLead(leadDto, contactEntity, leadTypeForGeneration);
   }
 
   async createLeadWithExistingContact(
     leadDto: CreateLeadDto,
     contactId: number,
-    skipClickUpSync: boolean = false,
     leadTypeForGeneration?: LeadType,
   ): Promise<any> {
     const contactEntity = await this.contactRepo.findOne({
@@ -232,18 +222,12 @@ export class LeadsService {
     if (!contactEntity) {
       throw new ContactExceptions.ContactNotFoundException(contactId);
     }
-    return this.persistLead(
-      leadDto,
-      contactEntity,
-      skipClickUpSync,
-      leadTypeForGeneration,
-    );
+    return this.persistLead(leadDto, contactEntity, leadTypeForGeneration);
   }
 
   private async persistLead(
     leadDto: CreateLeadDto,
     contact: Contact,
-    skipClickUpSync: boolean,
     leadTypeForGeneration?: LeadType,
   ): Promise<any> {
     await this.leadNumberingService.applyDefaults(
@@ -285,14 +269,6 @@ export class LeadsService {
     try {
       const saved = await this.leadRepo.save(entity);
       const dto = this.leadMapper.toDto(saved);
-
-      // Responder al cliente primero, luego sincronizar con ClickUp en background
-      if (!skipClickUpSync) {
-        executeInBackground(async () => {
-          await this.clickUpSyncService.syncLeadCreate(saved);
-        }, `ClickUp sync for lead ${dto.id} creation`, this.logger);
-      }
-
       return dto;
     } catch (error: unknown) {
       const normalizedError = this.toError(error);
@@ -374,12 +350,6 @@ export class LeadsService {
     }
 
     const dto = this.leadMapper.toDto(entity);
-
-    // Responder al cliente primero, luego sincronizar con ClickUp en background
-    executeInBackground(async () => {
-      await this.clickUpSyncService.syncLeadUpdate(entity);
-    }, `ClickUp sync for lead ${dto.id} update`, this.logger);
-
     return dto;
   }
 
@@ -480,19 +450,12 @@ export class LeadsService {
     const contactId = entity.contact?.id;
     const companyId = entity.contact?.company?.id;
 
-    // Guardar referencia para usar en background (antes de eliminar)
-    const leadForSync = { ...entity };
-    const leadId = entity.id;
-
     try {
-      // Optimización: Usar UPDATE directo con SQL raw para relaciones
-      // Clear lead references from projects before deletion
       await this.dataSource.query(
         'UPDATE projects SET lead_id = NULL WHERE lead_id = $1',
         [id],
       );
 
-      // Load entity with all relations
       const leadWithRelations =
         await this.leadsRepository.findByIdWithRelations(id);
       if (!leadWithRelations) {
@@ -500,11 +463,6 @@ export class LeadsService {
       }
 
       await this.leadRepo.remove(leadWithRelations);
-
-      // Responder al cliente primero, luego sincronizar con ClickUp en background
-      executeInBackground(async () => {
-        await this.clickUpSyncService.syncLeadDelete(leadForSync);
-      }, `ClickUp sync for lead ${leadId} deletion`, this.logger);
 
       let deletedContact = false;
       let deletedCompany = false;

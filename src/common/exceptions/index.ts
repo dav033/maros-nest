@@ -4,7 +4,6 @@ export * from './validation.exception';
 export * from './resource-not-found.exception';
 export * from './database.exception';
 export * from './external-service.exception';
-export * from './clickup.exception';
 export * from './domain/contact.exceptions';
 export * from './domain/lead.exceptions';
 export * from './domain/project-type.exceptions';

@@ -94,7 +94,6 @@ async function bootstrap() {
     .addTag('contacts', 'Contact management endpoints')
     .addTag('leads', 'Lead management endpoints')
     .addTag('projects', 'Project management endpoints')
-    .addTag('clickup', 'ClickUp integration endpoints')
     .addTag('crm-summary', 'CRM summary and metrics endpoints')
     .addBearerAuth() // If authentication is needed
     .build();
