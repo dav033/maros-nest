@@ -11,7 +11,10 @@ import {
   ListS3ObjectsResult,
   PresignedGetUrlResult,
   PresignedPutUrlResult,
+  S3UploadRules,
   S3ObjectMetadataResult,
+  UploadFileFromServerInput,
+  UploadFileFromServerResult,
 } from '../dto/s3.dto';
 
 const {
@@ -78,6 +81,55 @@ export class S3Service {
       expiresInSeconds,
       maxUploadBytes: this.config.maxUploadBytes,
       contentType: input.contentType,
+    };
+  }
+
+  async uploadFileFromServer(
+    input: UploadFileFromServerInput,
+  ): Promise<UploadFileFromServerResult> {
+    this.ensureConfigured();
+    this.ensureContentType(input.contentType);
+
+    if (!input.buffer || input.buffer.length === 0) {
+      throw new ValidationException('File content is empty', 'file');
+    }
+
+    if (input.sizeBytes > this.config.maxUploadBytes) {
+      throw new ValidationException(
+        `File exceeds max allowed (${this.config.maxUploadBytes} bytes)`,
+        'file',
+      );
+    }
+
+    const key = this.buildObjectKey(input.fileName, input.prefix);
+
+    await this.exec(
+      () =>
+        this.s3Client.send(
+          new PutObjectCommand({
+            Bucket: this.config.bucketName,
+            Key: key,
+            Body: input.buffer,
+            ContentType: input.contentType,
+            ContentLength: input.sizeBytes,
+          }),
+        ),
+      `PUT ${key}`,
+    );
+
+    return {
+      uploaded: true,
+      bucket: this.config.bucketName,
+      key,
+      sizeBytes: input.sizeBytes,
+      contentType: input.contentType,
+    };
+  }
+
+  getUploadRules(): S3UploadRules {
+    return {
+      basePrefix: this.config.basePrefix,
+      maxUploadBytes: this.config.maxUploadBytes,
     };
   }
 

@@ -65,3 +65,24 @@ export interface DeleteS3ObjectResult {
   bucket: string;
   key: string;
 }
+
+export interface UploadFileFromServerInput {
+  buffer: Buffer;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  prefix?: string;
+}
+
+export interface UploadFileFromServerResult {
+  uploaded: boolean;
+  bucket: string;
+  key: string;
+  sizeBytes: number;
+  contentType: string;
+}
+
+export interface S3UploadRules {
+  basePrefix: string;
+  maxUploadBytes: number;
+}
