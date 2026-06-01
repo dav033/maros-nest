@@ -62,6 +62,43 @@ export class EnvironmentVariables {
   @IsOptional()
   TRELLO_SECRET_KEY: string;
 
+  // S3
+  @IsString()
+  @IsOptional()
+  S3_ACCESS_KEY_ID: string;
+
+  @IsString()
+  @IsOptional()
+  S3_SECRET_ACCESS_KEY: string;
+
+  @IsString()
+  @IsOptional()
+  S3_BUCKET_NAME: string;
+
+  @IsString()
+  @IsOptional()
+  S3_REGION: string;
+
+  @IsString()
+  @IsOptional()
+  S3_ENDPOINT: string;
+
+  @IsBoolean()
+  @IsOptional()
+  S3_FORCE_PATH_STYLE: boolean = false;
+
+  @IsString()
+  @IsOptional()
+  S3_BASE_PREFIX: string = 'mcp/attachments/';
+
+  @IsNumber()
+  @IsOptional()
+  S3_MAX_UPLOAD_MB: number = 5;
+
+  @IsNumber()
+  @IsOptional()
+  S3_PRESIGNED_URL_EXPIRES_SECONDS: number = 900;
+
   // CORS
   @IsString()
   @IsOptional()
@@ -145,6 +182,17 @@ export function validate(config: Record<string, unknown>) {
     throw new Error(
       `Missing required Trello configuration: ${missingTrelloConfig.join(', ')}`,
     );
+  }
+
+  const missingS3Config = [
+    'S3_ACCESS_KEY_ID',
+    'S3_SECRET_ACCESS_KEY',
+    'S3_BUCKET_NAME',
+    'S3_REGION',
+  ].filter((key) => !normalizedConfig[key]);
+
+  if (isProduction && missingS3Config.length > 0) {
+    throw new Error(`Missing required S3 configuration: ${missingS3Config.join(', ')}`);
   }
 
   return validatedConfig;

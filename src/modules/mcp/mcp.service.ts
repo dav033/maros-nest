@@ -11,6 +11,7 @@ import { QuickbooksJobCostingService } from '../quickbooks/services/job-costing/
 import { QuickbooksAttachmentsService } from '../quickbooks/services/attachments/quickbooks-attachments.service';
 import { QuickbooksVendorMatchingService } from '../quickbooks/services/vendor/quickbooks-vendor-matching.service';
 import { QuickbooksNormalizerService } from '../quickbooks/services/core/quickbooks-normalizer.service';
+import { S3Service } from '../s3/services/s3.service';
 import { TrelloService } from '../trello/services/trello.service';
 import {
   registerLeadTools,
@@ -36,6 +37,7 @@ import {
   registerQboCrmReports,
 } from './tools/qbo-reports';
 import { registerQboProxyTools } from './tools/qbo-proxy';
+import { registerS3Tools } from './tools/s3';
 import { registerTrelloTools } from './tools/trello';
 import { McpToolDeps } from './tools/shared';
 
@@ -53,6 +55,7 @@ export class McpService {
     private readonly qboAttachments: QuickbooksAttachmentsService,
     private readonly qboVendorMatching: QuickbooksVendorMatchingService,
     private readonly qboNormalizer: QuickbooksNormalizerService,
+    private readonly s3Service: S3Service,
     private readonly trelloService: TrelloService,
   ) {}
 
@@ -74,6 +77,7 @@ export class McpService {
       qboAttachments: this.qboAttachments,
       qboVendorMatching: this.qboVendorMatching,
       qboNormalizer: this.qboNormalizer,
+      s3Service: this.s3Service,
       trelloService: this.trelloService,
     };
 
@@ -93,6 +97,7 @@ export class McpService {
     registerQboFinancialReportTools(server, deps);
     registerQboCrmReports(server, deps);
     registerQboProxyTools(server, deps);
+    registerS3Tools(server, deps);
     registerTrelloTools(server, deps);
 
     return server;
