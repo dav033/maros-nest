@@ -6,16 +6,139 @@ export function registerTrelloTools(server: McpServer, deps: McpToolDeps) {
   server.tool(
     'trello_list_boards',
     'List all open Trello boards the workspace token has access to. Use this to find the board where tasks should be created.',
-    {},
-    async () => jsonContent(await deps.trelloService.listBoardsForMe()),
+    {
+      filter: z
+        .enum(['open', 'closed', 'all'])
+        .optional()
+        .default('open')
+        .describe('Board filter. Default is open.'),
+    },
+    async ({ filter }) =>
+      jsonContent(await deps.trelloService.listBoardsForMe(filter)),
+  );
+
+  server.tool(
+    'trello_create_board',
+    'Create a new Trello board. Use this when the user asks for a new workspace board to organize tasks.',
+    {
+      name: z.string().describe('Board name'),
+      desc: z.string().optional().describe('Board description'),
+      defaultLists: z
+        .boolean()
+        .optional()
+        .describe('Create default lists (To Do, Doing, Done). Defaults to true.'),
+      defaultLabels: z
+        .boolean()
+        .optional()
+        .describe('Create default labels. Defaults to true.'),
+      idOrganization: z
+        .string()
+        .optional()
+        .describe('Optional Trello workspace organization id'),
+      prefsPermissionLevel: z
+        .enum(['private', 'org', 'public'])
+        .optional()
+        .describe('Board visibility: private, org, or public'),
+    },
+    async (input) => jsonContent(await deps.trelloService.createBoard(input)),
+  );
+
+  server.tool(
+    'trello_get_board',
+    'Get a Trello board by id.',
+    { boardId: z.string().describe('Trello board id') },
+    async ({ boardId }) =>
+      jsonContent(await deps.trelloService.getBoard(boardId)),
+  );
+
+  server.tool(
+    'trello_update_board',
+    'Update a Trello board (rename, description, close/open, visibility).',
+    {
+      boardId: z.string().describe('Trello board id'),
+      name: z.string().optional().describe('New board name'),
+      desc: z.string().optional().describe('New board description'),
+      closed: z.boolean().optional().describe('Close board (true) or reopen (false)'),
+      subscribed: z
+        .boolean()
+        .optional()
+        .describe('Subscribe current token user to board updates'),
+      prefsPermissionLevel: z
+        .enum(['private', 'org', 'public'])
+        .optional()
+        .describe('Board visibility: private, org, or public'),
+    },
+    async ({ boardId, ...rest }) =>
+      jsonContent(await deps.trelloService.updateBoard(boardId, rest)),
+  );
+
+  server.tool(
+    'trello_delete_board',
+    'Permanently delete a Trello board by id. Use with extreme caution.',
+    { boardId: z.string().describe('Trello board id') },
+    async ({ boardId }) => {
+      await deps.trelloService.deleteBoard(boardId);
+      return jsonContent({ deleted: true, boardId });
+    },
   );
 
   server.tool(
     'trello_list_lists',
     'List all open lists (columns) in a Trello board. Use this to find the idList for creating a card (e.g. "To Do", "In Progress").',
-    { boardId: z.string().describe('Trello board id') },
-    async ({ boardId }) =>
-      jsonContent(await deps.trelloService.listListsByBoard(boardId)),
+    {
+      boardId: z.string().describe('Trello board id'),
+      filter: z
+        .enum(['open', 'closed', 'all'])
+        .optional()
+        .default('open')
+        .describe('List filter. Default is open.'),
+    },
+    async ({ boardId, filter }) =>
+      jsonContent(await deps.trelloService.listListsByBoard(boardId, filter)),
+  );
+
+  server.tool(
+    'trello_create_list',
+    'Create a new list (column) in a Trello board.',
+    {
+      boardId: z.string().describe('Target Trello board id'),
+      name: z.string().describe('List name'),
+      pos: z
+        .union([z.enum(['top', 'bottom']), z.number().int().nonnegative()])
+        .optional()
+        .describe('Position in board: top, bottom, or numeric position'),
+    },
+    async ({ boardId, name, pos }) =>
+      jsonContent(await deps.trelloService.createList({ idBoard: boardId, name, pos })),
+  );
+
+  server.tool(
+    'trello_update_list',
+    'Update a Trello list (rename, archive/unarchive, reorder).',
+    {
+      listId: z.string().describe('Trello list id'),
+      name: z.string().optional().describe('New list name'),
+      closed: z
+        .boolean()
+        .optional()
+        .describe('Archive list (true) or unarchive (false)'),
+      pos: z
+        .union([z.enum(['top', 'bottom']), z.number().int().nonnegative()])
+        .optional()
+        .describe('Position in board: top, bottom, or numeric position'),
+    },
+    async ({ listId, ...rest }) =>
+      jsonContent(await deps.trelloService.updateList(listId, rest)),
+  );
+
+  server.tool(
+    'trello_archive_all_cards_in_list',
+    'Archive all cards in a Trello list. Useful for cleanup or sprint rollover.',
+    { listId: z.string().describe('Trello list id') },
+    async ({ listId }) => {
+      await deps.trelloService.archiveAllCardsInList(listId);
+      return jsonContent({ archivedAllCards: true, listId });
+    },
   );
 
   server.tool(

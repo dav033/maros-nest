@@ -7,12 +7,16 @@ import type { Observable } from 'rxjs';
 import { ExternalServiceException } from '../../../common/exceptions';
 import trelloConfig from '../../../config/trello.config';
 import {
+  CreateTrelloBoardInput,
   CreateTrelloCardInput,
+  CreateTrelloListInput,
   TrelloBoard,
   TrelloCard,
   TrelloList,
   TrelloMember,
+  UpdateTrelloBoardInput,
   UpdateTrelloCardInput,
+  UpdateTrelloListInput,
 } from '../dto/trello.dto';
 
 @Injectable()
@@ -25,18 +29,70 @@ export class TrelloService {
     private readonly httpService: HttpService,
   ) {}
 
-  async listBoardsForMe(): Promise<TrelloBoard[]> {
+  async listBoardsForMe(
+    filter: 'open' | 'closed' | 'all' = 'open',
+  ): Promise<TrelloBoard[]> {
     return this.get<TrelloBoard[]>('/members/me/boards', {
-      fields: 'id,name,closed,url',
-      filter: 'open',
+      fields: 'id,name,desc,closed,url',
+      filter,
     });
   }
 
-  async listListsByBoard(boardId: string): Promise<TrelloList[]> {
+  async getBoard(boardId: string): Promise<TrelloBoard> {
+    return this.get<TrelloBoard>(`/boards/${boardId}`, {
+      fields: 'id,name,desc,closed,url',
+    });
+  }
+
+  async createBoard(input: CreateTrelloBoardInput): Promise<TrelloBoard> {
+    return this.post<TrelloBoard>('/boards', {
+      name: input.name,
+      desc: input.desc,
+      defaultLists: input.defaultLists ?? true,
+      defaultLabels: input.defaultLabels ?? true,
+      idOrganization: input.idOrganization,
+      prefs_permissionLevel: input.prefsPermissionLevel,
+    });
+  }
+
+  async updateBoard(
+    boardId: string,
+    input: UpdateTrelloBoardInput,
+  ): Promise<TrelloBoard> {
+    return this.put<TrelloBoard>(`/boards/${boardId}`, {
+      ...input,
+      prefs_permissionLevel: input.prefsPermissionLevel,
+    });
+  }
+
+  async deleteBoard(boardId: string): Promise<void> {
+    await this.delete(`/boards/${boardId}`);
+  }
+
+  async listListsByBoard(
+    boardId: string,
+    filter: 'open' | 'closed' | 'all' = 'open',
+  ): Promise<TrelloList[]> {
     return this.get<TrelloList[]>(`/boards/${boardId}/lists`, {
       fields: 'id,name,idBoard,closed',
-      filter: 'open',
+      filter,
     });
+  }
+
+  async createList(input: CreateTrelloListInput): Promise<TrelloList> {
+    return this.post<TrelloList>('/lists', {
+      idBoard: input.idBoard,
+      name: input.name,
+      pos: input.pos ?? 'bottom',
+    });
+  }
+
+  async updateList(listId: string, input: UpdateTrelloListInput): Promise<TrelloList> {
+    return this.put<TrelloList>(`/lists/${listId}`, { ...input });
+  }
+
+  async archiveAllCardsInList(listId: string): Promise<void> {
+    await this.post<unknown>(`/lists/${listId}/archiveAllCards`, {});
   }
 
   async listMembersByBoard(boardId: string): Promise<TrelloMember[]> {
