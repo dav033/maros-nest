@@ -6,6 +6,24 @@ import { McpToolDeps } from './shared';
 import { registerMcpTool } from './tool-registration';
 import { deletedMessage } from './crm-write-shared';
 
+const contactWritableShape = {
+  name: z.string().optional().describe('Contact name'),
+  role: z.string().optional().describe('Role of the contact (max 100 chars)'),
+  occupation: z.string().optional().describe('Occupation'),
+  phone: z.string().optional().describe('Phone number'),
+  email: z.string().optional().describe('Email address'),
+  address: z.string().optional().describe('Address'),
+  addressLink: z.string().optional().describe('Address link (Google Maps URL)'),
+  isCustomer: z.boolean().optional().describe('Is the contact a customer?'),
+  isClient: z.boolean().optional().describe('Is the contact a client?'),
+  companyId: z.number().optional().describe('Company ID to associate with'),
+  notes: z.array(z.string()).optional().describe('Notes'),
+  attachments: z
+    .array(z.string())
+    .optional()
+    .describe('Attachment S3 keys for the contact'),
+};
+
 export function registerContactWriteTools(server: McpServer, deps: McpToolDeps) {
   registerMcpTool(
     server,
@@ -22,18 +40,7 @@ export function registerContactWriteTools(server: McpServer, deps: McpToolDeps) 
     server,
     'create_contact',
     'Create a new contact in the CRM',
-    {
-      name: z.string().optional().describe('Contact name'),
-      occupation: z.string().optional().describe('Occupation'),
-      phone: z.string().optional().describe('Phone number'),
-      email: z.string().optional().describe('Email address'),
-      address: z.string().optional().describe('Address'),
-      addressLink: z.string().optional().describe('Address link (Google Maps URL)'),
-      isCustomer: z.boolean().optional().describe('Is the contact a customer?'),
-      isClient: z.boolean().optional().describe('Is the contact a client?'),
-      companyId: z.number().optional().describe('Company ID to associate with'),
-      notes: z.array(z.string()).optional().describe('Notes'),
-    },
+    contactWritableShape,
     async (fields: Record<string, unknown>) =>
       deps.contactsService.create(fields as CreateContactDto),
   );
@@ -44,15 +51,7 @@ export function registerContactWriteTools(server: McpServer, deps: McpToolDeps) 
     'Update an existing contact by its ID. Only provided fields are updated',
     {
       contactId: z.number().describe('The contact ID to update'),
-      name: z.string().optional().describe('Contact name'),
-      occupation: z.string().optional().describe('Occupation'),
-      phone: z.string().optional().describe('Phone number'),
-      email: z.string().optional().describe('Email address'),
-      address: z.string().optional().describe('Address'),
-      addressLink: z.string().optional().describe('Address link'),
-      isCustomer: z.boolean().optional().describe('Is the contact a customer?'),
-      isClient: z.boolean().optional().describe('Is the contact a client?'),
-      companyId: z.number().optional().describe('Company ID'),
+      ...contactWritableShape,
       notes: z
         .array(z.string())
         .optional()

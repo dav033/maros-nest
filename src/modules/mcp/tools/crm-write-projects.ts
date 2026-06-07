@@ -8,6 +8,18 @@ import { registerMcpTool } from './tool-registration';
 import { deletedMessage } from './crm-write-shared';
 import { enumFromTsEnum } from './zod-utils';
 
+const projectWritableShape = {
+  projectProgressStatus: enumFromTsEnum(ProjectProgressStatus)
+    .optional()
+    .describe('Project progress status'),
+  overview: z.string().optional().describe('Project overview/description'),
+  notes: z.array(z.string()).optional().describe('Project notes'),
+  attachments: z
+    .array(z.string())
+    .optional()
+    .describe('Attachment S3 keys for the project'),
+};
+
 export function registerProjectWriteTools(server: McpServer, deps: McpToolDeps) {
   registerMcpTool(
     server,
@@ -26,11 +38,7 @@ export function registerProjectWriteTools(server: McpServer, deps: McpToolDeps) 
     'Create a new project for an existing lead',
     {
       leadId: z.number().describe('Lead ID to associate the project with'),
-      projectProgressStatus: enumFromTsEnum(ProjectProgressStatus)
-        .optional()
-        .describe('Project progress status'),
-      overview: z.string().optional().describe('Project overview/description'),
-      notes: z.array(z.string()).optional().describe('Project notes'),
+      ...projectWritableShape,
     },
     async (fields: Record<string, unknown>) =>
       deps.projectsService.create(fields as unknown as CreateProjectDto),
@@ -42,14 +50,19 @@ export function registerProjectWriteTools(server: McpServer, deps: McpToolDeps) 
     'Update an existing project by its ID. Only provided fields are updated',
     {
       projectId: z.number().describe('The project ID to update'),
-      projectProgressStatus: enumFromTsEnum(ProjectProgressStatus)
-        .optional()
-        .describe('Project progress status'),
-      overview: z.string().optional().describe('Project overview/description'),
+      ...projectWritableShape,
       notes: z
         .array(z.string())
         .optional()
         .describe('Project notes (replaces all existing notes)'),
+      leadName: z
+        .string()
+        .optional()
+        .describe("Optionally update the linked lead's name (max 100 chars)"),
+      leadNumber: z
+        .string()
+        .optional()
+        .describe("Optionally update the linked lead's lead number (max 50 chars)"),
     },
     async ({ projectId, ...fields }: { projectId: number } & Record<string, unknown>) =>
       deps.projectsService.update(projectId, fields as UpdateProjectDto),
