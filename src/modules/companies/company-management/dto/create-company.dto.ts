@@ -61,6 +61,12 @@ export class CreateCompanyDto {
   @IsOptional()
   notes?: string[];
 
+  @ApiPropertyOptional({ description: 'Attachment S3 keys for the company', type: [String] })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  attachments?: string[];
+
   @ApiPropertyOptional({ description: 'Phone number of the company', maxLength: 255 })
   @IsString()
   @IsOptional()
@@ -73,10 +79,10 @@ export class CreateCompanyDto {
   @MaxLength(255)
   email?: string;
 
-  @ApiPropertyOptional({ description: 'Submiz field for the company', maxLength: 255 })
+  @ApiPropertyOptional({ description: 'Sunbiz registration URL for the company', maxLength: 2048 })
   @IsString()
   @IsOptional()
-  @MaxLength(255)
+  @MaxLength(2048)
   submiz?: string;
 
   @ApiPropertyOptional({ description: 'Linked QuickBooks vendor ID', maxLength: 64 })

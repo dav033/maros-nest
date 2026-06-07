@@ -47,15 +47,10 @@ export class LeadIntakeService {
 
     if (!company && dto.companyEmail) {
       company = await this.companyRepo.findOne({
-        where: [
-          { email: ILike(`%${dto.companyEmail}%`) },
-          { submiz: ILike(`%${dto.companyEmail}%`) },
-        ],
+        where: { email: ILike(`%${dto.companyEmail}%`) },
       });
       if (company) {
-        actions.push(
-          `Found existing company by email: ${company.email || company.submiz}`,
-        );
+        actions.push(`Found existing company by email: ${company.email}`);
       }
     }
 

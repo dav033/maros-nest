@@ -12,12 +12,14 @@ import { LeadNumberingService } from './lead-management/services/lead-numbering.
 import { LeadMutationService } from './lead-management/services/lead-mutation.service';
 import { ContactsModule } from '../contacts/contacts.module';
 import { QuickbooksModule } from '../quickbooks/quickbooks.module';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Lead, Contact, ProjectType, Project]),
     ContactsModule,
     QuickbooksModule,
+    MailModule,
   ],
   controllers: [LeadsController],
   providers: [

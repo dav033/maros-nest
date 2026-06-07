@@ -1,9 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { McpToolDeps, jsonContent } from './shared';
+import { McpToolDeps } from './shared';
+import { registerMcpTool } from './tool-registration';
 
 export function registerTrelloTools(server: McpServer, deps: McpToolDeps) {
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_list_boards',
     'List all open Trello boards the workspace token has access to. Use this to find the board where tasks should be created.',
     {
@@ -13,11 +15,12 @@ export function registerTrelloTools(server: McpServer, deps: McpToolDeps) {
         .default('open')
         .describe('Board filter. Default is open.'),
     },
-    async ({ filter }) =>
-      jsonContent(await deps.trelloService.listBoardsForMe(filter)),
+    async ({ filter }: { filter?: 'open' | 'closed' | 'all' }) =>
+      deps.trelloService.listBoardsForMe(filter),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_create_board',
     'Create a new Trello board. Use this when the user asks for a new workspace board to organize tasks.',
     {
@@ -40,18 +43,20 @@ export function registerTrelloTools(server: McpServer, deps: McpToolDeps) {
         .optional()
         .describe('Board visibility: private, org, or public'),
     },
-    async (input) => jsonContent(await deps.trelloService.createBoard(input)),
+    async (input: Parameters<typeof deps.trelloService.createBoard>[0]) =>
+      deps.trelloService.createBoard(input),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_get_board',
     'Get a Trello board by id.',
     { boardId: z.string().describe('Trello board id') },
-    async ({ boardId }) =>
-      jsonContent(await deps.trelloService.getBoard(boardId)),
+    async ({ boardId }: { boardId: string }) => deps.trelloService.getBoard(boardId),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_update_board',
     'Update a Trello board (rename, description, close/open, visibility).',
     {
@@ -68,21 +73,26 @@ export function registerTrelloTools(server: McpServer, deps: McpToolDeps) {
         .optional()
         .describe('Board visibility: private, org, or public'),
     },
-    async ({ boardId, ...rest }) =>
-      jsonContent(await deps.trelloService.updateBoard(boardId, rest)),
+    async ({
+      boardId,
+      ...rest
+    }: { boardId: string } & Parameters<typeof deps.trelloService.updateBoard>[1]) =>
+      deps.trelloService.updateBoard(boardId, rest),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_delete_board',
     'Permanently delete a Trello board by id. Use with extreme caution.',
     { boardId: z.string().describe('Trello board id') },
-    async ({ boardId }) => {
+    async ({ boardId }: { boardId: string }) => {
       await deps.trelloService.deleteBoard(boardId);
-      return jsonContent({ deleted: true, boardId });
+      return { deleted: true, boardId };
     },
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_list_lists',
     'List all open lists (columns) in a Trello board. Use this to find the idList for creating a card (e.g. "To Do", "In Progress").',
     {
@@ -93,11 +103,17 @@ export function registerTrelloTools(server: McpServer, deps: McpToolDeps) {
         .default('open')
         .describe('List filter. Default is open.'),
     },
-    async ({ boardId, filter }) =>
-      jsonContent(await deps.trelloService.listListsByBoard(boardId, filter)),
+    async ({
+      boardId,
+      filter,
+    }: {
+      boardId: string;
+      filter?: 'open' | 'closed' | 'all';
+    }) => deps.trelloService.listListsByBoard(boardId, filter),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_create_list',
     'Create a new list (column) in a Trello board.',
     {
@@ -108,11 +124,19 @@ export function registerTrelloTools(server: McpServer, deps: McpToolDeps) {
         .optional()
         .describe('Position in board: top, bottom, or numeric position'),
     },
-    async ({ boardId, name, pos }) =>
-      jsonContent(await deps.trelloService.createList({ idBoard: boardId, name, pos })),
+    async ({
+      boardId,
+      name,
+      pos,
+    }: {
+      boardId: string;
+      name: string;
+      pos?: 'top' | 'bottom' | number;
+    }) => deps.trelloService.createList({ idBoard: boardId, name, pos }),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_update_list',
     'Update a Trello list (rename, archive/unarchive, reorder).',
     {
@@ -127,29 +151,35 @@ export function registerTrelloTools(server: McpServer, deps: McpToolDeps) {
         .optional()
         .describe('Position in board: top, bottom, or numeric position'),
     },
-    async ({ listId, ...rest }) =>
-      jsonContent(await deps.trelloService.updateList(listId, rest)),
+    async ({
+      listId,
+      ...rest
+    }: { listId: string } & Parameters<typeof deps.trelloService.updateList>[1]) =>
+      deps.trelloService.updateList(listId, rest),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_archive_all_cards_in_list',
     'Archive all cards in a Trello list. Useful for cleanup or sprint rollover.',
     { listId: z.string().describe('Trello list id') },
-    async ({ listId }) => {
+    async ({ listId }: { listId: string }) => {
       await deps.trelloService.archiveAllCardsInList(listId);
-      return jsonContent({ archivedAllCards: true, listId });
+      return { archivedAllCards: true, listId };
     },
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_list_members',
     'List members of a Trello board (id, fullName, username). Use this to map a person mentioned by the user (e.g. "Juan", "Ana") to a Trello idMember before creating/assigning cards.',
     { boardId: z.string().describe('Trello board id') },
-    async ({ boardId }) =>
-      jsonContent(await deps.trelloService.listMembersByBoard(boardId)),
+    async ({ boardId }: { boardId: string }) =>
+      deps.trelloService.listMembersByBoard(boardId),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_create_card',
     'Create a Trello card (task) in a list. Resolve idList via trello_list_lists and idMembers via trello_list_members BEFORE calling this.',
     {
@@ -184,17 +214,20 @@ export function registerTrelloTools(server: McpServer, deps: McpToolDeps) {
         .optional()
         .describe('Optional attachments added immediately after card creation'),
     },
-    async (input) => jsonContent(await deps.trelloService.createCard(input)),
+    async (input: Parameters<typeof deps.trelloService.createCard>[0]) =>
+      deps.trelloService.createCard(input),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_get_card',
     'Get a Trello card by id, including attachments.',
     { cardId: z.string() },
-    async ({ cardId }) => jsonContent(await deps.trelloService.getCard(cardId)),
+    async ({ cardId }: { cardId: string }) => deps.trelloService.getCard(cardId),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_add_card_attachment',
     'Add a URL attachment to an existing Trello card.',
     {
@@ -206,19 +239,25 @@ export function registerTrelloTools(server: McpServer, deps: McpToolDeps) {
         .optional()
         .describe('Set this attachment as card cover when possible'),
     },
-    async ({ cardId, ...input }) =>
-      jsonContent(await deps.trelloService.addAttachmentToCard(cardId, input)),
+    async ({
+      cardId,
+      ...input
+    }: { cardId: string } & Parameters<
+      typeof deps.trelloService.addAttachmentToCard
+    >[1]) => deps.trelloService.addAttachmentToCard(cardId, input),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_list_card_attachments',
     'List all attachments in a Trello card.',
     { cardId: z.string().describe('Target Trello card id') },
-    async ({ cardId }) =>
-      jsonContent(await deps.trelloService.listCardAttachments(cardId)),
+    async ({ cardId }: { cardId: string }) =>
+      deps.trelloService.listCardAttachments(cardId),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_update_card',
     'Update an existing Trello card (rename, change due date, reassign members, move list, archive).',
     {
@@ -230,25 +269,30 @@ export function registerTrelloTools(server: McpServer, deps: McpToolDeps) {
       closed: z.boolean().optional().describe('Archive (true) or unarchive (false)'),
       idMembers: z.array(z.string()).optional().describe('Replace assigned members'),
     },
-    async ({ cardId, ...rest }) =>
-      jsonContent(await deps.trelloService.updateCard(cardId, rest)),
+    async ({
+      cardId,
+      ...rest
+    }: { cardId: string } & Parameters<typeof deps.trelloService.updateCard>[1]) =>
+      deps.trelloService.updateCard(cardId, rest),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_delete_card',
     'Permanently delete a Trello card.',
     { cardId: z.string() },
-    async ({ cardId }) => {
+    async ({ cardId }: { cardId: string }) => {
       await deps.trelloService.deleteCard(cardId);
-      return jsonContent({ deleted: true, cardId });
+      return { deleted: true, cardId };
     },
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'trello_list_cards_by_list',
     'List all cards currently in a given Trello list.',
     { listId: z.string() },
-    async ({ listId }) =>
-      jsonContent(await deps.trelloService.listCardsByList(listId)),
+    async ({ listId }: { listId: string }) =>
+      deps.trelloService.listCardsByList(listId),
   );
 }

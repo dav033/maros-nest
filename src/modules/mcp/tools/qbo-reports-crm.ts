@@ -1,11 +1,13 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { ProjectProgressStatus } from '../../../common/enums/project-progress-status.enum';
-import { McpToolDeps, jsonContent } from './shared';
+import { McpToolDeps } from './shared';
+import { registerMcpTool } from './tool-registration';
 import { realmIdParam } from './qbo-tool-utils';
 
 export function registerQboCrmReports(server: McpServer, deps: McpToolDeps) {
-  server.tool(
+  registerMcpTool(
+    server,
     'get_pipeline_value',
     'Leads grouped by status with count per status. ' +
       'Gives a snapshot of the sales pipeline. ' +
@@ -23,11 +25,12 @@ export function registerQboCrmReports(server: McpServer, deps: McpToolDeps) {
         byStatus[status].count += 1;
         byStatus[status].leads.push(lead);
       }
-      return jsonContent(byStatus);
+      return byStatus;
     },
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'get_win_rate',
     'Win rate: percentage of leads that were converted to a project. ' +
       'Based on CRM data (projects / total pipeline leads).',
@@ -42,21 +45,22 @@ export function registerQboCrmReports(server: McpServer, deps: McpToolDeps) {
       const won = projects.length;
       const total = openLeads + won;
       const winRate = total > 0 ? Math.round((won / total) * 10000) / 100 : 0;
-      return jsonContent({
+      return {
         totalLeads: total,
         convertedToProject: won,
         openLeads,
         winRate,
-      });
+      };
     },
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'get_unbilled_completed_work_crm',
     'Projects with COMPLETED status in the CRM that have unbilled work in QuickBooks ' +
       '(estimated > invoiced). Combines CRM project data with QBO financials.',
     { realmId: realmIdParam },
-    async ({ realmId }) => {
+    async ({ realmId }: { realmId?: string }) => {
       const completedProjects = await deps.projectsService.findByStatus(
         ProjectProgressStatus.COMPLETED,
       );
@@ -68,7 +72,7 @@ export function registerQboCrmReports(server: McpServer, deps: McpToolDeps) {
         })
         .filter(Boolean) as string[];
 
-      if (!leadNumbers.length) return jsonContent([]);
+      if (!leadNumbers.length) return [];
 
       const financials = await deps.qboFinancials.getProjectFinancials(
         leadNumbers,
@@ -76,7 +80,7 @@ export function registerQboCrmReports(server: McpServer, deps: McpToolDeps) {
       );
       const unbilled = financials.filter((fin) => fin.estimateVsInvoicedDelta > 0);
 
-      const enriched = unbilled.map((fin) => {
+      return unbilled.map((fin) => {
         const project = completedProjects.find(
           (candidate: Record<string, unknown>) =>
             (candidate['lead'] as { leadNumber?: string } | undefined)
@@ -84,12 +88,11 @@ export function registerQboCrmReports(server: McpServer, deps: McpToolDeps) {
         );
         return { ...fin, crmProject: project };
       });
-
-      return jsonContent(enriched);
     },
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'get_top_clients_by_volume',
     'Top clients ranked by number of projects in the CRM.',
     {
@@ -98,7 +101,7 @@ export function registerQboCrmReports(server: McpServer, deps: McpToolDeps) {
         .optional()
         .describe('Number of clients to return (default: 10)'),
     },
-    async ({ limit = 10 }) => {
+    async ({ limit = 10 }: { limit?: number }) => {
       const projects = await deps.projectsService.findAll();
       const byClient: Record<
         string,
@@ -121,15 +124,14 @@ export function registerQboCrmReports(server: McpServer, deps: McpToolDeps) {
         byClient[key].projects.push(project);
       }
 
-      const sorted = Object.values(byClient)
+      return Object.values(byClient)
         .sort((a, b) => b.count - a.count)
         .slice(0, limit);
-
-      return jsonContent(sorted);
     },
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'get_company_financial_snapshot',
     'Full financial overview of the entire company: reads every project from the CRM, ' +
       'fetches their QuickBooks financials in a single batch, and returns per-project numbers ' +
@@ -137,7 +139,7 @@ export function registerQboCrmReports(server: McpServer, deps: McpToolDeps) {
       'Use this to understand the current financial state of the business at a glance. ' +
       'Projects not found in QuickBooks are flagged with found=false.',
     { realmId: realmIdParam },
-    async ({ realmId }) => {
+    async ({ realmId }: { realmId?: string }) => {
       const allProjects = (await deps.projectsService.findAll()) as Record<
         string,
         unknown
@@ -215,7 +217,7 @@ export function registerQboCrmReports(server: McpServer, deps: McpToolDeps) {
         ),
       };
 
-      return jsonContent({ totals, projects });
+      return { totals, projects };
     },
   );
 }

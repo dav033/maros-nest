@@ -22,6 +22,7 @@ import {
   DatabaseException,
 } from '../../../common/exceptions';
 import { ProjectQboEnrichmentService } from '../../quickbooks/services/crm-bridge/project-qbo-enrichment.service';
+import { MailService } from '../../mail/services/mail.service';
 
 @Injectable()
 export class LeadsService {
@@ -41,6 +42,7 @@ export class LeadsService {
     private readonly leadMutationService: LeadMutationService,
     private readonly dataSource: DataSource,
     private readonly qboEnrichment: ProjectQboEnrichmentService,
+    private readonly mailService: MailService,
   ) {}
 
   async getAllLeads(options: { includeQbo?: boolean } = {}): Promise<any[]> {
@@ -252,16 +254,13 @@ export class LeadsService {
       projectTypeId = leadDto.projectTypeId;
     }
 
-    if (!projectTypeId) {
-      throw ValidationException.format('Project Type is required');
-    }
-
-    const projectType = await this.leadMutationService.resolveProjectType(
-      projectTypeId,
-    );
     const entity = this.leadMapper.toEntity(leadDto);
     entity.contact = contact;
-    entity.projectType = projectType;
+    if (projectTypeId) {
+      entity.projectType = await this.leadMutationService.resolveProjectType(
+        projectTypeId,
+      );
+    }
 
     // Ensure ID is not set (should be auto-generated)
     delete (entity as any).id;
@@ -321,7 +320,7 @@ export class LeadsService {
 
     // Cargar entity completo solo si necesitamos actualizar relaciones
     const needsRelations =
-      patchDto.contactId !== undefined || patchDto.projectTypeId !== undefined;
+      patchDto.contactId !== undefined || patchDto.projectTypeId !== undefined || patchDto.status !== undefined;
     const entity = await this.leadRepo.findOne({
       where: { id },
       relations: needsRelations ? ['contact', 'projectType'] : [],
@@ -331,26 +330,51 @@ export class LeadsService {
       throw new LeadExceptions.LeadNotFoundException(id);
     }
 
+    const previousStatus = entity.status;
+
     await this.leadMutationService.updateEntityFields(patchDto, entity);
     await this.dataSource.manager.save(entity);
 
-    // Auto-create project when status becomes WON
-    if (entity.status === LeadStatus.WON) {
-      const existingProject = await this.projectRepo.findOne({
-        where: { lead: { id } },
-      });
-      if (!existingProject) {
-        const project = this.projectRepo.create();
+    let conversion: { converted: boolean; projectId?: number } = {
+      converted: false,
+    };
+
+    const becameWon =
+      previousStatus !== LeadStatus.WON && entity.status === LeadStatus.WON;
+    this.logger.log(`updateLead #${id} — previousStatus: ${previousStatus}, newStatus: ${entity.status}, becameWon: ${becameWon}`);
+    if (becameWon) {
+      let project = await this.projectRepo.findOne({ where: { lead: { id } } });
+      if (!project) {
+        this.logger.log(`Creating new project for lead #${id}`);
+        project = this.projectRepo.create();
         project.lead = entity;
-        const savedProject = await this.projectRepo.save(project);
-        entity.project = savedProject;
+        project.attachments = entity.attachments ?? [];
+        project = await this.projectRepo.save(project);
+        this.logger.log(`Created project #${project.id} for lead #${id}`);
       } else {
-        entity.project = existingProject;
+        this.logger.log(`Existing project #${project.id} found for lead #${id}`);
+      }
+      entity.project = project;
+      conversion = { converted: true, projectId: project.id };
+
+      const leadLabel = entity.leadNumber ?? entity.name ?? `Lead #${id}`;
+      const contactEmail = entity.contact?.email;
+      this.logger.log(`Sending WON notification email for lead "${leadLabel}" (id: ${id}, project: ${project.id}, contactEmail: ${contactEmail ?? 'none'})`);
+      try {
+        const textBody = `El lead "${entity.name ?? entity.leadNumber}" ha pasado a estado WON y se ha creado el proyecto #${project.id}.\n\nFecha: ${new Date().toLocaleString()}${contactEmail ? `\n\nContacto: ${entity.contact?.name ?? 'N/A'} <${contactEmail}>` : ''}`;
+        const mailResult = await this.mailService.sendMail({
+          to: ['info@marosconstruction.com'],
+          subject: `Lead Won: ${leadLabel} convertido a proyecto`,
+          text: textBody,
+        });
+        this.logger.log(`WON notification email sent — messageId: ${mailResult.messageId ?? 'N/A'}`);
+      } catch (err) {
+        this.logger.warn(`WON notification email failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
     const dto = this.leadMapper.toDto(entity);
-    return dto;
+    return { ...dto, conversion };
   }
 
   async getLeadRejectionInfo(id: number): Promise<{

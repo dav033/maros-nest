@@ -3,22 +3,25 @@ import { z } from 'zod';
 import { CreateProjectDto } from '../../projects/project-management/dto/create-project.dto';
 import { UpdateProjectDto } from '../../projects/project-management/dto/update-project.dto';
 import { ProjectProgressStatus } from '../../../common/enums/project-progress-status.enum';
-import { McpToolDeps, jsonContent } from './shared';
+import { McpToolDeps } from './shared';
+import { registerMcpTool } from './tool-registration';
 import { deletedMessage } from './crm-write-shared';
 import { enumFromTsEnum } from './zod-utils';
 
 export function registerProjectWriteTools(server: McpServer, deps: McpToolDeps) {
-  server.tool(
+  registerMcpTool(
+    server,
     'delete_project',
     'Delete a project by its ID. The associated lead is preserved',
     { projectId: z.number().describe('The project ID to delete') },
-    async ({ projectId }) => {
+    async ({ projectId }: { projectId: number }) => {
       await deps.projectsService.delete(projectId);
       return deletedMessage('Project', projectId);
     },
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'create_project',
     'Create a new project for an existing lead',
     {
@@ -29,13 +32,12 @@ export function registerProjectWriteTools(server: McpServer, deps: McpToolDeps) 
       overview: z.string().optional().describe('Project overview/description'),
       notes: z.array(z.string()).optional().describe('Project notes'),
     },
-    async (fields) => {
-      const data = await deps.projectsService.create(fields as CreateProjectDto);
-      return jsonContent(data);
-    },
+    async (fields: Record<string, unknown>) =>
+      deps.projectsService.create(fields as unknown as CreateProjectDto),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'update_project',
     'Update an existing project by its ID. Only provided fields are updated',
     {
@@ -49,12 +51,7 @@ export function registerProjectWriteTools(server: McpServer, deps: McpToolDeps) 
         .optional()
         .describe('Project notes (replaces all existing notes)'),
     },
-    async ({ projectId, ...fields }) => {
-      const data = await deps.projectsService.update(
-        projectId,
-        fields as UpdateProjectDto,
-      );
-      return jsonContent(data);
-    },
+    async ({ projectId, ...fields }: { projectId: number } & Record<string, unknown>) =>
+      deps.projectsService.update(projectId, fields as UpdateProjectDto),
   );
 }

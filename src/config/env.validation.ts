@@ -99,6 +99,39 @@ export class EnvironmentVariables {
   @IsOptional()
   S3_PRESIGNED_URL_EXPIRES_SECONDS: number = 900;
 
+  // Mail (optional at startup; MailService validates at send time)
+  @IsString()
+  @IsOptional()
+  MAIL_FROM: string;
+
+  @IsString()
+  @IsOptional()
+  MAIL_TRANSPORT: string;
+
+  @IsString()
+  @IsOptional()
+  MAIL_SMTP_HOST: string;
+
+  @IsNumber()
+  @IsOptional()
+  MAIL_SMTP_PORT: number = 587;
+
+  @IsString()
+  @IsOptional()
+  MAIL_SMTP_USER: string;
+
+  @IsString()
+  @IsOptional()
+  MAIL_SMTP_PASSWORD: string;
+
+  @IsBoolean()
+  @IsOptional()
+  MAIL_SMTP_SECURE: boolean = false;
+
+  @IsString()
+  @IsOptional()
+  MAIL_API_KEY: string;
+
   // CORS
   @IsString()
   @IsOptional()

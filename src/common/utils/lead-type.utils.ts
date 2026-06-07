@@ -21,15 +21,15 @@ export function getLeadTypeFromNumber(leadNumber: string | null | undefined): Le
     return null;
   }
   
-  // Patrón para ROOFING: número seguido de 'R-' y más números
-  // Ejemplo: 053R-1025
-  if (/^\d+R-\d+$/.test(trimmed)) {
+  // Patrón para ROOFING: número seguido de 'R-' y más números.
+  // Permite notas al final, por ejemplo: 053R-1025 (issue)
+  if (/^\d+R-\d+(?:\D.*)?$/.test(trimmed)) {
     return LeadType.ROOFING;
   }
 
-  // Patrón para PLUMBING: número seguido de 'P-' y más números
-  // Ejemplo: 053P-1025
-  if (/^\d+P-\d+$/.test(trimmed)) {
+  // Patrón para PLUMBING: número seguido de 'P-' y más números.
+  // Permite notas al final, por ejemplo: 053P-1025 (issue)
+  if (/^\d+P-\d+(?:\D.*)?$/.test(trimmed)) {
     return LeadType.PLUMBING;
   }
 
@@ -72,20 +72,20 @@ export function leadNumberSqlFilter(
   if (leadType === LeadType.ROOFING) {
     return {
       clause: `${column} ~ :${paramKey}`,
-      parameters: { [paramKey]: '^\\d+R-\\d+$' },
+      parameters: { [paramKey]: '^[0-9]+R-[0-9]+([^0-9].*)?$' },
     };
   }
 
   if (leadType === LeadType.PLUMBING) {
     return {
       clause: `${column} ~ :${paramKey}`,
-      parameters: { [paramKey]: '^\\d+P-\\d+$' },
+      parameters: { [paramKey]: '^[0-9]+P-[0-9]+([^0-9].*)?$' },
     };
   }
 
   return {
     clause: `${column} IS NOT NULL AND ${column} !~ :${paramKey}`,
-    parameters: { [paramKey]: '^\\d+[RP]-\\d+$' },
+    parameters: { [paramKey]: '^[0-9]+[RP]-[0-9]+([^0-9].*)?$' },
   };
 }
 

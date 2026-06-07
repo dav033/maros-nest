@@ -35,13 +35,16 @@ export class Company {
   @Column({ type: 'jsonb', nullable: true })
   notes?: string[];
 
+  @Column({ type: 'jsonb', nullable: true, name: 'attachments', default: [] })
+  attachments?: string[];
+
   @Column({ length: 255, nullable: true })
   phone?: string;
 
   @Column({ length: 255, nullable: true })
   email?: string;
 
-  @Column({ length: 255, nullable: true })
+  @Column({ length: 2048, nullable: true })
   submiz?: string;
 
   @Column({ name: 'qbo_vendor_id', length: 64, nullable: true })

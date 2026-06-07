@@ -15,6 +15,7 @@ export class CompanyMapper {
     entity.customer = dto.isCustomer ?? false;
     entity.client = dto.isClient ?? false;
     entity.notes = dto.notes;
+    entity.attachments = dto.attachments ?? [];
     entity.phone = dto.phone;
     entity.email = dto.email;
     entity.submiz = dto.submiz;
@@ -39,7 +40,9 @@ export class CompanyMapper {
     if (dto.notes !== undefined) {
       entity.notes = dto.notes;
     }
-    
+
+    if (dto.attachments !== undefined) entity.attachments = dto.attachments;
+
     if (dto.phone !== undefined) entity.phone = dto.phone;
     if (dto.email !== undefined) entity.email = dto.email;
     if (dto.submiz !== undefined) entity.submiz = dto.submiz;
@@ -68,6 +71,7 @@ export class CompanyMapper {
       isCustomer: entity.customer,
       isClient: entity.client,
       notes: entity.notes,
+      attachments: entity.attachments ?? [],
       phone: entity.phone,
       email: entity.email,
       submiz: entity.submiz,

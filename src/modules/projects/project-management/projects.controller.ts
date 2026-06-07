@@ -16,6 +16,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/
 import { ProjectsService } from './services/projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { SendEstimateEmailDto } from './dto/send-estimate-email.dto';
 
 @ApiTags('projects')
 @Controller('projects')
@@ -48,6 +49,23 @@ export class ProjectsController {
   @ApiResponse({ status: 404, description: 'Project not found' })
   async getProjectDetails(@Param('id', ParseIntPipe) id: number) {
     return this.projectsService.getProjectDetails(id);
+  }
+
+  @Get(':id/estimate-file')
+  @ApiOperation({ summary: 'Find the estimate attachment for a project (searches the linked lead + project attachments)' })
+  @ApiParam({ name: 'id', type: Number })
+  async getEstimateFile(@Param('id', ParseIntPipe) id: number) {
+    return this.projectsService.findEstimateFile(id);
+  }
+
+  @Post(':id/send-estimate-email')
+  @ApiOperation({ summary: 'Send the project estimate by email (optionally without attachment)' })
+  @ApiParam({ name: 'id', type: Number })
+  async sendEstimateEmail(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SendEstimateEmailDto,
+  ) {
+    return this.projectsService.sendEstimateEmail(id, dto);
   }
 
   @Get(':id')

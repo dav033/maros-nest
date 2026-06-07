@@ -3,12 +3,14 @@ import { z } from 'zod';
 import { CreateCompanyDto } from '../../companies/company-management/dto/create-company.dto';
 import { UpdateCompanyDto } from '../../companies/company-management/dto/update-company.dto';
 import { CompanyType } from '../../../common/enums/company-type.enum';
-import { McpToolDeps, jsonContent } from './shared';
+import { McpToolDeps } from './shared';
+import { registerMcpTool } from './tool-registration';
 import { deletedMessage } from './crm-write-shared';
 import { enumFromTsEnum } from './zod-utils';
 
 export function registerCompanyWriteTools(server: McpServer, deps: McpToolDeps) {
-  server.tool(
+  registerMcpTool(
+    server,
     'create_company',
     'Create a new company in the CRM',
     {
@@ -23,13 +25,12 @@ export function registerCompanyWriteTools(server: McpServer, deps: McpToolDeps) 
       phone: z.string().optional().describe('Phone number'),
       email: z.string().optional().describe('Email address'),
     },
-    async (fields) => {
-      const data = await deps.companiesService.create(fields as CreateCompanyDto);
-      return jsonContent(data);
-    },
+    async (fields: Record<string, unknown>) =>
+      deps.companiesService.create(fields as unknown as CreateCompanyDto),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'update_company',
     'Update an existing company by its ID. Only provided fields are updated',
     {
@@ -48,20 +49,16 @@ export function registerCompanyWriteTools(server: McpServer, deps: McpToolDeps) 
       phone: z.string().optional().describe('Phone number'),
       email: z.string().optional().describe('Email address'),
     },
-    async ({ companyId, ...fields }) => {
-      const data = await deps.companiesService.update(
-        companyId,
-        fields as UpdateCompanyDto,
-      );
-      return jsonContent(data);
-    },
+    async ({ companyId, ...fields }: { companyId: number } & Record<string, unknown>) =>
+      deps.companiesService.update(companyId, fields as UpdateCompanyDto),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'delete_company',
     'Delete a company by its ID',
     { companyId: z.number().describe('The company ID to delete') },
-    async ({ companyId }) => {
+    async ({ companyId }: { companyId: number }) => {
       await deps.companiesService.delete(companyId);
       return deletedMessage('Company', companyId);
     },

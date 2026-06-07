@@ -47,6 +47,9 @@ export class Contact {
   @Column({ type: 'jsonb', nullable: true, name: 'notes' })
   notes?: string[];
 
+  @Column({ type: 'jsonb', nullable: true, name: 'attachments', default: [] })
+  attachments?: string[];
+
   @ManyToOne(() => Company, (company) => company.contacts, { nullable: true })
   @JoinColumn({ name: 'company_id' })
   company: Company;

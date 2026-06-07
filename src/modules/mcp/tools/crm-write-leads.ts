@@ -3,11 +3,13 @@ import { z } from 'zod';
 import { CreateLeadDto } from '../../leads/lead-management/dto/create-lead.dto';
 import { CreateContactDto } from '../../contacts/contact-management/dto/create-contact.dto';
 import { LeadStatus } from '../../../common/enums/lead-status.enum';
-import { McpToolDeps, jsonContent } from './shared';
+import { McpToolDeps } from './shared';
+import { registerMcpTool } from './tool-registration';
 import { enumFromTsEnum } from './zod-utils';
 
 export function registerLeadWriteTools(server: McpServer, deps: McpToolDeps) {
-  server.tool(
+  registerMcpTool(
+    server,
     'create_lead_with_existing_contact',
     'Create a new lead and associate it with an existing contact by contact ID',
     {
@@ -25,17 +27,14 @@ export function registerLeadWriteTools(server: McpServer, deps: McpToolDeps) {
       notes: z.array(z.string()).optional().describe('Notes'),
       inReview: z.boolean().optional().describe('Whether the lead is in review'),
     },
-    async ({ contactId, ...leadFields }) => {
-      const lead: CreateLeadDto = leadFields as CreateLeadDto;
-      const data = await deps.leadsService.createLeadWithExistingContact(
-        lead,
-        contactId,
-      );
-      return jsonContent(data);
+    async ({ contactId, ...leadFields }: { contactId: number } & Record<string, unknown>) => {
+      const lead = leadFields as CreateLeadDto;
+      return deps.leadsService.createLeadWithExistingContact(lead, contactId);
     },
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'create_lead_with_new_contact',
     'Create a new lead together with a new contact',
     {
@@ -72,25 +71,25 @@ export function registerLeadWriteTools(server: McpServer, deps: McpToolDeps) {
       contact_isClient,
       contact_notes,
       ...leadFields
-    }) => {
+    }: Record<string, unknown>) => {
       const contact: CreateContactDto = {
-        name: contact_name,
-        phone: contact_phone,
-        email: contact_email,
-        occupation: contact_occupation,
-        address: contact_address,
-        companyId: contact_companyId,
-        isCustomer: contact_isCustomer,
-        isClient: contact_isClient,
-        notes: contact_notes,
+        name: contact_name as string | undefined,
+        phone: contact_phone as string | undefined,
+        email: contact_email as string | undefined,
+        occupation: contact_occupation as string | undefined,
+        address: contact_address as string | undefined,
+        companyId: contact_companyId as number | undefined,
+        isCustomer: contact_isCustomer as boolean | undefined,
+        isClient: contact_isClient as boolean | undefined,
+        notes: contact_notes as string[] | undefined,
       };
-      const lead: CreateLeadDto = leadFields as CreateLeadDto;
-      const data = await deps.leadsService.createLeadWithNewContact(lead, contact);
-      return jsonContent(data);
+      const lead = leadFields as CreateLeadDto;
+      return deps.leadsService.createLeadWithNewContact(lead, contact);
     },
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'update_lead',
     'Update an existing lead by its ID. Only provided fields are updated',
     {
@@ -108,13 +107,12 @@ export function registerLeadWriteTools(server: McpServer, deps: McpToolDeps) {
         .describe('Notes (replaces all existing notes)'),
       inReview: z.boolean().optional().describe('Whether the lead is in review'),
     },
-    async ({ leadId, ...fields }) => {
-      const data = await deps.leadsService.updateLead(leadId, fields as CreateLeadDto);
-      return jsonContent(data);
-    },
+    async ({ leadId, ...fields }: { leadId: number } & Record<string, unknown>) =>
+      deps.leadsService.updateLead(leadId, fields as CreateLeadDto),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     'delete_lead',
     'Delete a lead by its ID. Optionally also delete the associated contact and/or company',
     {
@@ -128,12 +126,14 @@ export function registerLeadWriteTools(server: McpServer, deps: McpToolDeps) {
         .optional()
         .describe('Also delete the associated company?'),
     },
-    async ({ leadId, deleteContact, deleteCompany }) => {
-      const data = await deps.leadsService.deleteLead(leadId, {
-        deleteContact,
-        deleteCompany,
-      });
-      return jsonContent(data);
-    },
+    async ({
+      leadId,
+      deleteContact,
+      deleteCompany,
+    }: {
+      leadId: number;
+      deleteContact?: boolean;
+      deleteCompany?: boolean;
+    }) => deps.leadsService.deleteLead(leadId, { deleteContact, deleteCompany }),
   );
 }

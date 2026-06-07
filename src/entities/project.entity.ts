@@ -30,6 +30,9 @@ export class Project {
   @Column({ type: 'jsonb', nullable: true, name: 'notes' })
   notes?: string[];
 
+  @Column({ type: 'jsonb', nullable: true, name: 'attachments', default: [] })
+  attachments?: string[];
+
   @OneToOne(() => Lead, { nullable: false, cascade: ['insert', 'update'] })
   @JoinColumn({ name: 'lead_id' })
   lead: Lead;

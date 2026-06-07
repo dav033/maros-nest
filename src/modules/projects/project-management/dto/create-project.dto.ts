@@ -19,6 +19,12 @@ export class CreateProjectDto {
   @IsOptional()
   notes?: string[];
 
+  @ApiPropertyOptional({ description: 'Attachment S3 keys for the project', type: [String] })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  attachments?: string[];
+
   @ApiProperty({ description: 'Lead ID associated with the project (required)', type: Number })
   @IsNumber()
   @IsNotEmpty()

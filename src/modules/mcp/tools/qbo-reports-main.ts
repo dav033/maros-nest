@@ -2,10 +2,10 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { McpToolDeps } from './shared';
 import { realmIdParam } from './qbo-tool-utils';
-import { registerJsonTool } from './tool-registration';
+import { registerMcpTool } from './tool-registration';
 
 export function registerQboReportTools(server: McpServer, deps: McpToolDeps) {
-  registerJsonTool(
+  registerMcpTool(
     server,
     'get_aging_report',
     'Accounts receivable aging report: all open invoices bucketed by days overdue ' +
@@ -15,7 +15,7 @@ export function registerQboReportTools(server: McpServer, deps: McpToolDeps) {
       deps.qboReports.getAgingReport(realmId),
   );
 
-  registerJsonTool(
+  registerMcpTool(
     server,
     'get_outstanding_balances',
     'All QuickBooks projects (jobs) with an open invoice balance, ' +
@@ -25,7 +25,7 @@ export function registerQboReportTools(server: McpServer, deps: McpToolDeps) {
       deps.qboReports.getOutstandingBalances(realmId),
   );
 
-  registerJsonTool(
+  registerMcpTool(
     server,
     'get_unbilled_completed_work',
     'All QuickBooks jobs where estimated amount exceeds invoiced amount - ' +
@@ -36,7 +36,7 @@ export function registerQboReportTools(server: McpServer, deps: McpToolDeps) {
       deps.qboReports.getUnbilledCompletedWork(realmId),
   );
 
-  registerJsonTool(
+  registerMcpTool(
     server,
     'get_revenue_by_period',
     'Total revenue collected (payments received) within a date range. ' +
@@ -57,7 +57,7 @@ export function registerQboReportTools(server: McpServer, deps: McpToolDeps) {
     }) => deps.qboReports.getRevenueByPeriod(start, end, realmId),
   );
 
-  registerJsonTool(
+  registerMcpTool(
     server,
     'get_backlog',
     'All QuickBooks jobs with contracted (estimated) work that has not yet been invoiced. ' +
@@ -66,7 +66,7 @@ export function registerQboReportTools(server: McpServer, deps: McpToolDeps) {
     async ({ realmId }: { realmId?: string }) => deps.qboReports.getBacklog(realmId),
   );
 
-  registerJsonTool(
+  registerMcpTool(
     server,
     'search_projects_by_financial_criteria',
     'Filter QuickBooks jobs by financial thresholds. All criteria are optional. ' +
@@ -104,7 +104,7 @@ export function registerQboReportTools(server: McpServer, deps: McpToolDeps) {
     }) => deps.qboReports.searchByFinancialCriteria(criteria, realmId),
   );
 
-  registerJsonTool(
+  registerMcpTool(
     server,
     'get_top_clients_by_revenue',
     'Top clients ranked by total invoiced amount, with paid vs outstanding breakdown.',

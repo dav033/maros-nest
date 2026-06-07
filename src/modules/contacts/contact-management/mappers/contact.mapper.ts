@@ -17,7 +17,8 @@ export class ContactMapper {
     entity.customer = dto.isCustomer ?? false;
     entity.client = dto.isClient ?? false;
     entity.notes = dto.notes;
-    
+    entity.attachments = dto.attachments ?? [];
+
     // Company relationship is handled by service usually, 
     // but we can set the ID if we want to use relationId loading or similar
     // For now, we just map basic fields.
@@ -40,6 +41,7 @@ export class ContactMapper {
     if (dto.isCustomer !== undefined) entity.customer = dto.isCustomer;
     if (dto.isClient !== undefined) entity.client = dto.isClient;
     if (dto.notes !== undefined) entity.notes = dto.notes;
+    if (dto.attachments !== undefined) entity.attachments = dto.attachments;
   }
 
   toDto(entity: Contact): any {
@@ -67,6 +69,7 @@ export class ContactMapper {
       isClient: entity.client,
       company: companyDto,
       notes: entity.notes,
+      attachments: entity.attachments ?? [],
     };
   }
 }

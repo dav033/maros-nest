@@ -1,9 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { McpToolDeps, jsonContent } from './shared';
+import { McpToolDeps } from './shared';
+import { registerMcpTool } from './tool-registration';
 
 export function registerS3Tools(server: McpServer, deps: McpToolDeps) {
-  server.tool(
+  registerMcpTool(
+    server,
     's3_get_presigned_put_url',
     'Generate a presigned URL for uploading a file to S3 under mcp/attachments/. Max upload is 5 MB by policy.',
     {
@@ -27,10 +29,12 @@ export function registerS3Tools(server: McpServer, deps: McpToolDeps) {
         .optional()
         .describe('Optional URL expiration in seconds (default 900, max 3600)'),
     },
-    async (input) => jsonContent(await deps.s3Service.getPresignedPutUrl(input)),
+    async (input: Parameters<typeof deps.s3Service.getPresignedPutUrl>[0]) =>
+      deps.s3Service.getPresignedPutUrl(input),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     's3_get_presigned_get_url',
     'Generate a presigned URL for downloading a file from S3.',
     {
@@ -45,10 +49,12 @@ export function registerS3Tools(server: McpServer, deps: McpToolDeps) {
         .optional()
         .describe('Optional URL expiration in seconds (default 900, max 3600)'),
     },
-    async (input) => jsonContent(await deps.s3Service.getPresignedGetUrl(input)),
+    async (input: Parameters<typeof deps.s3Service.getPresignedGetUrl>[0]) =>
+      deps.s3Service.getPresignedGetUrl(input),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     's3_list_objects',
     'List objects in S3 under mcp/attachments/ with pagination support.',
     {
@@ -65,10 +71,12 @@ export function registerS3Tools(server: McpServer, deps: McpToolDeps) {
         .optional()
         .describe('Token from previous page for pagination'),
     },
-    async (input) => jsonContent(await deps.s3Service.listObjects(input)),
+    async (input: Parameters<typeof deps.s3Service.listObjects>[0]) =>
+      deps.s3Service.listObjects(input),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     's3_get_object_metadata',
     'Read object metadata from S3 (size, MIME, etag, timestamps).',
     {
@@ -76,10 +84,11 @@ export function registerS3Tools(server: McpServer, deps: McpToolDeps) {
         .string()
         .describe('S3 object key inside mcp/attachments/ (absolute or relative key)'),
     },
-    async ({ key }) => jsonContent(await deps.s3Service.getObjectMetadata(key)),
+    async ({ key }: { key: string }) => deps.s3Service.getObjectMetadata(key),
   );
 
-  server.tool(
+  registerMcpTool(
+    server,
     's3_delete_object',
     'Delete an object from S3 under mcp/attachments/.',
     {
@@ -87,6 +96,6 @@ export function registerS3Tools(server: McpServer, deps: McpToolDeps) {
         .string()
         .describe('S3 object key inside mcp/attachments/ (absolute or relative key)'),
     },
-    async ({ key }) => jsonContent(await deps.s3Service.deleteObject(key)),
+    async ({ key }: { key: string }) => deps.s3Service.deleteObject(key),
   );
 }

@@ -95,13 +95,13 @@ export class LeadNumberingService {
     const max = allLeadNumbers
       .map((s) => {
         if (!s) return -1;
-        if (type === LeadType.ROOFING && /^\d{3}R-\d{4}$/.test(s)) {
+        if (type === LeadType.ROOFING && /^\d{3}R-\d{4}(?:\D.*)?$/.test(s)) {
           return parseInt(s.substring(0, 3), 10);
         }
-        if (type === LeadType.PLUMBING && /^\d{3}P-\d{4}$/.test(s)) {
+        if (type === LeadType.PLUMBING && /^\d{3}P-\d{4}(?:\D.*)?$/.test(s)) {
           return parseInt(s.substring(0, 3), 10);
         }
-        if (type === LeadType.CONSTRUCTION && /^\d{3}-\d{4}$/.test(s)) {
+        if (type === LeadType.CONSTRUCTION && /^\d{3}-\d{4}(?:\D.*)?$/.test(s)) {
           return parseInt(s.substring(0, 3), 10);
         }
         return -1;
@@ -123,9 +123,9 @@ export class LeadNumberingService {
 
   private extractNumericPrefix(leadNumber: string): string | null {
     if (
-      /^\d{3}R-\d{4}$/.test(leadNumber) ||
-      /^\d{3}P-\d{4}$/.test(leadNumber) ||
-      /^\d{3}-\d{4}$/.test(leadNumber)
+      /^\d{3}R-\d{4}(?:\D.*)?$/.test(leadNumber) ||
+      /^\d{3}P-\d{4}(?:\D.*)?$/.test(leadNumber) ||
+      /^\d{3}-\d{4}(?:\D.*)?$/.test(leadNumber)
     ) {
       return leadNumber.substring(0, 3);
     }

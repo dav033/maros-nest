@@ -7,6 +7,7 @@ import { ProjectsRepository } from '../repositories/projects.repository';
 import { ProjectMapper } from '../mappers/project.mapper';
 import { CreateProjectDto } from '../dto/create-project.dto';
 import { UpdateProjectDto } from '../dto/update-project.dto';
+import { SendEstimateEmailDto } from '../dto/send-estimate-email.dto';
 import {
   ValidationException,
   ResourceNotFoundException,
@@ -15,6 +16,8 @@ import { BaseService } from '../../../../common/services/base.service';
 import { ProjectProgressStatus } from '../../../../common/enums/project-progress-status.enum';
 import { LeadType } from '../../../../common/enums/lead-type.enum';
 import { ProjectQboEnrichmentService } from '../../../quickbooks/services/crm-bridge/project-qbo-enrichment.service';
+import { S3Service } from '../../../s3/services/s3.service';
+import { MailService } from '../../../mail/services/mail.service';
 
 @Injectable()
 export class ProjectsService extends BaseService<any, number, Project> {
@@ -28,13 +31,18 @@ export class ProjectsService extends BaseService<any, number, Project> {
     private readonly leadRepo: Repository<Lead>,
     private readonly projectMapper: ProjectMapper,
     private readonly qboEnrichment: ProjectQboEnrichmentService,
+    private readonly s3Service: S3Service,
+    private readonly mailService: MailService,
   ) {
     super(projectRepo, projectMapper);
   }
 
   async create(dto: CreateProjectDto): Promise<any> {
-    // Validate that lead exists
-    const lead = await this.leadRepo.findOne({ where: { id: dto.leadId } });
+    // Validate that lead exists and load contact relation
+    const lead = await this.leadRepo.findOne({
+      where: { id: dto.leadId },
+      relations: ['contact'],
+    });
     if (!lead) {
       throw ValidationException.format(
         'Lead not found with id: %s',
@@ -58,6 +66,23 @@ export class ProjectsService extends BaseService<any, number, Project> {
     entity.lead = lead;
 
     const saved = await this.projectRepo.save(entity);
+
+    // Send notification email
+    const leadLabel = lead.leadNumber ?? lead.name ?? `Lead #${lead.id}`;
+    const contactEmail = lead.contact?.email;
+    this.logger.log(`Project created manually for lead "${leadLabel}" (id: ${lead.id}, project: ${saved.id}, contactEmail: ${contactEmail ?? 'none'})`);
+    try {
+      const textBody = `Se ha creado un proyecto (#${saved.id}) para el lead "${lead.name ?? lead.leadNumber}".\n\nFecha: ${new Date().toLocaleString()}${contactEmail ? `\n\nContacto: ${lead.contact?.name ?? 'N/A'} <${contactEmail}>` : ''}`;
+      await this.mailService.sendMail({
+        to: ['info@marosconstruction.com'],
+        subject: `Proyecto creado: ${leadLabel}`,
+        text: textBody,
+      });
+      this.logger.log(`Project creation notification email sent`);
+    } catch (err) {
+      this.logger.warn(`Project creation notification email failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     return this.projectMapper.toDto(saved);
   }
 
@@ -305,5 +330,120 @@ export class ProjectsService extends BaseService<any, number, Project> {
     }
     await this.projectRepo.delete(id);
     this.logger.log(`Project ${id} deleted`);
+  }
+
+  async findEstimateFile(
+    id: number,
+  ): Promise<{ found: true; key: string; fileName: string } | { found: false }> {
+    const project = await this.projectRepo.findOne({
+      where: { id },
+      relations: ['lead'],
+    });
+    if (!project) {
+      throw new ResourceNotFoundException(`Project not found with id: ${id}`);
+    }
+
+    const keys = Array.from(
+      new Set([
+        ...(project.attachments ?? []),
+        ...(project.lead?.attachments ?? []),
+      ]),
+    );
+
+    const match = keys.find((key) =>
+      /estimate/i.test(this.extractFileName(key)),
+    );
+
+    if (!match) {
+      return { found: false };
+    }
+
+    return { found: true, key: match, fileName: this.extractFileName(match) };
+  }
+
+  private extractFileName(key: string): string {
+    const segments = key.split('/');
+    return segments[segments.length - 1] || key;
+  }
+
+  async sendEstimateEmail(
+    id: number,
+    dto: SendEstimateEmailDto,
+  ): Promise<
+    | { sent: true; attached: boolean; recipients: string[] }
+    | { sent: false; reason: 'ESTIMATE_NOT_FOUND' }
+  > {
+    const project = await this.projectRepo.findOne({
+      where: { id },
+      relations: ['lead'],
+    });
+    if (!project) {
+      throw new ResourceNotFoundException(`Project not found with id: ${id}`);
+    }
+
+    const providedRecipients = this.dedupeLowercase(dto.recipients ?? []);
+    if (providedRecipients.length === 0) {
+      throw ValidationException.format(
+        'At least one recipient email is required',
+      );
+    }
+    const recipients = providedRecipients;
+    const recipientSet = new Set(recipients);
+    const ccValues = this.dedupeLowercase(dto.cc ?? []).filter(
+      (email) => !recipientSet.has(email),
+    );
+    const cc = ccValues.length > 0 ? ccValues : undefined;
+
+    let attached = false;
+    let attachments:
+      | { filename: string; content: Buffer; contentType?: string }[]
+      | undefined;
+
+    if (dto.includeAttachment) {
+      let key = dto.attachmentKey;
+      if (!key) {
+        const found = await this.findEstimateFile(id);
+        if (found.found) {
+          key = found.key;
+        }
+      }
+      if (!key) {
+        return { sent: false, reason: 'ESTIMATE_NOT_FOUND' };
+      }
+      const file = await this.s3Service.getObjectBuffer(key);
+      attachments = [
+        {
+          filename: file.fileName,
+          content: file.buffer,
+          contentType: file.contentType ?? undefined,
+        },
+      ];
+      attached = true;
+    }
+
+    const leadNumber = project.lead?.leadNumber;
+    const leadName = project.lead?.name;
+    const subject =
+      dto.subject ??
+      `Estimate for ${leadNumber ?? leadName ?? `project ${id}`}`;
+    const text =
+      dto.message ??
+      `Please find the estimate for ${leadName ?? leadNumber ?? `project ${id}`}.`;
+
+    await this.mailService.sendMail({
+      to: recipients,
+      cc,
+      subject,
+      text,
+      attachments,
+    });
+
+    return { sent: true, attached, recipients };
+  }
+
+  private dedupeLowercase(values: string[]): string[] {
+    return Array.from(
+      new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean)),
+    );
   }
 }

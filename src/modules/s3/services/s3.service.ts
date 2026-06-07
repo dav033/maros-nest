@@ -1,6 +1,15 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
 import { randomUUID } from 'crypto';
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ExternalServiceException, ValidationException } from '../../../common/exceptions';
 import s3Config from '../../../config/s3.config';
 import {
@@ -17,20 +26,10 @@ import {
   UploadFileFromServerResult,
 } from '../dto/s3.dto';
 
-const {
-  DeleteObjectCommand,
-  GetObjectCommand,
-  HeadObjectCommand,
-  ListObjectsV2Command,
-  PutObjectCommand,
-  S3Client,
-} = require('@aws-sdk/client-s3');
-const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
-
 @Injectable()
 export class S3Service {
   private readonly logger = new Logger(S3Service.name);
-  private readonly s3Client: any;
+  private readonly s3Client: S3Client;
 
   constructor(
     @Inject(s3Config.KEY)
@@ -218,6 +217,32 @@ export class S3Service {
     };
   }
 
+  async getObjectBuffer(
+    key: string,
+  ): Promise<{ buffer: Buffer; contentType: string | null; fileName: string }> {
+    this.ensureConfigured();
+    const resolvedKey = this.normalizeExistingKey(key);
+    const response = await this.exec<any>(
+      () =>
+        this.s3Client.send(
+          new GetObjectCommand({
+            Bucket: this.config.bucketName,
+            Key: resolvedKey,
+          }),
+        ),
+      `GET ${resolvedKey}`,
+    );
+    const chunks: Buffer[] = [];
+    for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
+      chunks.push(Buffer.from(chunk));
+    }
+    return {
+      buffer: Buffer.concat(chunks),
+      contentType: response.ContentType ?? null,
+      fileName: resolvedKey.split('/').pop() || 'attachment',
+    };
+  }
+
   async deleteObject(key: string): Promise<DeleteS3ObjectResult> {
     this.ensureConfigured();
 
@@ -286,7 +311,7 @@ export class S3Service {
       return this.config.basePrefix;
     }
 
-    let normalized = this.normalizePath(prefix);
+    const normalized = this.normalizePath(prefix);
     this.assertNoTraversal(normalized);
 
     if (normalized.startsWith(this.config.basePrefix)) {
@@ -377,13 +402,14 @@ export class S3Service {
     } catch (err: any) {
       const status = err?.$metadata?.httpStatusCode ?? err?.response?.status;
       const message = err?.message ?? 'unknown';
+      const originalError = err instanceof Error ? err : undefined;
 
       this.logger.error(`S3 ${label} failed [${status}]: ${message}`);
 
       throw new ExternalServiceException(
         `S3 ${label} failed: ${message}`,
         'S3',
-        err,
+        originalError,
       );
     }
   }

@@ -48,7 +48,7 @@ export class LeadsRepository {
       .leftJoinAndSelect('lead.contact', 'contact')
       .leftJoinAndSelect('contact.company', 'company')
       .leftJoinAndSelect('lead.projectType', 'projectType')
-      .leftJoin('lead.project', 'project')
+      .leftJoin(Project, 'project', 'project.lead_id = lead.id')
       .where('project.id IS NULL');
 
     const filter = leadNumberSqlFilter(type, 'lead.lead_number', 'leadNumberPattern');

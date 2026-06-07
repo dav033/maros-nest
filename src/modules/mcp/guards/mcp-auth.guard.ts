@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
+import { timingSafeEqual } from 'crypto';
 
 @Injectable()
 export class McpAuthGuard implements CanActivate {
@@ -28,11 +29,18 @@ export class McpAuthGuard implements CanActivate {
       throw new UnauthorizedException('MCP_TOKEN is not configured');
     }
 
-    if (token !== expectedToken) {
+    if (!this.tokensMatch(token, expectedToken)) {
       throw new UnauthorizedException('Invalid token');
     }
 
     return true;
+  }
+
+  private tokensMatch(provided: string, expected: string): boolean {
+    const providedBuf = Buffer.from(provided);
+    const expectedBuf = Buffer.from(expected);
+    if (providedBuf.length !== expectedBuf.length) return false;
+    return timingSafeEqual(providedBuf, expectedBuf);
   }
 
   private readQueryToken(request: Request): string | null {

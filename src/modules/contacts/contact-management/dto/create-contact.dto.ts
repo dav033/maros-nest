@@ -1,4 +1,4 @@
-import { IsString, MaxLength, IsOptional, IsBoolean, IsNumber, IsArray, IsEmail } from 'class-validator';
+import { IsString, MaxLength, IsOptional, IsBoolean, IsNumber, IsArray, IsEmail, ValidateIf } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateContactDto {
@@ -27,6 +27,7 @@ export class CreateContactDto {
   phone?: string;
 
   @ApiPropertyOptional({ description: 'Email address', maxLength: 100 })
+  @ValidateIf((o) => o.email !== undefined && o.email !== null && o.email !== '')
   @IsEmail()
   @IsOptional()
   @MaxLength(100)
@@ -64,4 +65,10 @@ export class CreateContactDto {
   @IsString({ each: true })
   @IsOptional()
   notes?: string[];
+
+  @ApiPropertyOptional({ description: 'Attachment S3 keys for the contact', type: [String] })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  attachments?: string[];
 }

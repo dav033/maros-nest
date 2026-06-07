@@ -15,11 +15,15 @@ import {
 import { ProjectMapper } from './project-management/mappers/project.mapper';
 import { ProjectTypeMapper } from './project-types/mappers/project-type.mapper';
 import { QuickbooksModule } from '../quickbooks/quickbooks.module';
+import { S3Module } from '../s3/s3.module';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Project, Lead, ProjectType]),
     QuickbooksModule,
+    S3Module,
+    MailModule,
   ],
   controllers: [ProjectsController, ProjectTypeController, ProjectTypesController],
   providers: [

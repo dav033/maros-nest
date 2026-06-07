@@ -10,7 +10,8 @@ export class ProjectMapper {
     entity.projectProgressStatus = dto.projectProgressStatus;
     entity.overview = dto.overview;
     entity.notes = dto.notes ?? [];
-    
+    entity.attachments = dto.attachments ?? [];
+
     return entity;
   }
 
@@ -18,6 +19,7 @@ export class ProjectMapper {
     if (dto.projectProgressStatus !== undefined) entity.projectProgressStatus = dto.projectProgressStatus;
     if (dto.overview !== undefined) entity.overview = dto.overview;
     if (dto.notes !== undefined) entity.notes = dto.notes;
+    if (dto.attachments !== undefined) entity.attachments = dto.attachments;
   }
 
   toDto(entity: Project): any {
@@ -26,6 +28,7 @@ export class ProjectMapper {
       projectProgressStatus: entity.projectProgressStatus,
       overview: entity.overview,
       notes: entity.notes || [],
+      attachments: entity.attachments ?? [],
       leadId: entity.lead ? entity.lead.id : undefined,
     };
 
