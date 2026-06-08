@@ -108,11 +108,20 @@ export class ProjectsController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete project' })
+  @ApiOperation({ summary: 'Delete project (also deletes associated lead)' })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 204, description: 'Project deleted successfully' })
   @ApiResponse({ status: 404, description: 'Project not found' })
   async deleteProject(@Param('id', ParseIntPipe) id: number) {
     await this.projectsService.delete(id);
+  }
+
+  @Post(':id/revert-to-lead')
+  @ApiOperation({ summary: 'Revert project back to lead (deletes project, resets lead status)' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({ status: 200, description: 'Returns the lead id to navigate to' })
+  @ApiResponse({ status: 404, description: 'Project not found' })
+  async revertProjectToLead(@Param('id', ParseIntPipe) id: number) {
+    return this.projectsService.revertToLead(id);
   }
 }

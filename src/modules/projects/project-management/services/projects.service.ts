@@ -15,6 +15,7 @@ import {
 import { BaseService } from '../../../../common/services/base.service';
 import { ProjectProgressStatus } from '../../../../common/enums/project-progress-status.enum';
 import { LeadType } from '../../../../common/enums/lead-type.enum';
+import { LeadStatus } from '../../../../common/enums/lead-status.enum';
 import { ProjectQboEnrichmentService } from '../../../quickbooks/services/crm-bridge/project-qbo-enrichment.service';
 import { S3Service } from '../../../s3/services/s3.service';
 import { MailService } from '../../../mail/services/mail.service';
@@ -67,26 +68,36 @@ export class ProjectsService extends BaseService<any, number, Project> {
 
     const saved = await this.projectRepo.save(entity);
 
-    // Send notification email
+    const wasNotWon = lead.status !== LeadStatus.WON;
+    if (wasNotWon) {
+      lead.status = LeadStatus.WON;
+      await this.leadRepo.save(lead);
+      this.logger.log(`Lead #${lead.id} status set to WON after project #${saved.id} creation`);
+    }
+
+    await this.sendWonNotificationEmail(lead, saved.id);
+
+    return this.projectMapper.toDto(saved);
+  }
+
+  private async sendWonNotificationEmail(lead: Lead, projectId: number): Promise<void> {
     const leadLabel = lead.leadNumber ?? lead.name ?? `Lead #${lead.id}`;
     const contactEmail = lead.contact?.email;
-    this.logger.log(`Project created manually for lead "${leadLabel}" (id: ${lead.id}, project: ${saved.id}, contactEmail: ${contactEmail ?? 'none'})`);
+    this.logger.log(`Sending WON notification email for lead "${leadLabel}" (id: ${lead.id}, project: ${projectId}, contactEmail: ${contactEmail ?? 'none'})`);
     try {
-      const textBody = `Se ha creado un proyecto (#${saved.id}) para el lead "${lead.name ?? lead.leadNumber}".\n\nFecha: ${new Date().toLocaleString()}${contactEmail ? `\n\nContacto: ${lead.contact?.name ?? 'N/A'} <${contactEmail}>` : ''}`;
-      await this.mailService.sendMail({
+      const textBody = `El lead "${lead.name ?? lead.leadNumber}" ha pasado a estado WON y se ha creado el proyecto #${projectId}.\n\nFecha: ${new Date().toLocaleString()}${contactEmail ? `\n\nContacto: ${lead.contact?.name ?? 'N/A'} <${contactEmail}>` : ''}`;
+      const mailResult = await this.mailService.sendMail({
         to: [
           'info@marosconstruction.com',
           'agonzales@marosconstruction.com',
         ],
-        subject: `Proyecto creado: ${leadLabel}`,
+        subject: `Lead Won: ${leadLabel} convertido a proyecto`,
         text: textBody,
       });
-      this.logger.log(`Project creation notification email sent`);
+      this.logger.log(`WON notification email sent — messageId: ${mailResult.messageId ?? 'N/A'}`);
     } catch (err) {
-      this.logger.warn(`Project creation notification email failed: ${err instanceof Error ? err.message : String(err)}`);
+      this.logger.warn(`WON notification email failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-
-    return this.projectMapper.toDto(saved);
   }
 
   async update(id: number, dto: UpdateProjectDto): Promise<any> {
@@ -327,12 +338,51 @@ export class ProjectsService extends BaseService<any, number, Project> {
   }
 
   async delete(id: number): Promise<void> {
-    const project = await this.projectRepo.findOne({ where: { id }, select: ['id'] });
+    const project = await this.projectRepo.findOne({
+      where: { id },
+      relations: ['lead'],
+    });
     if (!project) {
       throw new ResourceNotFoundException(`Project not found with id: ${id}`);
     }
+    const leadId = project.lead?.id;
     await this.projectRepo.delete(id);
     this.logger.log(`Project ${id} deleted`);
+
+    if (leadId) {
+      try {
+        await this.leadRepo.delete(leadId);
+        this.logger.log(`Lead ${leadId} deleted alongside project ${id}`);
+      } catch (err) {
+        this.logger.warn(`Failed to delete lead ${leadId} after project ${id} deletion: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
+  async revertToLead(id: number): Promise<{ leadId: number }> {
+    const project = await this.projectRepo.findOne({
+      where: { id },
+      relations: ['lead'],
+    });
+    if (!project) {
+      throw new ResourceNotFoundException(`Project not found with id: ${id}`);
+    }
+    const lead = project.lead;
+    if (!lead) {
+      throw ValidationException.format(
+        'Project %s has no associated lead to revert to',
+        id.toString(),
+      );
+    }
+
+    await this.projectRepo.delete(id);
+    this.logger.log(`Project ${id} deleted as part of revert-to-lead`);
+
+    lead.status = LeadStatus.FOLLOW_UP;
+    await this.leadRepo.save(lead);
+    this.logger.log(`Lead ${lead.id} status reset to FOLLOW_UP after revert`);
+
+    return { leadId: lead.id };
   }
 
   async findEstimateFile(
