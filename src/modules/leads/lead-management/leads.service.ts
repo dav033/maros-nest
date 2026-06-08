@@ -363,7 +363,10 @@ export class LeadsService {
       try {
         const textBody = `El lead "${entity.name ?? entity.leadNumber}" ha pasado a estado WON y se ha creado el proyecto #${project.id}.\n\nFecha: ${new Date().toLocaleString()}${contactEmail ? `\n\nContacto: ${entity.contact?.name ?? 'N/A'} <${contactEmail}>` : ''}`;
         const mailResult = await this.mailService.sendMail({
-          to: ['info@marosconstruction.com'],
+          to: [
+            'info@marosconstruction.com',
+            'agonzales@marosconstruction.com',
+          ],
           subject: `Lead Won: ${leadLabel} convertido a proyecto`,
           text: textBody,
         });

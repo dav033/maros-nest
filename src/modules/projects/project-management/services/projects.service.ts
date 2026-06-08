@@ -74,7 +74,10 @@ export class ProjectsService extends BaseService<any, number, Project> {
     try {
       const textBody = `Se ha creado un proyecto (#${saved.id}) para el lead "${lead.name ?? lead.leadNumber}".\n\nFecha: ${new Date().toLocaleString()}${contactEmail ? `\n\nContacto: ${lead.contact?.name ?? 'N/A'} <${contactEmail}>` : ''}`;
       await this.mailService.sendMail({
-        to: ['info@marosconstruction.com'],
+        to: [
+          'info@marosconstruction.com',
+          'agonzales@marosconstruction.com',
+        ],
         subject: `Proyecto creado: ${leadLabel}`,
         text: textBody,
       });
