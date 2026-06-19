@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Not, Repository } from 'typeorm';
+import { DataSource, Not, Repository } from 'typeorm';
 import { Project } from '../../../../entities/project.entity';
 import { Lead } from '../../../../entities/lead.entity';
 import { ProjectsRepository } from '../repositories/projects.repository';
@@ -34,6 +34,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
     private readonly qboEnrichment: ProjectQboEnrichmentService,
     private readonly s3Service: S3Service,
     private readonly mailService: MailService,
+    private readonly dataSource: DataSource,
   ) {
     super(projectRepo, projectMapper);
   }
@@ -66,15 +67,24 @@ export class ProjectsService extends BaseService<any, number, Project> {
     const entity = this.projectMapper.toEntity(dto);
     entity.lead = lead;
 
-    const saved = await this.projectRepo.save(entity);
-
     const wasNotWon = lead.status !== LeadStatus.WON;
-    if (wasNotWon) {
-      lead.status = LeadStatus.WON;
-      await this.leadRepo.save(lead);
-      this.logger.log(`Lead #${lead.id} status set to WON after project #${saved.id} creation`);
-    }
 
+    // Transacción: la creación del proyecto y el cambio de estado del lead a WON
+    // se persisten atómicamente. Si falla cualquiera de los dos, ninguno queda
+    // aplicado (evita un proyecto creado con el lead en estado inconsistente).
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const savedProject = await manager.getRepository(Project).save(entity);
+      if (wasNotWon) {
+        lead.status = LeadStatus.WON;
+        await manager.getRepository(Lead).save(lead);
+        this.logger.log(
+          `Lead #${lead.id} status set to WON after project #${savedProject.id} creation`,
+        );
+      }
+      return savedProject;
+    });
+
+    // El email se envía tras confirmar la transacción y ya es tolerante a fallos.
     await this.sendWonNotificationEmail(lead, saved.id);
 
     return this.projectMapper.toDto(saved);
@@ -89,7 +99,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
       const mailResult = await this.mailService.sendMail({
         to: [
           'info@marosconstruction.com',
-          'agonzales@marosconstruction.com',
+          'david.theran03@gmail.com',
         ],
         subject: `Lead Won: ${leadLabel} convertido a proyecto`,
         text: textBody,

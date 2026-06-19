@@ -8,8 +8,6 @@ class LoginDto {
   password: string;
 }
 
-const HARDCODED_PASSWORD = process.env.AUTH_PASSWORD || 'Maros2024!';
-
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
@@ -19,7 +17,11 @@ export class AuthController {
   @ApiResponse({ status: 200, description: 'Login successful' })
   @ApiResponse({ status: 401, description: 'Invalid password' })
   login(@Body() body: LoginDto) {
-    if (body.password !== HARDCODED_PASSWORD) {
+    // Read at request time: process.env is populated by ConfigModule during
+    // bootstrap, after module imports are evaluated — a module-level const here
+    // would capture `undefined` and fall back to the hardcoded default.
+    const expectedPassword = process.env.AUTH_PASSWORD || 'Maros2024!';
+    if (body.password !== expectedPassword) {
       throw new UnauthorizedException('Invalid password');
     }
     return { success: true };
