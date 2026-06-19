@@ -382,6 +382,7 @@ export class LeadsService {
           to: [
             'info@marosconstruction.com',
             'david.theran03@gmail.com',
+            'agonzales@marosconstruction.com',
           ],
           subject: `Lead Won: ${leadLabel} convertido a proyecto`,
           text: textBody,
