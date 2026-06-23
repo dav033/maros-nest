@@ -6,6 +6,18 @@ import { QuickbooksAuthService } from './quickbooks-auth.service';
 export interface QueryAllOptions {
   where?: string;
   orderBy?: string;
+  /**
+   * Optional comma-separated list of fields to fetch (e.g. `Id, DocNumber, TxnDate`).
+   * When omitted, all fields are fetched (`SELECT *`). Trimming field projections
+   * dramatically reduces the payload from QBO and speeds up pagination.
+   */
+  select?: string;
+  /**
+   * Optional caller-defined cache bucket to differentiate queries that would
+   * otherwise share the same (entity, where, orderBy, select) key. Most callers
+   * can omit it.
+   */
+  cacheKey?: string;
 }
 
 @Injectable()
@@ -14,6 +26,7 @@ export class QuickbooksApiService {
   private readonly environment: string;
   private readonly readCacheTtlMs = 90_000;
   private readonly readCacheMaxEntries = 1_500;
+  private readonly queryAllCacheTtlMs = 60_000;
   private readonly readCache = new Map<
     string,
     {
@@ -153,21 +166,49 @@ export class QuickbooksApiService {
   /**
    * Fetches ALL records of a QBO entity with automatic pagination.
    * Iterates STARTPOSITION in steps of 1000 until a partial page is returned.
-   * Always uses SELECT * — field trimming must be done in TypeScript.
+   * Pass `options.select` to project only the fields you need (massive payload
+   * reduction for large entities). Results are cached in-memory for
+   * `queryAllCacheTtlMs` so repeated calls from different services share work.
    */
   async queryAll(
     realmId: string,
     entityName: string,
     options: QueryAllOptions = {},
   ): Promise<unknown[]> {
+    const selectClause = options.select
+      ? `SELECT ${options.select} FROM ${entityName}`
+      : `SELECT * FROM ${entityName}`;
     const where = options.where ? ` WHERE ${options.where}` : '';
     const orderBy = options.orderBy ? ` ORDERBY ${options.orderBy}` : '';
+    const cacheKey = this.buildReadCacheKey(
+      'queryAll',
+      options.cacheKey ?? realmId,
+      entityName,
+      options.select ?? '*',
+      options.where ?? '',
+      options.orderBy ?? '',
+    );
+
+    return this.getOrSetReadCacheWithTtl(
+      cacheKey,
+      () => this.fetchAllPages(realmId, entityName, selectClause, where, orderBy),
+      this.queryAllCacheTtlMs,
+    );
+  }
+
+  private async fetchAllPages(
+    realmId: string,
+    entityName: string,
+    selectClause: string,
+    where: string,
+    orderBy: string,
+  ): Promise<unknown[]> {
     const pageSize = 1000;
     const results: unknown[] = [];
     let position = 1;
 
     while (true) {
-      const q = `SELECT * FROM ${entityName}${where}${orderBy} STARTPOSITION ${position} MAXRESULTS ${pageSize}`;
+      const q = `${selectClause}${where}${orderBy} STARTPOSITION ${position} MAXRESULTS ${pageSize}`;
       const resp = await this.queryRawGet(realmId, q);
       const page = this.getQueryResponseArray(resp, entityName);
 
@@ -339,6 +380,14 @@ export class QuickbooksApiService {
     key: string,
     load: () => Promise<T>,
   ): Promise<T> {
+    return this.getOrSetReadCacheWithTtl(key, load, this.readCacheTtlMs);
+  }
+
+  private async getOrSetReadCacheWithTtl<T>(
+    key: string,
+    load: () => Promise<T>,
+    ttlMs: number,
+  ): Promise<T> {
     this.pruneReadCacheIfNeeded();
 
     const now = Date.now();
@@ -356,7 +405,7 @@ export class QuickbooksApiService {
       .then((value) => {
         this.readCache.set(key, {
           value,
-          expiresAt: Date.now() + this.readCacheTtlMs,
+          expiresAt: Date.now() + ttlMs,
         });
         return value;
       })

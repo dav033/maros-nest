@@ -9,7 +9,7 @@ import {
   Query,
   Res,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { randomBytes } from 'crypto';
 import type { Response } from 'express';
 import { QuickbooksApiService } from './services/core/quickbooks-api.service';
@@ -18,6 +18,7 @@ import {
   ProjectFinancials,
   QuickbooksFinancialsService,
 } from './services/financials/quickbooks-financials.service';
+import { QuickbooksAttachmentsService } from './services/attachments/quickbooks-attachments.service';
 
 /** OAuth state tokens expire after this many milliseconds (10 minutes). */
 const STATE_TTL_MS = 10 * 60 * 1000;
@@ -37,6 +38,7 @@ export class QuickbooksController {
     private readonly authService: QuickbooksAuthService,
     private readonly apiService: QuickbooksApiService,
     private readonly financialsService: QuickbooksFinancialsService,
+    private readonly attachmentsService: QuickbooksAttachmentsService,
   ) {}
 
   /**
@@ -150,6 +152,68 @@ export class QuickbooksController {
     }
 
     return this.financialsService.getProjectFinancials(cleaned, realmId);
+  }
+
+  /**
+   * Collect QuickBooks attachments linked to a project (Customer/Job) and its
+   * related transactions (Invoice, Estimate, Payment, Purchase, Bill, etc.).
+   *
+   * Pass `?includeTempDownloadUrl=true` to also receive a temporary download
+   * URL per attachment (QuickBooks rotates these URLs frequently, so they
+   * should be requested lazily and not cached for long).
+   */
+  @Get('projects/:projectNumber/attachments')
+  @ApiOperation({
+    summary: 'List QuickBooks attachments for a project, classified by entity',
+  })
+  @ApiQuery({ name: 'realmId', required: false })
+  @ApiQuery({ name: 'includeTempDownloadUrl', required: false, type: Boolean })
+  @ApiQuery({ name: 'startDate', required: false })
+  @ApiQuery({ name: 'endDate', required: false })
+  async projectAttachments(
+    @Param('projectNumber') projectNumber: string,
+    @Query('realmId') realmId?: string,
+    @Query('includeTempDownloadUrl') includeTempDownloadUrl?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    const projectNumberClean = String(projectNumber ?? '').trim();
+    if (!projectNumberClean) {
+      throw new BadRequestException('projectNumber path parameter is required');
+    }
+    const includeUrls = includeTempDownloadUrl === 'true' || includeTempDownloadUrl === '1';
+
+    return this.attachmentsService.getProjectAttachments({
+      projectNumber: projectNumberClean,
+      realmId,
+      startDate,
+      endDate,
+      includeTempDownloadUrl: includeUrls,
+    });
+  }
+
+  /**
+   * Fetch a fresh temporary download URL for a single QuickBooks attachable.
+   * Useful when a previously returned URL has expired or for "refresh link"
+   * actions in the UI.
+   */
+  @Get('attachments/:attachmentId/download-url')
+  @ApiOperation({
+    summary: 'Get a temporary download URL for a single QuickBooks attachment',
+  })
+  @ApiQuery({ name: 'realmId', required: false })
+  async attachmentDownloadUrl(
+    @Param('attachmentId') attachmentId: string,
+    @Query('realmId') realmId?: string,
+  ) {
+    const id = String(attachmentId ?? '').trim();
+    if (!id) {
+      throw new BadRequestException('attachmentId path parameter is required');
+    }
+    const effectiveRealmId =
+      realmId ?? (await this.financialsService.getDefaultRealmId());
+
+    return this.attachmentsService.getAttachmentDownloadUrl(effectiveRealmId, id);
   }
 
   // ---------------------------------------------------------------------------
