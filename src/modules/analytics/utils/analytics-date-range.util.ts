@@ -4,12 +4,17 @@ export type OptionalDateRange = { from?: string; to?: string };
 export type DateRange = { from: string; to: string };
 
 export function toDateString(date: Date): string {
-  return date.toISOString().split('T')[0];
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 export function buildDefaultLast12MonthsRange(baseDate: Date = new Date()): DateRange {
   const to = toDateString(baseDate);
-  const fromDate = new Date(baseDate.getFullYear(), baseDate.getMonth() - 11, 1);
+  const fromDate = new Date(
+    Date.UTC(baseDate.getUTCFullYear(), baseDate.getUTCMonth() - 11, 1),
+  );
   const from = toDateString(fromDate);
   return { from, to };
 }

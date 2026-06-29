@@ -115,6 +115,10 @@ export class LeadsService {
     return this.mapLeadList(this.leadsRepository.findByStatus(status), options);
   }
 
+  async getLostLeads(options: { includeQbo?: boolean } = {}): Promise<any[]> {
+    return this.getLeadsByStatus(LeadStatus.LOST, options);
+  }
+
   async getStatusCounts(
     leadType?: LeadType,
   ): Promise<Array<{ status: string; count: number; estimatedValue: number }>> {

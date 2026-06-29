@@ -52,6 +52,15 @@ export class QuickbooksReportsFinancialService {
     }, true);
   }
 
+  async getBalanceSheet(params: ReportParams): Promise<ParsedReport> {
+    const rid = await this.contextService.resolveRealmId(params.realmId);
+    // BalanceSheet is a point-in-time report: it uses report_date (endDate),
+    // not a date range. supportsDateRange = false handles that below.
+    return this.fetchAndParseReport(rid, 'BalanceSheet', params, {
+      accounting_method: params.accountingMethod,
+    }, false);
+  }
+
   async getVendorExpenses(params: ReportParams): Promise<ParsedReport> {
     const rid = await this.contextService.resolveRealmId(params.realmId);
     return this.fetchAndParseReport(rid, 'VendorExpenses', params, {

@@ -252,30 +252,62 @@ export class AnalyticsFinancialService {
     const period =
       normalizeOptionalDateRange(range) ?? buildDefaultLast12MonthsRange();
 
-    const report = await this.quickbooksReportsService.getCashFlow({
+    // "Cash position" = el dinero real que la empresa tiene ahora en sus
+    // cuentas bancarias. La fuente correcta es el Balance Sheet (Total Bank
+    // Accounts), NO el Statement of Cash Flows. El Balance Sheet es un reporte
+    // puntual: se evalúa a la fecha final del período (report_date = period.to).
+    const report = await this.quickbooksReportsService.getBalanceSheet({
       startDate: period.from,
       endDate: period.to,
-      accountingMethod: 'Accrual',
     });
 
-    let cashAtEnd: number | null = null;
-    let netCash: number | null = null;
-
-    for (const row of report.rows) {
-      const label = row.label.toLowerCase();
-      if (label.includes('cash at end')) {
-        cashAtEnd = row.amount;
-      } else if (label.includes('net cash')) {
-        netCash = (netCash ?? 0) + row.amount;
-      }
-    }
+    const cash = this.extractCashPosition(report);
 
     return {
-      cashPosition: cashAtEnd ?? netCash ?? 0,
-      cashAtEnd,
-      netCash,
+      cashPosition: cash ?? 0,
+      cashAtEnd: cash,
+      netCash: null,
       period,
     };
+  }
+
+  /**
+   * Extrae el "cash position" del Balance Sheet de QBO.
+   * Prioriza la cuenta operativa principal "BUS COMPLETE CHK" (el dinero que
+   * la empresa considera disponible ahora). Si no se encuentra, cae a la fila
+   * resumen "Total Bank Accounts" y, por último, a la suma de las cuentas
+   * bancarias hoja (ASSETS > Current Assets > Bank Accounts).
+   */
+  private extractCashPosition(report: ParsedReport): number | null {
+    const isBankSection = (section: string) =>
+      section.trim().toLowerCase() === 'bank accounts';
+
+    const busComplete = report.rows.find(
+      (row) =>
+        isBankSection(row.section) &&
+        row.label.trim().toLowerCase().includes('bus complete'),
+    );
+    if (busComplete) {
+      return Number(busComplete.amount) || 0;
+    }
+
+    const totalRow = report.rows.find(
+      (row) => row.label.trim().toLowerCase() === 'total bank accounts',
+    );
+    if (totalRow) {
+      return Number(totalRow.amount) || 0;
+    }
+
+    const bankRows = report.rows.filter(
+      (row) =>
+        isBankSection(row.section) &&
+        !row.label.trim().toLowerCase().startsWith('total'),
+    );
+    if (bankRows.length > 0) {
+      return bankRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+    }
+
+    return null;
   }
 
   async getQuickbooksRevenueReport(range?: OptionalDateRange): Promise<ParsedReport> {
@@ -333,15 +365,18 @@ export class AnalyticsFinancialService {
     }
 
     const now = new Date();
+    const baseYear = now.getUTCFullYear();
+    const baseMonth = now.getUTCMonth();
     const ranges: Array<{ month: string; from: string; to: string }> = [];
 
     for (let index = months - 1; index >= 0; index -= 1) {
-      const target = new Date(now.getFullYear(), now.getMonth() - index, 1);
-      const fromDate = new Date(target.getFullYear(), target.getMonth(), 1);
-      const toDate = new Date(target.getFullYear(), target.getMonth() + 1, 0);
+      const targetYear = baseYear;
+      const targetMonth = baseMonth - index;
+      const fromDate = new Date(Date.UTC(targetYear, targetMonth, 1));
+      const toDate = new Date(Date.UTC(targetYear, targetMonth + 1, 0));
 
       ranges.push({
-        month: `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}`,
+        month: `${fromDate.getUTCFullYear()}-${String(fromDate.getUTCMonth() + 1).padStart(2, '0')}`,
         from: toDateString(fromDate),
         to: toDateString(toDate),
       });
@@ -358,23 +393,31 @@ export class AnalyticsFinancialService {
     const fromDate = new Date(`${range.from}T00:00:00.000Z`);
     const toDate = new Date(`${range.to}T00:00:00.000Z`);
 
-    const firstMonth = new Date(fromDate.getFullYear(), fromDate.getMonth(), 1);
-    const lastMonth = new Date(toDate.getFullYear(), toDate.getMonth(), 1);
+    const firstMonth = new Date(
+      Date.UTC(fromDate.getUTCFullYear(), fromDate.getUTCMonth(), 1),
+    );
+    const lastMonth = new Date(
+      Date.UTC(toDate.getUTCFullYear(), toDate.getUTCMonth(), 1),
+    );
     const ranges: Array<{ month: string; from: string; to: string }> = [];
     const cap = 36;
 
     for (
       let current = new Date(firstMonth);
       current <= lastMonth && ranges.length < cap;
-      current = new Date(current.getFullYear(), current.getMonth() + 1, 1)
+      current = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth() + 1, 1))
     ) {
-      const monthStart = new Date(current.getFullYear(), current.getMonth(), 1);
-      const monthEnd = new Date(current.getFullYear(), current.getMonth() + 1, 0);
+      const monthStart = new Date(
+        Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), 1),
+      );
+      const monthEnd = new Date(
+        Date.UTC(current.getUTCFullYear(), current.getUTCMonth() + 1, 0),
+      );
       const start = monthStart < fromDate ? fromDate : monthStart;
       const end = monthEnd > toDate ? toDate : monthEnd;
 
       ranges.push({
-        month: `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`,
+        month: `${current.getUTCFullYear()}-${String(current.getUTCMonth() + 1).padStart(2, '0')}`,
         from: toDateString(start),
         to: toDateString(end),
       });
@@ -384,9 +427,6 @@ export class AnalyticsFinancialService {
   }
 
   private toDefaultRange(): DateRange {
-    const now = new Date();
-    const to = toDateString(now);
-    const from = toDateString(new Date(now.getFullYear(), now.getMonth() - 11, 1));
-    return { from, to };
+    return buildDefaultLast12MonthsRange();
   }
 }

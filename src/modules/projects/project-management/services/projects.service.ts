@@ -453,8 +453,19 @@ export class ProjectsService extends BaseService<any, number, Project> {
       | undefined;
 
     if (dto.includeAttachment) {
+      const allowedKeys = new Set([
+        ...(project.attachments ?? []),
+        ...(project.lead?.attachments ?? []),
+      ]);
+
       let key = dto.attachmentKey;
-      if (!key) {
+      if (key) {
+        if (!allowedKeys.has(key)) {
+          throw ValidationException.format(
+            'attachmentKey does not belong to this project',
+          );
+        }
+      } else {
         const found = await this.findEstimateFile(id);
         if (found.found) {
           key = found.key;

@@ -52,6 +52,13 @@ export class LeadsController {
     return this.leadsService.getLeadsInReview();
   }
 
+  @Get('lost')
+  @ApiOperation({ summary: 'Get lost leads across all types' })
+  @ApiResponse({ status: 200, description: 'Returns leads with status = LOST' })
+  async getLostLeads() {
+    return this.leadsService.getLostLeads();
+  }
+
   @Post('new-contact')
   @ApiOperation({ summary: 'Create lead with new contact' })
   @ApiQuery({

@@ -115,6 +115,8 @@ export class LeadsRepository {
       pattern = '%R-' + monthYear;
     } else if (leadType === LeadType.PLUMBING) {
       pattern = '%P-' + monthYear;
+    } else if (leadType === LeadType.FENCE) {
+      pattern = '%F-' + monthYear;
     } else {
       pattern = '%-' + monthYear;
     }

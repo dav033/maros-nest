@@ -33,6 +33,9 @@ class ListLimitQueryDto extends LeadTypeQueryDto {
   limit?: number;
 }
 
+// cache-manager v7 expects TTL in milliseconds.
+const ANALYTICS_CACHE_TTL_MS = 5 * 60 * 1000;
+
 @Controller('analytics')
 @UseInterceptors(CacheInterceptor)
 export class AnalyticsController {
@@ -46,7 +49,7 @@ export class AnalyticsController {
   ) {}
 
   @Get('overview')
-  @CacheTTL(300)
+  @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getOverview(@Query() query: DateRangeQueryDto) {
     return this.overviewService.getOverview({
       from: query.from,
@@ -56,31 +59,31 @@ export class AnalyticsController {
   }
 
   @Get('pipeline')
-  @CacheTTL(300)
+  @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getPipeline(@Query() query: LeadTypeQueryDto) {
     return this.pipelineService.getPipeline(query.leadType);
   }
 
   @Get('projects-status')
-  @CacheTTL(300)
+  @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getProjectsStatus(@Query() query: LeadTypeQueryDto) {
     return this.pipelineService.getProjectsStatus(query.leadType);
   }
 
   @Get('financial-snapshot')
-  @CacheTTL(300)
+  @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getFinancialSnapshot(@Query() query: LeadTypeQueryDto) {
     return this.financialService.getFinancialSnapshot(query.leadType);
   }
 
   @Get('aging')
-  @CacheTTL(300)
+  @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getAging(@Query() query: LeadTypeQueryDto) {
     return this.financialService.getAging(query.leadType);
   }
 
   @Get('revenue-trend')
-  @CacheTTL(300)
+  @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getRevenueTrend(@Query() query: RevenueTrendQueryDto) {
     const months = query.months ?? 12;
     return this.financialService.getRevenueTrend(months, {
@@ -91,7 +94,7 @@ export class AnalyticsController {
   }
 
   @Get('top-clients')
-  @CacheTTL(300)
+  @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getTopClients(@Query() query: TopClientsQueryDto) {
     const limit = query.limit ?? 5;
     const by = query.by ?? 'revenue';
@@ -99,7 +102,7 @@ export class AnalyticsController {
   }
 
   @Get('outstanding-balances')
-  @CacheTTL(300)
+  @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getOutstandingBalances(@Query() query: ListLimitQueryDto) {
     return this.financialService.getOutstandingBalances(
       query.limit ?? 100,
@@ -108,13 +111,13 @@ export class AnalyticsController {
   }
 
   @Get('backlog')
-  @CacheTTL(300)
+  @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getBacklog(@Query() query: ListLimitQueryDto) {
     return this.financialService.getBacklog(query.limit ?? 100, query.leadType);
   }
 
   @Get('cash-position')
-  @CacheTTL(300)
+  @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getCashPosition(@Query() query: DateRangeQueryDto) {
     return this.financialService.getCashPosition({
       from: query.from,
@@ -123,7 +126,7 @@ export class AnalyticsController {
   }
 
   @Get('quickbooks-revenue-report')
-  @CacheTTL(300)
+  @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getQuickbooksRevenueReport(@Query() query: DateRangeQueryDto) {
     return this.financialService.getQuickbooksRevenueReport({
       from: query.from,
@@ -132,7 +135,7 @@ export class AnalyticsController {
   }
 
   @Get('project-financials')
-  @CacheTTL(300)
+  @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getProjectFinancials(@Query() query: ListLimitQueryDto) {
     return this.financialService.getProjectFinancials(
       query.limit ?? 200,
@@ -141,7 +144,7 @@ export class AnalyticsController {
   }
 
   @Get('project-health')
-  @CacheTTL(300)
+  @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getProjectHealth(@Query() query: LeadTypeQueryDto) {
     return this.projectsService.getProjectHealth(query.leadType);
   }

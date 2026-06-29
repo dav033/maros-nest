@@ -126,6 +126,10 @@ export class QuickbooksReportsService {
     return this.financialService.getCashFlow(params);
   }
 
+  async getBalanceSheet(params: ReportParams): Promise<ParsedReport> {
+    return this.financialService.getBalanceSheet(params);
+  }
+
   async getVendorExpenses(params: ReportParams): Promise<ParsedReport> {
     return this.financialService.getVendorExpenses(params);
   }
