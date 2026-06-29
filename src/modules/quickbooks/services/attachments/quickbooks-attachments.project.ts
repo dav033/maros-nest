@@ -41,7 +41,21 @@ export class QuickbooksAttachmentsProjectService {
       });
     }
 
-    const options = this.apiService.buildDateWhereClause(params);
+    const baseOptions = this.apiService.buildDateWhereClause(params);
+    const customerWhere = customerId
+      ? this.apiService.escapeQboString(customerId)
+      : '';
+
+    const invoiceOptions = customerId
+      ? { ...baseOptions, where: this.combineWhere(baseOptions.where, `CustomerRef = '${customerWhere}'`) }
+      : baseOptions;
+    const estimateOptions = customerId
+      ? { ...baseOptions, where: this.combineWhere(baseOptions.where, `CustomerRef = '${customerWhere}'`) }
+      : baseOptions;
+    const paymentOptions = customerId
+      ? { ...baseOptions, where: this.combineWhere(baseOptions.where, `CustomerRef = '${customerWhere}'`) }
+      : baseOptions;
+
     const [
       invoices,
       estimates,
@@ -53,15 +67,15 @@ export class QuickbooksAttachmentsProjectService {
       purchaseOrders,
       journalEntries,
     ] = await Promise.all([
-      this.apiService.queryAll(realmId, 'Invoice', options),
-      this.apiService.queryAll(realmId, 'Estimate', options),
-      this.apiService.queryAll(realmId, 'Payment', options),
-      this.apiService.queryAll(realmId, 'Purchase', options),
-      this.apiService.queryAll(realmId, 'Bill', options),
-      this.apiService.queryAll(realmId, 'BillPayment', options),
-      this.apiService.queryAll(realmId, 'VendorCredit', options),
-      this.apiService.queryAll(realmId, 'PurchaseOrder', options),
-      this.apiService.queryAll(realmId, 'JournalEntry', options),
+      this.apiService.queryAll(realmId, 'Invoice', invoiceOptions),
+      this.apiService.queryAll(realmId, 'Estimate', estimateOptions),
+      this.apiService.queryAll(realmId, 'Payment', paymentOptions),
+      this.apiService.queryAll(realmId, 'Purchase', baseOptions),
+      this.apiService.queryAll(realmId, 'Bill', baseOptions),
+      this.apiService.queryAll(realmId, 'BillPayment', baseOptions),
+      this.apiService.queryAll(realmId, 'VendorCredit', baseOptions),
+      this.apiService.queryAll(realmId, 'PurchaseOrder', baseOptions),
+      this.apiService.queryAll(realmId, 'JournalEntry', baseOptions),
     ]);
 
     const projectBillIds = new Set<string>();
@@ -267,5 +281,10 @@ export class QuickbooksAttachmentsProjectService {
     return values.some((value) =>
       this.helpers.nameMatchesProject(this.helpers.normalizeName(value), normalizedProject),
     );
+  }
+
+  private combineWhere(existing: string | undefined, extra: string): string {
+    if (!existing) return extra;
+    return `${existing} AND ${extra}`;
   }
 }

@@ -152,6 +152,8 @@ export class QuickbooksAttachmentsService {
     const project = await this.projectService.findProjectRefs(realmId, params);
     const warnings: QboAiWarning[] = [];
 
+    const effectiveParams = this.applyDefaultDateRange(params);
+
     if (!this.helpers.hasProjectIdentity(project)) {
       warnings.push(
         this.normalizer.warning(
@@ -176,10 +178,10 @@ export class QuickbooksAttachmentsService {
     const entityRefs = await this.projectService.getProjectRelatedEntityRefs(
       realmId,
       project,
-      params,
+      effectiveParams,
     );
     const attachmentResult = await this.getAttachmentsForEntities(realmId, entityRefs, {
-      includeTempDownloadUrl: params.includeTempDownloadUrl,
+      includeTempDownloadUrl: effectiveParams.includeTempDownloadUrl,
     });
 
     return {
@@ -200,6 +202,18 @@ export class QuickbooksAttachmentsService {
     attachableId: string,
   ): Promise<QboAttachmentDownloadUrl> {
     return this.queryService.getAttachmentDownloadUrl(realmId, attachableId);
+  }
+
+  private applyDefaultDateRange(
+    params: QboProjectAttachmentsParams,
+  ): QboProjectAttachmentsParams {
+    if (params.startDate || params.endDate) {
+      return params;
+    }
+    const twelveMonthsAgo = new Date();
+    twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+    const startDate = twelveMonthsAgo.toISOString().slice(0, 10);
+    return { ...params, startDate };
   }
 
   private async resolveRealmId(realmId?: string): Promise<string> {

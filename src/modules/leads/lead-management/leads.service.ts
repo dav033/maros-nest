@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, EntityManager } from 'typeorm';
 import { Lead } from '../../../entities/lead.entity';
 import { Contact } from '../../../entities/contact.entity';
 import { Company } from '../../../entities/company.entity';
@@ -203,18 +203,31 @@ export class LeadsService {
     if (!contactDto.addressLink && leadDto.addressLink) {
       contactDto.addressLink = leadDto.addressLink;
     }
-    const savedContact = await this.contactsService.create(contactDto);
-    const savedContactId = (savedContact as { id?: unknown }).id;
-    if (typeof savedContactId !== 'number') {
-      throw new ContactExceptions.ContactNotFoundException('created contact');
-    }
-    const contactEntity = await this.contactRepo.findOne({
-      where: { id: savedContactId },
+    // Transacción: el contacto y el lead se guardan atómicamente. Si la
+    // creación del lead falla, el contacto se revierte automáticamente, sin
+    // dejar registros huérfanos en la BD.
+    return this.dataSource.transaction(async (manager) => {
+      const savedContact = await this.contactsService.create(
+        contactDto,
+        manager,
+      );
+      const savedContactId = (savedContact as { id?: unknown }).id;
+      if (typeof savedContactId !== 'number') {
+        throw new ContactExceptions.ContactNotFoundException('created contact');
+      }
+      const contactEntity = await manager.getRepository(Contact).findOne({
+        where: { id: savedContactId },
+      });
+      if (!contactEntity) {
+        throw new ContactExceptions.ContactNotFoundException(savedContactId);
+      }
+      return this.persistLead(
+        leadDto,
+        contactEntity,
+        leadTypeForGeneration,
+        manager,
+      );
     });
-    if (!contactEntity) {
-      throw new ContactExceptions.ContactNotFoundException(savedContactId);
-    }
-    return this.persistLead(leadDto, contactEntity, leadTypeForGeneration);
   }
 
   async createLeadWithExistingContact(
@@ -235,6 +248,7 @@ export class LeadsService {
     leadDto: CreateLeadDto,
     contact: Contact,
     leadTypeForGeneration?: LeadType,
+    manager?: EntityManager,
   ): Promise<any> {
     await this.leadNumberingService.applyDefaults(
       leadDto,
@@ -269,8 +283,10 @@ export class LeadsService {
     // Ensure ID is not set (should be auto-generated)
     delete (entity as any).id;
 
+    const leadRepo = manager ? manager.getRepository(Lead) : this.leadRepo;
+
     try {
-      const saved = await this.leadRepo.save(entity);
+      const saved = await leadRepo.save(entity);
       const dto = this.leadMapper.toDto(saved);
       return dto;
     } catch (error: unknown) {
@@ -367,10 +383,7 @@ export class LeadsService {
       try {
         const textBody = `El lead "${entity.name ?? entity.leadNumber}" ha pasado a estado WON y se ha creado el proyecto #${project.id}.\n\nFecha: ${new Date().toLocaleString()}${contactEmail ? `\n\nContacto: ${entity.contact?.name ?? 'N/A'} <${contactEmail}>` : ''}`;
         const mailResult = await this.mailService.sendMail({
-          to: [
-            'info@marosconstruction.com',
-            'agonzales@marosconstruction.com',
-          ],
+          to: ['agonzales@marosconstruction.com'],
           subject: `Lead Won: ${leadLabel} convertido a proyecto`,
           text: textBody,
         });

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, EntityManager } from 'typeorm';
 import { Contact } from '../../../../entities/contact.entity';
 import { Company } from '../../../../entities/company.entity';
 import { Lead } from '../../../../entities/lead.entity';
@@ -64,53 +64,82 @@ export class ContactsService extends BaseService<any, number, Contact> {
     return entities.map((entity) => this.contactMapper.toDto(entity));
   }
 
-  async create(dto: CreateContactDto): Promise<any> {
-    // Validate name
-    if (dto.name && await this.contactsRepository.existsByNameIgnoreCase(dto.name)) {
-      throw ValidationException.format('Contact name already exists: %s', dto.name);
+  /**
+   * Crea un contacto. Si se pasa un `EntityManager` (p. ej. desde una
+   * transacción en otro servicio), todas las lecturas y la escritura usan ese
+   * contexto, de modo que la operación participa de la transacción y puede
+   * revertirse atómicamente.
+   */
+  async create(dto: CreateContactDto, manager?: EntityManager): Promise<any> {
+    const contactRepo = manager
+      ? manager.getRepository(Contact)
+      : this.contactRepo;
+    const companyRepo = manager
+      ? manager.getRepository(Company)
+      : this.companyRepo;
+
+    // Nota: el nombre NO es único — dos personas distintas pueden llamarse igual.
+    // Solo email y teléfono se validan como únicos.
+
+    // Validar email (case-insensitive) en el mismo contexto de persistencia
+    if (dto.email && dto.email.trim() !== '') {
+      const emailCount = await contactRepo
+        .createQueryBuilder('contact')
+        .where('LOWER(contact.email) = LOWER(:email)', { email: dto.email })
+        .getCount();
+      if (emailCount > 0) {
+        throw ValidationException.format(
+          'Ya existe un contacto con ese email: %s',
+          dto.email,
+        );
+      }
     }
 
-    // Validate email
-    if (dto.email && dto.email.trim() !== '' && await this.contactsRepository.existsByEmailIgnoreCase(dto.email)) {
-      throw ValidationException.format('Contact email already exists: %s', dto.email);
-    }
-
-    // Validate phone
-    if (dto.phone && dto.phone.trim() !== '' && await this.contactsRepository.existsByPhone(dto.phone)) {
-      throw ValidationException.format('Contact phone already exists: %s', dto.phone);
+    // Validar teléfono
+    if (dto.phone && dto.phone.trim() !== '') {
+      const phoneCount = await contactRepo.count({ where: { phone: dto.phone } });
+      if (phoneCount > 0) {
+        throw ValidationException.format(
+          'Ya existe un contacto con ese teléfono: %s',
+          dto.phone,
+        );
+      }
     }
 
     const entity = this.contactMapper.toEntity(dto);
 
-    // Handle company relationship
+    // Relación con empresa
     if (dto.companyId) {
-      const company = await this.companyRepo.findOne({ where: { id: dto.companyId } });
+      const company = await companyRepo.findOne({
+        where: { id: dto.companyId },
+      });
       if (!company) {
-        throw ValidationException.format('Company not found with id: %s', dto.companyId.toString());
+        throw ValidationException.format(
+          'No existe una empresa con id: %s',
+          dto.companyId.toString(),
+        );
       }
       entity.company = company;
     }
 
-    const saved = await this.contactRepo.save(entity);
+    const saved = await contactRepo.save(entity);
     return this.contactMapper.toDto(saved);
   }
 
   async update(id: number, dto: UpdateContactDto): Promise<any> {
     const startTime = Date.now();
-    
-    // Validate name
-    if (dto.name && await this.contactsRepository.existsByNameIgnoreCaseAndIdNot(dto.name, id)) {
-      throw ValidationException.format('Contact name already exists: %s', dto.name);
-    }
 
-    // Validate email
+    // Nota: el nombre NO es único — dos personas distintas pueden llamarse igual.
+    // Solo email y teléfono se validan como únicos.
+
+    // Validar email
     if (dto.email && dto.email.trim() !== '' && await this.contactsRepository.existsByEmailIgnoreCaseAndIdNot(dto.email, id)) {
-      throw ValidationException.format('Contact email already exists: %s', dto.email);
+      throw ValidationException.format('Ya existe un contacto con ese email: %s', dto.email);
     }
 
-    // Validate phone
+    // Validar teléfono
     if (dto.phone && dto.phone.trim() !== '' && await this.contactsRepository.existsByPhoneAndIdNot(dto.phone, id)) {
-      throw ValidationException.format('Contact phone already exists: %s', dto.phone);
+      throw ValidationException.format('Ya existe un contacto con ese teléfono: %s', dto.phone);
     }
 
     // Optimización: Solo cargar relaciones si se está actualizando companyId
@@ -131,7 +160,7 @@ export class ContactsService extends BaseService<any, number, Contact> {
       if (dto.companyId) {
         const company = await this.companyRepo.findOne({ where: { id: dto.companyId } });
         if (!company) {
-          throw ValidationException.format('Company not found with id: %s', dto.companyId.toString());
+          throw ValidationException.format('No existe una empresa con id: %s', dto.companyId.toString());
         }
         entity.company = company;
       } else {
