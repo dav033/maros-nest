@@ -115,8 +115,6 @@ export class LeadsRepository {
       pattern = '%R-' + monthYear;
     } else if (leadType === LeadType.PLUMBING) {
       pattern = '%P-' + monthYear;
-    } else if (leadType === LeadType.FENCE) {
-      pattern = '%F-' + monthYear;
     } else {
       pattern = '%-' + monthYear;
     }
@@ -149,12 +147,11 @@ export class LeadsRepository {
 
   async getStatusCounts(
     leadType?: LeadType,
-  ): Promise<Array<{ status: string; count: number; estimatedValue: number }>> {
+  ): Promise<Array<{ status: string; count: number }>> {
     const qb = this.repo
       .createQueryBuilder('lead')
       .select('lead.status', 'status')
       .addSelect('COUNT(lead.id)', 'count')
-      .addSelect('COALESCE(SUM(lead.estimate), 0)', 'estimate')
       .groupBy('lead.status');
 
     const filter = leadNumberSqlFilter(leadType, 'lead.lead_number', 'leadNumberPattern');
@@ -165,13 +162,34 @@ export class LeadsRepository {
     const rows: Array<{
       status: string | null;
       count: string;
-      estimate: string | null;
     }> = await qb.getRawMany();
 
     return rows.map((row) => ({
       status: row.status ?? 'UNKNOWN',
       count: Number(row.count) || 0,
-      estimatedValue: Number(row.estimate) || 0,
+    }));
+  }
+
+  /** Filas ligeras (status, leadNumber) para sumar estimates de QBO por status. */
+  async findStatusSeed(
+    leadType?: LeadType,
+  ): Promise<Array<{ status: string; leadNumber: string | null }>> {
+    const qb = this.repo
+      .createQueryBuilder('lead')
+      .select('lead.status', 'status')
+      .addSelect('lead.lead_number', 'leadNumber');
+
+    const filter = leadNumberSqlFilter(leadType, 'lead.lead_number', 'leadNumberPattern');
+    if (filter) {
+      qb.andWhere(filter.clause, filter.parameters);
+    }
+
+    const rows: Array<{ status: string | null; leadNumber: string | null }> =
+      await qb.getRawMany();
+
+    return rows.map((row) => ({
+      status: row.status ?? 'UNKNOWN',
+      leadNumber: row.leadNumber,
     }));
   }
 

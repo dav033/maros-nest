@@ -19,7 +19,6 @@ export class LeadMapper {
     // leadType ya no se almacena, se determina desde leadNumber
     if (dto.notes) entity.notes = dto.notes;
     if (dto.attachments) entity.attachments = dto.attachments;
-    if (dto.estimate !== undefined) entity.estimate = dto.estimate;
     entity.inReview = dto.inReview ?? false;
     
     // Relations (contact, projectType) are usually handled by the service
@@ -40,7 +39,6 @@ export class LeadMapper {
     // leadType ya no se almacena, se determina desde leadNumber
     if (dto.notes !== undefined) entity.notes = dto.notes;
     if (dto.attachments !== undefined) entity.attachments = dto.attachments;
-    if (dto.estimate !== undefined) entity.estimate = dto.estimate;
     if (dto.inReview !== undefined) entity.inReview = dto.inReview;
   }
 
@@ -86,7 +84,6 @@ export class LeadMapper {
       leadType: getLeadTypeFromNumber(entity.leadNumber),
       notes: notes,
       attachments: attachments,
-      estimate: entity.estimate != null ? Number(entity.estimate) : null,
       inReview: entity.inReview ?? false,
       contact: entity.contact ? {
         id: entity.contact.id,

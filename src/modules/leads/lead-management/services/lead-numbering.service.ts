@@ -101,9 +101,6 @@ export class LeadNumberingService {
         if (type === LeadType.PLUMBING && /^\d{3}P-\d{4}(?:\D.*)?$/.test(s)) {
           return parseInt(s.substring(0, 3), 10);
         }
-        if (type === LeadType.FENCE && /^\d{3}F-\d{4}(?:\D.*)?$/.test(s)) {
-          return parseInt(s.substring(0, 3), 10);
-        }
         if (type === LeadType.CONSTRUCTION && /^\d{3}-\d{4}(?:\D.*)?$/.test(s)) {
           return parseInt(s.substring(0, 3), 10);
         }
@@ -121,9 +118,6 @@ export class LeadNumberingService {
     if (type === LeadType.PLUMBING) {
       return `${base}P-${mmyy}`;
     }
-    if (type === LeadType.FENCE) {
-      return `${base}F-${mmyy}`;
-    }
     return `${base}-${mmyy}`;
   }
 
@@ -131,7 +125,6 @@ export class LeadNumberingService {
     if (
       /^\d{3}R-\d{4}(?:\D.*)?$/.test(leadNumber) ||
       /^\d{3}P-\d{4}(?:\D.*)?$/.test(leadNumber) ||
-      /^\d{3}F-\d{4}(?:\D.*)?$/.test(leadNumber) ||
       /^\d{3}-\d{4}(?:\D.*)?$/.test(leadNumber)
     ) {
       return leadNumber.substring(0, 3);

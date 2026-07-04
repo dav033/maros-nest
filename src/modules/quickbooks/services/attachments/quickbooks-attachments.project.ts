@@ -171,9 +171,13 @@ export class QuickbooksAttachmentsProjectService {
 
     for (const ref of transactionRefs) {
       if (!ref.entityId) continue;
+      const amount = ref.normalized?.totalAmount;
       refs.push({
         entityType: ref.entityType,
         entityId: ref.entityId,
+        ...(typeof amount === 'number' && Number.isFinite(amount)
+          ? { amount }
+          : {}),
       });
     }
 

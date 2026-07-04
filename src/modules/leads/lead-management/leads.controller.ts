@@ -23,18 +23,21 @@ import { LeadType } from '../../../common/enums/lead-type.enum';
 export class LeadsController {
   constructor(private readonly leadsService: LeadsService) {}
 
+  // Las listas se enriquecen con QBO (financial.estimatedAmount, etc.):
+  // el monto estimado de un lead viene 100% de los Estimates de QuickBooks.
+
   @Get()
   @ApiOperation({ summary: 'Get all leads' })
   @ApiResponse({ status: 200, description: 'Returns all leads' })
   async getAllLeads() {
-    return this.leadsService.getAllLeads();
+    return this.leadsService.getAllLeads({ includeQbo: true });
   }
 
   @Post('type')
   @ApiOperation({ summary: 'Get leads by type (POST with body)' })
   @ApiResponse({ status: 200, description: 'Returns leads filtered by type' })
   async getLeadsByType(@Body() request: GetLeadsByTypeDto) {
-    return this.leadsService.getLeadsByType(request.type);
+    return this.leadsService.getLeadsByType(request.type, { includeQbo: true });
   }
 
   @Get('type')
@@ -42,21 +45,21 @@ export class LeadsController {
   @ApiQuery({ name: 'type', enum: LeadType })
   @ApiResponse({ status: 200, description: 'Returns leads filtered by type' })
   async getLeadsByTypeGet(@Query('type') type: LeadType) {
-    return this.leadsService.getLeadsByType(type);
+    return this.leadsService.getLeadsByType(type, { includeQbo: true });
   }
 
   @Get('review')
   @ApiOperation({ summary: 'Get leads in review' })
   @ApiResponse({ status: 200, description: 'Returns leads with inReview = true' })
   async getLeadsInReview() {
-    return this.leadsService.getLeadsInReview();
+    return this.leadsService.getLeadsInReview({ includeQbo: true });
   }
 
   @Get('lost')
   @ApiOperation({ summary: 'Get lost leads across all types' })
   @ApiResponse({ status: 200, description: 'Returns leads with status = LOST' })
   async getLostLeads() {
-    return this.leadsService.getLostLeads();
+    return this.leadsService.getLostLeads({ includeQbo: true });
   }
 
   @Post('new-contact')

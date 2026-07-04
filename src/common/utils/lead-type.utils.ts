@@ -7,7 +7,6 @@ import { LeadType } from '../enums/lead-type.enum';
  * - 053-1025 → CONSTRUCTION (formato estándar sin prefijo)
  * - 053R-1025 → ROOFING (prefijo 'R')
  * - 053P-1025 → PLUMBING (prefijo 'P')
- * - 053F-1025 → FENCE (prefijo 'F')
  *
  * @param leadNumber - El número de lead a analizar
  * @returns El tipo de lead o null si no se puede determinar
@@ -34,13 +33,7 @@ export function getLeadTypeFromNumber(leadNumber: string | null | undefined): Le
     return LeadType.PLUMBING;
   }
 
-  // Patrón para FENCE: número seguido de 'F-' y más números.
-  // Permite notas al final, por ejemplo: 053F-1025 (issue)
-  if (/^\d+F-\d+(?:\D.*)?$/.test(trimmed)) {
-    return LeadType.FENCE;
-  }
-
-  // Todo lo que no sea ROOFING, PLUMBING o FENCE se considera CONSTRUCTION.
+  // Todo lo que no sea ROOFING o PLUMBING se considera CONSTRUCTION.
   // Esto mantiene compatibilidad con números legacy que no siguen
   // exactamente el formato NNN-NNNN.
   return LeadType.CONSTRUCTION;
@@ -90,16 +83,9 @@ export function leadNumberSqlFilter(
     };
   }
 
-  if (leadType === LeadType.FENCE) {
-    return {
-      clause: `${column} ~ :${paramKey}`,
-      parameters: { [paramKey]: '^[0-9]+F-[0-9]+([^0-9].*)?$' },
-    };
-  }
-
   return {
     clause: `${column} IS NOT NULL AND ${column} !~ :${paramKey}`,
-    parameters: { [paramKey]: '^[0-9]+[RPF]-[0-9]+([^0-9].*)?$' },
+    parameters: { [paramKey]: '^[0-9]+[RP]-[0-9]+([^0-9].*)?$' },
   };
 }
 

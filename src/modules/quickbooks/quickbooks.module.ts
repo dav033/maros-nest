@@ -25,13 +25,11 @@ import { QuickbooksAttachmentsService } from './services/attachments/quickbooks-
 import { QuickbooksVendorMatchingService } from './services/vendor/quickbooks-vendor-matching.service';
 import { ProjectQboEnrichmentService } from './services/crm-bridge/project-qbo-enrichment.service';
 import { QuickbooksController } from './quickbooks.controller';
-import { N8nModule } from '../n8n/n8n.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([QboConnection, Company]),
     HttpModule,
-    N8nModule,
   ],
   controllers: [QuickbooksController],
   providers: [

@@ -139,9 +139,6 @@ export class LeadMutationService {
     if (dto.inReview !== undefined) {
       entity.inReview = dto.inReview;
     }
-    if (dto.estimate !== undefined) {
-      entity.estimate = dto.estimate;
-    }
   }
 
   async resolveProjectType(id: number): Promise<ProjectType> {

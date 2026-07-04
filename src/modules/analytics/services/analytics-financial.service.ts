@@ -7,7 +7,7 @@ import {
   AgingBucketDto,
   FinancialSnapshotDto,
 } from '../dto/financial-snapshot.dto';
-import { CashPositionDto } from '../dto/cash-position.dto';
+import { ExpensesSummaryDto } from '../dto/expenses-summary.dto';
 import { RevenueTrendDto, TopClientDto } from '../dto/revenue-trend.dto';
 import {
   AgingBucket,
@@ -248,66 +248,42 @@ export class AnalyticsFinancialService {
     return totalIncome;
   }
 
-  async getCashPosition(range?: OptionalDateRange): Promise<CashPositionDto> {
+  async getExpensesSummary(
+    range?: OptionalDateRange,
+  ): Promise<ExpensesSummaryDto> {
     const period =
       normalizeOptionalDateRange(range) ?? buildDefaultLast12MonthsRange();
 
-    // "Cash position" = el dinero real que la empresa tiene ahora en sus
-    // cuentas bancarias. La fuente correcta es el Balance Sheet (Total Bank
-    // Accounts), NO el Statement of Cash Flows. El Balance Sheet es un reporte
-    // puntual: se evalúa a la fecha final del período (report_date = period.to).
-    const report = await this.quickbooksReportsService.getBalanceSheet({
+    // Cash basis para ser consistente con el KPI de Revenue del dashboard
+    // (getRevenueCash), que también sale del P&L en base Cash.
+    const report = await this.quickbooksReportsService.getProfitAndLoss({
       startDate: period.from,
       endDate: period.to,
+      accountingMethod: 'Cash',
     });
 
-    const cash = this.extractCashPosition(report);
-
     return {
-      cashPosition: cash ?? 0,
-      cashAtEnd: cash,
-      netCash: null,
+      totalExpenses: this.extractSectionTotal(report, 'expenses'),
+      totalCogs: this.extractSectionTotal(report, 'cost of goods sold'),
       period,
     };
   }
 
   /**
-   * Extrae el "cash position" del Balance Sheet de QBO.
-   * Prioriza la cuenta operativa principal "BUS COMPLETE CHK" (el dinero que
-   * la empresa considera disponible ahora). Si no se encuentra, cae a la fila
-   * resumen "Total Bank Accounts" y, por último, a la suma de las cuentas
-   * bancarias hoja (ASSETS > Current Assets > Bank Accounts).
+   * Suma las filas resumen "Total [for] <section>" del P&L de QBO
+   * (p. ej. "Total for Expenses", "Total for Cost of Goods Sold").
    */
-  private extractCashPosition(report: ParsedReport): number | null {
-    const isBankSection = (section: string) =>
-      section.trim().toLowerCase() === 'bank accounts';
-
-    const busComplete = report.rows.find(
-      (row) =>
-        isBankSection(row.section) &&
-        row.label.trim().toLowerCase().includes('bus complete'),
-    );
-    if (busComplete) {
-      return Number(busComplete.amount) || 0;
+  private extractSectionTotal(report: ParsedReport, sectionName: string): number {
+    const totalLabel = new RegExp(`^total(\\s+for)?\\s+${sectionName}$`);
+    let total = 0;
+    for (const row of report.rows) {
+      const section = row.section.trim().toLowerCase();
+      const label = row.label.trim().toLowerCase();
+      if (section === sectionName && totalLabel.test(label)) {
+        total += row.amount;
+      }
     }
-
-    const totalRow = report.rows.find(
-      (row) => row.label.trim().toLowerCase() === 'total bank accounts',
-    );
-    if (totalRow) {
-      return Number(totalRow.amount) || 0;
-    }
-
-    const bankRows = report.rows.filter(
-      (row) =>
-        isBankSection(row.section) &&
-        !row.label.trim().toLowerCase().startsWith('total'),
-    );
-    if (bankRows.length > 0) {
-      return bankRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
-    }
-
-    return null;
+    return total;
   }
 
   async getQuickbooksRevenueReport(range?: OptionalDateRange): Promise<ParsedReport> {

@@ -116,10 +116,10 @@ export class AnalyticsController {
     return this.financialService.getBacklog(query.limit ?? 100, query.leadType);
   }
 
-  @Get('cash-position')
+  @Get('expenses-summary')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
-  getCashPosition(@Query() query: DateRangeQueryDto) {
-    return this.financialService.getCashPosition({
+  getExpensesSummary(@Query() query: DateRangeQueryDto) {
+    return this.financialService.getExpensesSummary({
       from: query.from,
       to: query.to,
     });

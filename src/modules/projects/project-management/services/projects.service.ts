@@ -67,6 +67,13 @@ export class ProjectsService extends BaseService<any, number, Project> {
     const entity = this.projectMapper.toEntity(dto);
     entity.lead = lead;
 
+    // Igual que la conversión automática por WON: el proyecto hereda los
+    // attachments del lead (ahí vive el archivo del estimate) para que no se
+    // pierdan al convertir manualmente.
+    if (!entity.attachments?.length && lead.attachments?.length) {
+      entity.attachments = [...lead.attachments];
+    }
+
     const wasNotWon = lead.status !== LeadStatus.WON;
 
     // Transacción: la creación del proyecto y el cambio de estado del lead a WON
@@ -97,7 +104,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
     try {
       const textBody = `El lead "${lead.name ?? lead.leadNumber}" ha pasado a estado WON y se ha creado el proyecto #${projectId}.\n\nFecha: ${new Date().toLocaleString()}${contactEmail ? `\n\nContacto: ${lead.contact?.name ?? 'N/A'} <${contactEmail}>` : ''}`;
       const mailResult = await this.mailService.sendMail({
-        to: ['agonzales@marosconstruction.com'],
+        to: ['agonzalez@marosconstruction.com'],
         subject: `Lead Won: ${leadLabel} convertido a proyecto`,
         text: textBody,
       });

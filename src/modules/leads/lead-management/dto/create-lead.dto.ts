@@ -61,11 +61,6 @@ export class CreateLeadDto {
   @IsOptional()
   attachments?: string[];
 
-  @ApiPropertyOptional({ description: 'Estimated value of the lead' })
-  @IsNumber()
-  @IsOptional()
-  estimate?: number;
-
   @ApiPropertyOptional({ description: 'Whether the lead is in review', default: false })
   @IsBoolean()
   @IsOptional()

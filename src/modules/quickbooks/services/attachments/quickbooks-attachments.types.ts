@@ -4,6 +4,8 @@ export interface QboAttachmentEntityRef {
   entityType: string;
   entityId: string;
   name?: string;
+  /** Monto total de la transacción vinculada (TotalAmt en QBO), si aplica. */
+  amount?: number | null;
 }
 
 export interface QboAttachmentOptions {
@@ -28,6 +30,8 @@ export interface QboNormalizedAttachment {
   updatedAt: string;
   linkedEntityType: string;
   linkedEntityId: string;
+  /** Monto de la transacción a la que está adjunto (ej. total del Bill/Invoice). */
+  linkedEntityAmount?: number | null;
   includeOnSend: boolean;
   hasDownloadUrl: boolean;
   downloadUrlExpires: string | null;

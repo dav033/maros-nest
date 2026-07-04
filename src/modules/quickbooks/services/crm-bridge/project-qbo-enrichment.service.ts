@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InvoiceStatus } from '../../../../common/enums/invoice-status.enum';
-import { N8nService } from '../../../n8n/services/n8n.service';
 import { QuickbooksFinancialsService } from '../financials/quickbooks-financials.service';
 import { QboReauthorizationRequiredException } from '../../exceptions/qbo-reauthorization-required.exception';
 import {
@@ -25,7 +24,6 @@ export class ProjectQboEnrichmentService {
   private readonly logger = new Logger(ProjectQboEnrichmentService.name);
 
   constructor(
-    private readonly n8nService: N8nService,
     private readonly quickbooksFinancialsService: QuickbooksFinancialsService,
   ) {}
 
@@ -40,11 +38,14 @@ export class ProjectQboEnrichmentService {
     }
 
     try {
-      const [financial, payments] = await Promise.all([
-        this.n8nService.getProjectFinancial(leadNumber),
+      const [financials, payments] = await Promise.all([
+        this.quickbooksFinancialsService.getProjectFinancials(
+          [leadNumber],
+          options.realmId,
+        ),
         this.fetchPayments(leadNumber, options.realmId),
       ]);
-      this.attachSummary(dto, leadNumber, financial, payments);
+      this.attachSummary(dto, leadNumber, financials[0] ?? null, payments);
     } catch (error) {
       this.attachError(dto, error, `project summary for ${leadNumber}`);
     }
@@ -66,7 +67,10 @@ export class ProjectQboEnrichmentService {
     }
 
     try {
-      const financials = await this.n8nService.getProjectFinancials(leadNumbers);
+      const financials = await this.quickbooksFinancialsService.getProjectFinancials(
+        leadNumbers,
+        options.realmId,
+      );
       const financialMap = new Map(
         financials.map((financial) => [financial.projectNumber, financial]),
       );
@@ -93,7 +97,6 @@ export class ProjectQboEnrichmentService {
       );
     }
 
-    void options;
     return dtos;
   }
 
@@ -198,7 +201,10 @@ export class ProjectQboEnrichmentService {
     financial: Partial<QboProjectSummary> | null,
     payments?: QboPaymentSummary[],
   ): void {
-    if (!financial) {
+    // found === false: el lead/proyecto no existe como customer en QBO.
+    // Se adjunta vacío (financial = null) para que la UI muestre "—" en vez
+    // de montos $0.00 que parecen datos reales.
+    if (!financial || financial.found === false) {
       this.attachEmpty(dto);
       return;
     }

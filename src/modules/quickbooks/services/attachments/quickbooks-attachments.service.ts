@@ -184,6 +184,10 @@ export class QuickbooksAttachmentsService {
       includeTempDownloadUrl: effectiveParams.includeTempDownloadUrl,
     });
 
+    // Copia el monto de la transacción vinculada (Bill/Invoice/etc.) a cada
+    // attachment para que la UI pueda mostrarlo junto al archivo.
+    this.applyLinkedEntityAmounts(entityRefs, attachmentResult.attachments);
+
     return {
       project,
       entityRefs,
@@ -202,6 +206,24 @@ export class QuickbooksAttachmentsService {
     attachableId: string,
   ): Promise<QboAttachmentDownloadUrl> {
     return this.queryService.getAttachmentDownloadUrl(realmId, attachableId);
+  }
+
+  private applyLinkedEntityAmounts(
+    entityRefs: QboAttachmentEntityRef[],
+    attachments: { linkedEntityType: string; linkedEntityId: string; linkedEntityAmount?: number | null }[],
+  ): void {
+    const amountByEntity = new Map<string, number>();
+    for (const ref of entityRefs) {
+      if (typeof ref.amount === 'number' && Number.isFinite(ref.amount)) {
+        amountByEntity.set(`${ref.entityType}:${ref.entityId}`, ref.amount);
+      }
+    }
+    for (const attachment of attachments) {
+      attachment.linkedEntityAmount =
+        amountByEntity.get(
+          `${attachment.linkedEntityType}:${attachment.linkedEntityId}`,
+        ) ?? null;
+    }
   }
 
   private applyDefaultDateRange(

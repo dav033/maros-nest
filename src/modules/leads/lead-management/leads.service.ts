@@ -121,8 +121,14 @@ export class LeadsService {
 
   async getStatusCounts(
     leadType?: LeadType,
-  ): Promise<Array<{ status: string; count: number; estimatedValue: number }>> {
+  ): Promise<Array<{ status: string; count: number }>> {
     return this.leadsRepository.getStatusCounts(leadType);
+  }
+
+  async getStatusSeed(
+    leadType?: LeadType,
+  ): Promise<Array<{ status: string; leadNumber: string | null }>> {
+    return this.leadsRepository.findStatusSeed(leadType);
   }
 
   async getTotalCount(leadType?: LeadType): Promise<number> {
@@ -383,7 +389,7 @@ export class LeadsService {
       try {
         const textBody = `El lead "${entity.name ?? entity.leadNumber}" ha pasado a estado WON y se ha creado el proyecto #${project.id}.\n\nFecha: ${new Date().toLocaleString()}${contactEmail ? `\n\nContacto: ${entity.contact?.name ?? 'N/A'} <${contactEmail}>` : ''}`;
         const mailResult = await this.mailService.sendMail({
-          to: ['agonzales@marosconstruction.com'],
+          to: ['agonzalez@marosconstruction.com'],
           subject: `Lead Won: ${leadLabel} convertido a proyecto`,
           text: textBody,
         });
