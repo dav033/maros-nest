@@ -28,11 +28,13 @@ export const getDatabaseConfig = (
     // Connection retry logic
     maxQueryExecutionTime: 10000, // Log slow queries (10 seconds)
     
-    // Connection pool settings (equivalent to Hikari)
+    // Connection pool settings. Supabase pooler (Supavisor) caps session-mode
+    // clients at pool_size (15), so the app connects via transaction mode
+    // (port 6543) and releases idle connections quickly.
     extra: {
-      max: 10, // maximum-pool-size (increased from 6)
-      min: 2, // minimum-idle
-      idleTimeoutMillis: 600000, // idle-timeout (10 minutes)
+      max: 10, // maximum-pool-size
+      min: 0, // minimum-idle: don't hold pooler slots while idle
+      idleTimeoutMillis: 30000, // idle-timeout (30 seconds)
       connectionTimeoutMillis: 30000, // connection-timeout (30 seconds)
       acquireTimeoutMillis: 60000, // acquire-timeout (60 seconds)
       // Enable keep-alive to prevent connection drops

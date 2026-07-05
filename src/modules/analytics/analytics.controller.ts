@@ -76,10 +76,15 @@ export class AnalyticsController {
     return this.financialService.getFinancialSnapshot(query.leadType);
   }
 
-  @Get('aging')
+  @Get('leads-per-month')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
-  getAging(@Query() query: LeadTypeQueryDto) {
-    return this.financialService.getAging(query.leadType);
+  getLeadsPerMonth(@Query() query: RevenueTrendQueryDto) {
+    const months = query.months ?? 12;
+    return this.pipelineService.getLeadsPerMonth(months, {
+      from: query.from,
+      to: query.to,
+      leadType: query.leadType,
+    });
   }
 
   @Get('revenue-trend')
@@ -120,6 +125,15 @@ export class AnalyticsController {
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getExpensesSummary(@Query() query: DateRangeQueryDto) {
     return this.financialService.getExpensesSummary({
+      from: query.from,
+      to: query.to,
+    });
+  }
+
+  @Get('costs-breakdown')
+  @CacheTTL(ANALYTICS_CACHE_TTL_MS)
+  getCostsBreakdown(@Query() query: DateRangeQueryDto) {
+    return this.financialService.getCostsBreakdown({
       from: query.from,
       to: query.to,
     });

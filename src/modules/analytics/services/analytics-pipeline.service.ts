@@ -7,6 +7,12 @@ import { ProjectsService } from '../../projects/project-management/services/proj
 import { QuickbooksFinancialsService } from '../../quickbooks/services/financials/quickbooks-financials.service';
 import { PipelineBucketDto } from '../dto/pipeline.dto';
 import { ProjectsStatusBucketDto } from '../dto/revenue-trend.dto';
+import { LeadsPerMonthDto } from '../dto/leads-per-month.dto';
+import {
+  OptionalDateRange,
+  buildMonthKeys,
+  normalizeOptionalDateRange,
+} from '../utils/analytics-date-range.util';
 
 @Injectable()
 export class AnalyticsPipelineService {
@@ -67,6 +73,42 @@ export class AnalyticsPipelineService {
         estimatedValue,
       };
     });
+  }
+
+  /**
+   * Leads creados por mes. El mes sale del lead_number (NNN-MMYY, con sufijo
+   * R/P para roofing/plumbing), que es la convención de numeración mensual
+   * del CRM; los leads sin número válido se omiten.
+   */
+  async getLeadsPerMonth(
+    months: number,
+    range?: OptionalDateRange & { leadType?: LeadType },
+  ): Promise<LeadsPerMonthDto[]> {
+    const normalizedRange = normalizeOptionalDateRange(range);
+    const monthKeys = buildMonthKeys(months, normalizedRange);
+    const counts = new Map<string, number>();
+
+    const seed = await this.leadsService.getStatusSeed(range?.leadType);
+    for (const row of seed) {
+      const month = this.parseMonthFromLeadNumber(row.leadNumber);
+      if (month) {
+        counts.set(month, (counts.get(month) ?? 0) + 1);
+      }
+    }
+
+    return monthKeys.map((month) => ({
+      month,
+      count: counts.get(month) ?? 0,
+    }));
+  }
+
+  private parseMonthFromLeadNumber(leadNumber: string | null): string | null {
+    if (!leadNumber) return null;
+    const match = /^\d+[RP]?-(\d{2})(\d{2})/.exec(leadNumber.trim().toUpperCase());
+    if (!match) return null;
+    const month = Number(match[1]);
+    if (month < 1 || month > 12) return null;
+    return `20${match[2]}-${match[1]}`;
   }
 
   async getProjectsStatus(

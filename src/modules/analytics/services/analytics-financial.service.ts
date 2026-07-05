@@ -3,14 +3,14 @@ import { LeadType } from '../../../common/enums/lead-type.enum';
 import { ProjectsService } from '../../projects/project-management/services/projects.service';
 import { QuickbooksFinancialsService } from '../../quickbooks/services/financials/quickbooks-financials.service';
 import { QuickbooksReportsService } from '../../quickbooks/services/reports/quickbooks-reports.service';
-import {
-  AgingBucketDto,
-  FinancialSnapshotDto,
-} from '../dto/financial-snapshot.dto';
+import { FinancialSnapshotDto } from '../dto/financial-snapshot.dto';
 import { ExpensesSummaryDto } from '../dto/expenses-summary.dto';
+import {
+  CostCategoryDto,
+  CostsBreakdownDto,
+} from '../dto/costs-breakdown.dto';
 import { RevenueTrendDto, TopClientDto } from '../dto/revenue-trend.dto';
 import {
-  AgingBucket,
   BacklogItem,
   OutstandingBalanceItem,
   ParsedReport,
@@ -57,33 +57,6 @@ export class AnalyticsFinancialService {
       paidTotal: this.sumByKey(financials, 'paidAmount'),
       outstandingTotal: this.sumByKey(financials, 'outstandingAmount'),
     };
-  }
-
-  async getAging(leadType?: LeadType): Promise<AgingBucketDto[]> {
-    const report = await this.quickbooksReportsService.getAgingReport();
-    const filterBucket = (bucket: AgingBucket) => {
-      if (!leadType) {
-        return { count: bucket.count, totalBalance: bucket.totalBalance };
-      }
-      const invoices = bucket.invoices.filter((inv) =>
-        matchesLeadType(inv.projectNumber, leadType),
-      );
-      return {
-        count: invoices.length,
-        totalBalance: invoices.reduce(
-          (sum, inv) => sum + (Number(inv.balance) || 0),
-          0,
-        ),
-      };
-    };
-
-    return [
-      { label: 'Current', ...filterBucket(report.current) },
-      { label: '1-30', ...filterBucket(report.days1to30) },
-      { label: '31-60', ...filterBucket(report.days31to60) },
-      { label: '61-90', ...filterBucket(report.days61to90) },
-      { label: '90+', ...filterBucket(report.over90) },
-    ];
   }
 
   async getRevenueTrend(
@@ -265,6 +238,62 @@ export class AnalyticsFinancialService {
     return {
       totalExpenses: this.extractSectionTotal(report, 'expenses'),
       totalCogs: this.extractSectionTotal(report, 'cost of goods sold'),
+      period,
+    };
+  }
+
+  /**
+   * Desglose de todos los costos (Expenses + COGS) por categoría a partir
+   * del P&L de QBO en base Cash, consistente con getExpensesSummary.
+   */
+  async getCostsBreakdown(
+    range?: OptionalDateRange,
+  ): Promise<CostsBreakdownDto> {
+    const period =
+      normalizeOptionalDateRange(range) ?? buildDefaultLast12MonthsRange();
+
+    const report = await this.quickbooksReportsService.getProfitAndLoss({
+      startDate: period.from,
+      endDate: period.to,
+      accountingMethod: 'Cash',
+    });
+
+    const sectionByRoot: Record<string, CostCategoryDto['section']> = {
+      expenses: 'EXPENSES',
+      'cost of goods sold': 'COGS',
+    };
+
+    const amounts = new Map<string, CostCategoryDto>();
+    for (const row of report.rows) {
+      const root = row.path[0]?.trim().toLowerCase() ?? '';
+      const section = sectionByRoot[root];
+      const label = row.label.trim();
+      // Solo filas de cuenta (hoja); las filas "Total [for] ..." son resúmenes
+      // de sección y sumarlas duplicaría los montos.
+      if (!section || !label || /^total(\s|$)/i.test(label)) {
+        continue;
+      }
+      const key = `${section}:${label}`;
+      const existing = amounts.get(key);
+      if (existing) {
+        existing.amount += row.amount;
+      } else {
+        amounts.set(key, { category: label, section, amount: row.amount });
+      }
+    }
+
+    const totalExpenses = this.extractSectionTotal(report, 'expenses');
+    const totalCogs = this.extractSectionTotal(report, 'cost of goods sold');
+
+    const categories = [...amounts.values()]
+      .filter((item) => item.amount !== 0)
+      .sort((a, b) => b.amount - a.amount);
+
+    return {
+      totalCosts: totalExpenses + totalCogs,
+      totalExpenses,
+      totalCogs,
+      categories,
       period,
     };
   }

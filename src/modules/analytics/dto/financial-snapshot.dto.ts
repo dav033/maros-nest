@@ -5,9 +5,3 @@ export class FinancialSnapshotDto {
   paidTotal: number;
   outstandingTotal: number;
 }
-
-export class AgingBucketDto {
-  label: string;
-  count: number;
-  totalBalance: number;
-}

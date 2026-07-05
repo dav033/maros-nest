@@ -53,6 +53,41 @@ export function normalizeOptionalDateRange(
   };
 }
 
+/**
+ * Devuelve las claves YYYY-MM del rango dado, o los últimos `months` meses
+ * (incluyendo el actual) cuando no hay rango. Máximo 36 meses.
+ */
+export function buildMonthKeys(months: number, range?: DateRange): string[] {
+  const cap = 36;
+  const monthKey = (year: number, month: number) =>
+    `${year}-${String(month + 1).padStart(2, '0')}`;
+
+  if (range?.from && range?.to) {
+    const fromDate = new Date(`${range.from}T00:00:00.000Z`);
+    const toDate = new Date(`${range.to}T00:00:00.000Z`);
+    const keys: string[] = [];
+    for (
+      let current = new Date(Date.UTC(fromDate.getUTCFullYear(), fromDate.getUTCMonth(), 1));
+      current <= toDate && keys.length < cap;
+      current = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth() + 1, 1))
+    ) {
+      keys.push(monthKey(current.getUTCFullYear(), current.getUTCMonth()));
+    }
+    return keys;
+  }
+
+  const safeMonths = Number.isFinite(months)
+    ? Math.max(1, Math.min(cap, Math.trunc(months)))
+    : 12;
+  const now = new Date();
+  const keys: string[] = [];
+  for (let index = safeMonths - 1; index >= 0; index -= 1) {
+    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - index, 1));
+    keys.push(monthKey(date.getUTCFullYear(), date.getUTCMonth()));
+  }
+  return keys;
+}
+
 function parseIsoDate(value: string, label: 'from' | 'to'): Date {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new BadRequestException(`Invalid ${label} date format. Use YYYY-MM-DD.`);
