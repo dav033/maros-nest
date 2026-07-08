@@ -31,6 +31,8 @@ export class QuickbooksAuthService {
   private readonly redirectUri: string;
   /** Precomputed Basic auth header for token endpoint calls. */
   private readonly basicAuthHeader: string;
+  /** Dedup in-flight token refresh requests per realmId to avoid race conditions. */
+  private readonly refreshInFlight = new Map<string, Promise<void>>();
 
   constructor(
     @InjectRepository(QboConnection)
@@ -92,8 +94,24 @@ export class QuickbooksAuthService {
    * Refreshes tokens for the given realmId using the stored refresh_token.
    * IMPORTANT: Intuit rotates the refresh_token on every call — the new value
    * is always saved, even if it looks the same.
+   *
+   * Concurrent callers for the same realmId are deduplicated to avoid race
+   * conditions where Intuit rotates the refresh token between two requests.
    */
   async refreshTokens(realmId: string): Promise<void> {
+    const existing = this.refreshInFlight.get(realmId);
+    if (existing) {
+      return existing;
+    }
+
+    const promise = this.doRefreshTokens(realmId).finally(() => {
+      this.refreshInFlight.delete(realmId);
+    });
+    this.refreshInFlight.set(realmId, promise);
+    return promise;
+  }
+
+  private async doRefreshTokens(realmId: string): Promise<void> {
     if (!this.isOAuthConfigured()) {
       this.logger.error(
         `QBO refresh requested for realm ${realmId} but OAuth credentials are not configured — manual reauthorization required`,
@@ -124,10 +142,13 @@ export class QuickbooksAuthService {
       await this.persistTokens(realmId, data);
       this.logger.log(`QBO tokens refreshed successfully for realm ${realmId}`);
     } catch (error: unknown) {
-      const errData = (error as { response?: { data?: { error?: string } } })
-        .response?.data;
+      const axiosError = error as {
+        response?: { status?: number; data?: { error?: string } };
+      };
+      const status = axiosError.response?.status;
+      const errorCode = axiosError.response?.data?.error;
 
-      if (errData?.error === 'invalid_grant') {
+      if (errorCode === 'invalid_grant') {
         this.logger.error(
           `QBO invalid_grant for realm ${realmId} — manual reauthorization required`,
         );
@@ -135,7 +156,7 @@ export class QuickbooksAuthService {
       }
 
       this.logger.error(
-        `QBO token refresh failed for realm ${realmId}: ${String(error)}`,
+        `QBO token refresh failed for realm ${realmId}: status=${status ?? 'unknown'} error=${errorCode ?? 'unknown'}`,
       );
       throw error;
     }

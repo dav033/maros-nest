@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { QboConnection } from '../../entities/qbo-connection.entity';
@@ -6,10 +8,12 @@ import { QboReauthorizationRequiredException } from '../../exceptions/qbo-reauth
 import { QuickbooksApiService } from '../core/quickbooks-api.service';
 import {
   JobIndex,
-  QboCustomerResponse,
+  QboCustomer,
   QboEstimate,
   QboInvoice,
 } from './quickbooks-reports.types';
+
+const JOB_INDEX_TTL_MS = 5 * 60 * 1000;
 
 @Injectable()
 export class QuickbooksReportsContextService {
@@ -17,6 +21,7 @@ export class QuickbooksReportsContextService {
     @InjectRepository(QboConnection)
     private readonly connectionRepo: Repository<QboConnection>,
     private readonly apiService: QuickbooksApiService,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
 
   async resolveRealmId(realmId?: string): Promise<string> {
@@ -27,12 +32,17 @@ export class QuickbooksReportsContextService {
   }
 
   async buildJobIndex(realmId: string): Promise<JobIndex> {
-    const resp = (await this.apiService.query(
-      realmId,
-      `SELECT * FROM Customer WHERE Job = true STARTPOSITION 1 MAXRESULTS 1000`,
-    )) as QboCustomerResponse;
+    const cacheKey = `qbo:job-index:${realmId}`;
+    const cached = await this.cacheManager.get<JobIndex>(cacheKey);
+    if (cached) {
+      return cached;
+    }
 
-    const customers = resp?.QueryResponse?.Customer ?? [];
+    const customers = (await this.apiService.queryAll(realmId, 'Customer', {
+      where: 'Job = true',
+      select: 'Id, DisplayName, FullyQualifiedName',
+    })) as QboCustomer[];
+
     const byId: JobIndex['byId'] = {};
     const projectNumberById: JobIndex['projectNumberById'] = {};
 
@@ -44,7 +54,9 @@ export class QuickbooksReportsContextService {
       projectNumberById[id] = prefix || null;
     }
 
-    return { byId, projectNumberById };
+    const index: JobIndex = { byId, projectNumberById };
+    await this.cacheManager.set(cacheKey, index, JOB_INDEX_TTL_MS);
+    return index;
   }
 
   refId(ref: QboInvoice['CustomerRef'] | QboEstimate['CustomerRef']): string {

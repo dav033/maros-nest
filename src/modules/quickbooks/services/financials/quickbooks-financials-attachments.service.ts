@@ -3,6 +3,10 @@ import { stringValue, transactionMatchesProject } from './quickbooks-financials.
 import { AttachmentEntityRef } from './quickbooks-financials.types';
 import { QuickbooksApiService } from '../core/quickbooks-api.service';
 import { QuickbooksNormalizerService } from '../core/quickbooks-normalizer.service';
+import {
+  QBO_ATTACHMENT_CONCURRENCY,
+  runWithConcurrency,
+} from '../core/quickbooks-concurrency.utils';
 
 @Injectable()
 export class QuickbooksFinancialsAttachmentsService {
@@ -21,16 +25,23 @@ export class QuickbooksFinancialsAttachmentsService {
     const [estimates, invoices, payments, purchases] = await Promise.all([
       this.apiService.queryAll(realmId, 'Estimate', {
         where: `CustomerRef IN ('${escapedJobId}')`,
+        select:
+          'Id, DocNumber, TxnDate, ExpirationDate, CustomerRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo, TxnStatus',
       }) as Promise<Record<string, unknown>[]>,
       this.apiService.queryAll(realmId, 'Invoice', {
         where: `CustomerRef IN ('${escapedJobId}')`,
+        select:
+          'Id, DocNumber, TxnDate, DueDate, CustomerRef, TotalAmt, Balance, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo',
       }) as Promise<Record<string, unknown>[]>,
       this.apiService.queryAll(realmId, 'Payment', {
         where: `CustomerRef IN ('${escapedJobId}')`,
+        select:
+          'Id, DocNumber, TxnDate, CustomerRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo, UnappliedAmt, DepositToAccountRef',
       }) as Promise<Record<string, unknown>[]>,
-      this.apiService.queryAll(realmId, 'Purchase') as Promise<
-        Record<string, unknown>[]
-      >,
+      this.apiService.queryAll(realmId, 'Purchase', {
+        select:
+          'Id, DocNumber, TxnDate, CustomerRef, EntityRef, AccountRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo, PaymentType',
+      }) as Promise<Record<string, unknown>[]>,
     ]);
 
     const projectPurchases = purchases.filter((purchase) =>
@@ -78,16 +89,19 @@ export class QuickbooksFinancialsAttachmentsService {
       uniqueRefs.set(`${ref.entityType}:${ref.entityId}`, ref);
     }
 
-    const pages = await Promise.all(
-      [...uniqueRefs.values()].map((ref) => {
+    const pages = await runWithConcurrency(
+      [...uniqueRefs.values()].map((ref) => () => {
         const entityType = this.apiService.escapeQboString(ref.entityType);
         const entityId = this.apiService.escapeQboString(ref.entityId);
         return this.apiService.queryAll(realmId, 'Attachable', {
           where:
             `AttachableRef.EntityRef.Type = '${entityType}' ` +
             `AND AttachableRef.EntityRef.Value = '${entityId}'`,
+          select:
+            'Id, FileName, ContentType, Size, Note, TxnDate, AttachableRef',
         }) as Promise<Record<string, unknown>[]>;
       }),
+      QBO_ATTACHMENT_CONCURRENCY,
     );
 
     const byId = new Map<string, Record<string, unknown>>();

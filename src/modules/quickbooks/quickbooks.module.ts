@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
+import { CacheModule } from '@nestjs/cache-manager';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { QboConnection } from './entities/qbo-connection.entity';
 import { Company } from '../../entities/company.entity';
@@ -30,6 +31,10 @@ import { QuickbooksController } from './quickbooks.controller';
   imports: [
     TypeOrmModule.forFeature([QboConnection, Company]),
     HttpModule,
+    CacheModule.register({
+      ttl: 300_000,
+      max: 500,
+    }),
   ],
   controllers: [QuickbooksController],
   providers: [

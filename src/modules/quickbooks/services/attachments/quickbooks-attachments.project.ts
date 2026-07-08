@@ -67,15 +67,51 @@ export class QuickbooksAttachmentsProjectService {
       purchaseOrders,
       journalEntries,
     ] = await Promise.all([
-      this.apiService.queryAll(realmId, 'Invoice', invoiceOptions),
-      this.apiService.queryAll(realmId, 'Estimate', estimateOptions),
-      this.apiService.queryAll(realmId, 'Payment', paymentOptions),
-      this.apiService.queryAll(realmId, 'Purchase', baseOptions),
-      this.apiService.queryAll(realmId, 'Bill', baseOptions),
-      this.apiService.queryAll(realmId, 'BillPayment', baseOptions),
-      this.apiService.queryAll(realmId, 'VendorCredit', baseOptions),
-      this.apiService.queryAll(realmId, 'PurchaseOrder', baseOptions),
-      this.apiService.queryAll(realmId, 'JournalEntry', baseOptions),
+      this.apiService.queryAll(realmId, 'Invoice', {
+        ...invoiceOptions,
+        select:
+          'Id, DocNumber, TxnDate, DueDate, CustomerRef, TotalAmt, Balance, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo',
+      }),
+      this.apiService.queryAll(realmId, 'Estimate', {
+        ...estimateOptions,
+        select:
+          'Id, DocNumber, TxnDate, ExpirationDate, CustomerRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo, TxnStatus',
+      }),
+      this.apiService.queryAll(realmId, 'Payment', {
+        ...paymentOptions,
+        select:
+          'Id, DocNumber, TxnDate, CustomerRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo, UnappliedAmt, DepositToAccountRef',
+      }),
+      this.apiService.queryAll(realmId, 'Purchase', {
+        ...baseOptions,
+        select:
+          'Id, DocNumber, TxnDate, CustomerRef, EntityRef, AccountRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo, PaymentType',
+      }),
+      this.apiService.queryAll(realmId, 'Bill', {
+        ...baseOptions,
+        select:
+          'Id, DocNumber, TxnDate, DueDate, CustomerRef, VendorRef, APAccountRef, TotalAmt, Balance, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo',
+      }),
+      this.apiService.queryAll(realmId, 'BillPayment', {
+        ...baseOptions,
+        select:
+          'Id, DocNumber, TxnDate, CustomerRef, VendorRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo, PayType, CheckPayment, CreditCardPayment',
+      }),
+      this.apiService.queryAll(realmId, 'VendorCredit', {
+        ...baseOptions,
+        select:
+          'Id, DocNumber, TxnDate, CustomerRef, VendorRef, APAccountRef, TotalAmt, Balance, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo',
+      }),
+      this.apiService.queryAll(realmId, 'PurchaseOrder', {
+        ...baseOptions,
+        select:
+          'Id, DocNumber, TxnDate, ShipDate, CustomerRef, VendorRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo, POStatus',
+      }),
+      this.apiService.queryAll(realmId, 'JournalEntry', {
+        ...baseOptions,
+        select:
+          'Id, DocNumber, TxnDate, CustomerRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo',
+      }),
     ]);
 
     const projectBillIds = new Set<string>();
@@ -211,16 +247,18 @@ export class QuickbooksAttachmentsProjectService {
 
     if (!projectNumber) return { found: false, refs: [] };
 
+    const normalizedProject = this.helpers.normalizeName(projectNumber);
+    const likePattern = `${this.apiService.escapeQboLike(normalizedProject)}%`;
     const jobs = (await this.apiService.queryAll(realmId, 'Customer', {
-      where: 'Job = true',
+      where:
+        `Job = true ` +
+        `AND (DisplayName LIKE '${likePattern}' ESCAPE '\\' ` +
+        `OR FullyQualifiedName LIKE '${likePattern}' ESCAPE '\\')`,
+      select: 'Id, DisplayName, FullyQualifiedName, Job',
     })) as QboCustomerRecord[];
-    const match =
-      jobs.find((customer) =>
-        this.customerMatchesProjectNumber(customer, projectNumber),
-      ) ??
-      ((await this.apiService.queryAll(realmId, 'Customer')) as QboCustomerRecord[]).find(
-        (customer) => this.customerMatchesProjectNumber(customer, projectNumber),
-      );
+    const match = jobs.find((customer) =>
+      this.customerMatchesProjectNumber(customer, projectNumber),
+    );
 
     if (!match) {
       return {
@@ -279,7 +317,6 @@ export class QuickbooksAttachmentsProjectService {
       this.helpers.stringValue(customer.Id),
       this.helpers.stringValue(customer.DisplayName),
       this.helpers.stringValue(customer.FullyQualifiedName),
-      this.helpers.stringValue(customer['Name']),
       this.helpers.stringValue(customer['ProjectNumber']),
     ];
     return values.some((value) =>

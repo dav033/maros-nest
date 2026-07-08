@@ -2,6 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosError, AxiosInstance } from 'axios';
 import { QuickbooksAuthService } from './quickbooks-auth.service';
+import { QBO_MAX_CONCURRENCY, runWithConcurrency } from './quickbooks-concurrency.utils';
+
+const DEFAULT_QUERY_ALL_MAX_PAGES = 50;
+const ABSOLUTE_MAX_PAGES = 1000;
 
 export interface QueryAllOptions {
   where?: string;
@@ -18,6 +22,12 @@ export interface QueryAllOptions {
    * can omit it.
    */
   cacheKey?: string;
+  /**
+   * Optional cap on the number of pages fetched. Each page requests up to 1000
+   * records, so `maxPages: 5` returns at most 5000 records. Useful when only a
+   * bounded window of data is needed.
+   */
+  maxPages?: number;
 }
 
 @Injectable()
@@ -136,12 +146,18 @@ export class QuickbooksApiService {
   async queryRawGet(realmId: string, sqlLikeQuery: string): Promise<unknown> {
     return this.getOrSetReadCache(
       this.buildReadCacheKey('query:get', realmId, sqlLikeQuery),
-      () =>
-        this.withRetry(realmId, (client) =>
-          client
-            .get<unknown>('/query', { params: { query: sqlLikeQuery } })
-            .then((r) => r.data),
-        ),
+      async () => {
+        try {
+          return await this.withRetry(realmId, (client) =>
+            client
+              .get<unknown>('/query', { params: { query: sqlLikeQuery } })
+              .then((r) => r.data),
+          );
+        } catch (error) {
+          this.logQboQueryError(error, sqlLikeQuery);
+          throw error;
+        }
+      },
     );
   }
 
@@ -152,14 +168,20 @@ export class QuickbooksApiService {
   async queryRawPost(realmId: string, sqlLikeQuery: string): Promise<unknown> {
     return this.getOrSetReadCache(
       this.buildReadCacheKey('query:post', realmId, sqlLikeQuery),
-      () =>
-        this.withRetry(realmId, (client) =>
-          client
-            .post<unknown>('/query', sqlLikeQuery, {
-              headers: { 'Content-Type': 'application/text' },
-            })
-            .then((r) => r.data),
-        ),
+      async () => {
+        try {
+          return await this.withRetry(realmId, (client) =>
+            client
+              .post<unknown>('/query', sqlLikeQuery, {
+                headers: { 'Content-Type': 'application/text' },
+              })
+              .then((r) => r.data),
+          );
+        } catch (error) {
+          this.logQboQueryError(error, sqlLikeQuery);
+          throw error;
+        }
+      },
     );
   }
 
@@ -182,16 +204,26 @@ export class QuickbooksApiService {
     const orderBy = options.orderBy ? ` ORDERBY ${options.orderBy}` : '';
     const cacheKey = this.buildReadCacheKey(
       'queryAll',
-      options.cacheKey ?? realmId,
+      realmId,
+      options.cacheKey ?? '',
       entityName,
       options.select ?? '*',
       options.where ?? '',
       options.orderBy ?? '',
+      String(options.maxPages ?? DEFAULT_QUERY_ALL_MAX_PAGES),
     );
 
     return this.getOrSetReadCacheWithTtl(
       cacheKey,
-      () => this.fetchAllPages(realmId, entityName, selectClause, where, orderBy),
+      () =>
+        this.fetchAllPages(
+          realmId,
+          entityName,
+          selectClause,
+          where,
+          orderBy,
+          options.maxPages,
+        ),
       this.queryAllCacheTtlMs,
     );
   }
@@ -202,23 +234,83 @@ export class QuickbooksApiService {
     selectClause: string,
     where: string,
     orderBy: string,
+    maxPages?: number,
   ): Promise<unknown[]> {
     const pageSize = 1000;
-    const results: unknown[] = [];
-    let position = 1;
+    const allResults: unknown[] = [];
 
-    while (true) {
-      const q = `${selectClause}${where}${orderBy} STARTPOSITION ${position} MAXRESULTS ${pageSize}`;
-      const resp = await this.queryRawGet(realmId, q);
-      const page = this.getQueryResponseArray(resp, entityName);
+    const firstPage = await this.fetchQueryPage(
+      realmId,
+      entityName,
+      selectClause,
+      where,
+      orderBy,
+      1,
+      pageSize,
+    );
+    allResults.push(...firstPage);
 
-      results.push(...page);
-
-      if (page.length < pageSize) break;
-      position += pageSize;
+    if (firstPage.length < pageSize || maxPages === 1) {
+      return allResults;
     }
 
-    return results;
+    const maxPagesEffective = Math.min(
+      maxPages ?? DEFAULT_QUERY_ALL_MAX_PAGES,
+      ABSOLUTE_MAX_PAGES,
+    );
+
+    let nextPage = 2;
+    while (nextPage <= maxPagesEffective) {
+      const batchSize = Math.min(
+        QBO_MAX_CONCURRENCY,
+        maxPagesEffective - nextPage + 1,
+      );
+      const positions = Array.from(
+        { length: batchSize },
+        (_, i) => 1 + pageSize * (nextPage + i - 1),
+      );
+
+      const batch = await runWithConcurrency(
+        positions.map(
+          (startPosition) => () =>
+            this.fetchQueryPage(
+              realmId,
+              entityName,
+              selectClause,
+              where,
+              orderBy,
+              startPosition,
+              pageSize,
+            ),
+        ),
+        QBO_MAX_CONCURRENCY,
+      );
+
+      for (const page of batch) {
+        allResults.push(...page);
+        if (page.length < pageSize) {
+          return allResults;
+        }
+      }
+
+      nextPage += batchSize;
+    }
+
+    return allResults;
+  }
+
+  private async fetchQueryPage(
+    realmId: string,
+    entityName: string,
+    selectClause: string,
+    where: string,
+    orderBy: string,
+    startPosition: number,
+    pageSize: number,
+  ): Promise<unknown[]> {
+    const q = `${selectClause}${where}${orderBy} STARTPOSITION ${startPosition} MAXRESULTS ${pageSize}`;
+    const resp = await this.queryRawGet(realmId, q);
+    return this.getQueryResponseArray(resp, entityName);
   }
 
   /**
@@ -255,6 +347,28 @@ export class QuickbooksApiService {
   /** Escapes a string value for safe use inside a QBO WHERE clause literal. */
   escapeQboString(value: string): string {
     return value.replace(/'/g, "''");
+  }
+
+  /**
+   * Escapes a string value for safe use inside a QBO LIKE pattern.
+   *
+   * Escapes backslashes, single quotes, percent signs (`%`) and underscores
+   * (`_`) so the literal characters are matched, preventing accidental
+   * wildcard expansion in QBO's `LIKE` operator.
+   *
+   * @param value  Raw string to escape.
+   * @returns The escaped string, safe to embed in a QBO `LIKE` clause
+   *          with `ESCAPE '\'`.
+   *
+   * @example
+   * escapeQboLike("it's 100% done_")
+   * // → "it''s 100\\% done\\_"
+   */
+  escapeQboLike(value: string): string {
+    return this.escapeQboString(value)
+      .replace(/\\/g, '\\\\')
+      .replace(/%/g, '\\%')
+      .replace(/_/g, '\\_');
   }
 
   /** Extracts a named entity object from a raw QBO API response envelope. */
@@ -298,6 +412,30 @@ export class QuickbooksApiService {
         'Content-Type': 'application/json',
       },
     });
+  }
+
+  /**
+   * Logs the exact query and QBO response when a query returns 400 Bad Request.
+   * Does not log tokens; the query string and error body are safe to capture.
+   */
+  private logQboQueryError(error: unknown, query: string): void {
+    if (!axios.isAxiosError(error)) {
+      return;
+    }
+    const axiosErr = error as AxiosError<unknown>;
+    const status = axiosErr.response?.status;
+    if (status === 400) {
+      const qboMessage = this.extractQboErrorMessage(axiosErr);
+      this.logger.error(`QBO query failed with 400: ${query} — ${qboMessage}`);
+    }
+  }
+
+  private extractQboErrorMessage(error: AxiosError<unknown>): string {
+    const data = error.response?.data as
+      | { Fault?: { Error?: Array<{ Message?: string }> } }
+      | undefined;
+    const messages = data?.Fault?.Error?.map((e) => e.Message).filter(Boolean);
+    return messages?.join('; ') ?? JSON.stringify(error.response?.data);
   }
 
   /**

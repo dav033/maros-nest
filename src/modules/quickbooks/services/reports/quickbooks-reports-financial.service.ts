@@ -1,9 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { QuickbooksApiService } from '../core/quickbooks-api.service';
+import { QBO_MAX_CONCURRENCY, runWithConcurrency } from '../core/quickbooks-concurrency.utils';
 import { QuickbooksReportsContextService } from './quickbooks-reports.context.service';
 import {
   ParsedReport,
   ReportCoverage,
+  DateChunk,
   ReportParams,
   ReportRow,
 } from './quickbooks-reports.types';
@@ -15,6 +17,8 @@ import {
 
 @Injectable()
 export class QuickbooksReportsFinancialService {
+  private readonly logger = new Logger(QuickbooksReportsFinancialService.name);
+
   constructor(
     private readonly apiService: QuickbooksApiService,
     private readonly contextService: QuickbooksReportsContextService,
@@ -153,14 +157,22 @@ export class QuickbooksReportsFinancialService {
     const allRows: ReportRow[] = [];
     const rawChunks: unknown[] = [];
 
-    for (const chunk of coverage.dateChunks) {
-      const raw = await this.apiService.report(rid, qboReportName, {
-        start_date: chunk.start,
-        end_date: chunk.end,
-        ...cleaned,
-      });
-      allRows.push(...parseQboReportRows(qboReportName, raw));
-      if (include) rawChunks.push(raw);
+    const chunkResults = await runWithConcurrency(
+      coverage.dateChunks.map(
+        (chunk) => () => this.fetchReportChunk(rid, qboReportName, chunk, cleaned),
+      ),
+      QBO_MAX_CONCURRENCY,
+    );
+
+    for (const result of chunkResults) {
+      if (result.error) {
+        this.logger.warn(
+          `QBO report ${qboReportName} chunk ${result.chunk.start}..${result.chunk.end} failed: ${result.error.message}`,
+        );
+        continue;
+      }
+      allRows.push(...parseQboReportRows(qboReportName, result.raw));
+      if (include) rawChunks.push(result.raw);
     }
 
     return {
@@ -172,6 +184,28 @@ export class QuickbooksReportsFinancialService {
         ? { raw: rawChunks.length === 1 ? rawChunks[0] : rawChunks }
         : {}),
     };
+  }
+
+  private async fetchReportChunk(
+    rid: string,
+    qboReportName: string,
+    chunk: DateChunk,
+    qboParams: Record<string, string | number>,
+  ): Promise<{ chunk: DateChunk; raw: unknown; error?: Error }> {
+    try {
+      const raw = await this.apiService.report(rid, qboReportName, {
+        start_date: chunk.start,
+        end_date: chunk.end,
+        ...qboParams,
+      });
+      return { chunk, raw };
+    } catch (error) {
+      return {
+        chunk,
+        raw: {},
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+    }
   }
 
   private cleanQboParams(

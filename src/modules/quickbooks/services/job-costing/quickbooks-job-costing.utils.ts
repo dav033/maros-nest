@@ -65,7 +65,6 @@ export class QuickbooksJobCostingUtils {
       this.stringValue(customer.Id),
       this.stringValue(customer.DisplayName),
       this.stringValue(customer.FullyQualifiedName),
-      this.stringValue(customer['Name']),
       this.stringValue(customer['ProjectNumber']),
     ];
     return values.some((value) =>

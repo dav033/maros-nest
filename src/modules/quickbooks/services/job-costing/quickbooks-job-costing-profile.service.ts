@@ -52,18 +52,10 @@ export class QuickbooksJobCostingProjectProfileService {
     input: BuildProjectJobCostSummaryInput,
   ): Promise<QboProjectJobCostSummaryResult> {
     const { realmId, project, params, jobCost, context } = input;
-    const cashInResult = await this.fetchProjectCashIn(
-      realmId,
-      project,
-      params,
-      context,
-    );
-    const reportResult = await this.fetchProjectReports(
-      realmId,
-      project,
-      params,
-      context,
-    );
+    const [cashInResult, reportResult] = await Promise.all([
+      this.fetchProjectCashIn(realmId, project, params, context),
+      this.fetchProjectReports(realmId, project, params, context),
+    ]);
     const attachmentResult = await this.buildProjectAttachmentSummary(
       realmId,
       project,
