@@ -48,6 +48,20 @@ export class AnalyticsController {
     private readonly quickbooksApiService: QuickbooksApiService,
   ) {}
 
+  /**
+   * GET /analytics/overview
+   *
+   * Returns aggregated dashboard KPIs including leads, projects, revenue,
+   * pipeline, and profit.
+   *
+   * Query params (all optional):
+   * - `from` / `to` — date range in YYYY-MM-DD (defaults to last 12 months).
+   * - `leadType` — scope filter: CONSTRUCTION | PLUMBING | ROOFING.
+   *   When omitted, company-wide (General) data is returned.
+   *
+   * **profit** (new): Net Income from company-wide P&L for General scope;
+   * aggregated from project-level P&Ls for scoped views.
+   */
   @Get('overview')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getOverview(@Query() query: DateRangeQueryDto) {
@@ -58,18 +72,43 @@ export class AnalyticsController {
     });
   }
 
+  /**
+   * GET /analytics/pipeline
+   *
+   * Returns lead pipeline buckets grouped by status.
+   *
+   * Query params (optional):
+   * - `leadType` — scope filter: CONSTRUCTION | PLUMBING | ROOFING.
+   */
   @Get('pipeline')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getPipeline(@Query() query: LeadTypeQueryDto) {
     return this.pipelineService.getPipeline(query.leadType);
   }
 
+  /**
+   * GET /analytics/projects-status
+   *
+   * Returns project counts grouped by status.
+   *
+   * Query params (optional):
+   * - `leadType` — scope filter: CONSTRUCTION | PLUMBING | ROOFING.
+   */
   @Get('projects-status')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getProjectsStatus(@Query() query: LeadTypeQueryDto) {
     return this.pipelineService.getProjectsStatus(query.leadType);
   }
 
+  /**
+   * GET /analytics/financial-snapshot
+   *
+   * Returns aggregated estimated, invoiced, paid, and outstanding amounts
+   * across active projects.
+   *
+   * Query params (optional):
+   * - `leadType` — scope filter: CONSTRUCTION | PLUMBING | ROOFING.
+   */
   @Get('financial-snapshot')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getFinancialSnapshot(@Query() query: LeadTypeQueryDto) {
@@ -121,22 +160,50 @@ export class AnalyticsController {
     return this.financialService.getBacklog(query.limit ?? 100, query.leadType);
   }
 
+  /**
+   * GET /analytics/expenses-summary
+   *
+   * Returns total expenses and COGS for the period.
+   *
+   * Query params (all optional):
+   * - `from` / `to` — date range in YYYY-MM-DD (defaults to last 12 months).
+   * - `leadType` — scope filter: CONSTRUCTION | PLUMBING | ROOFING.
+   *   When omitted, company-wide data from the Cash P&L is returned.
+   *   When set, aggregates project-level P&Ls for all active projects in that scope.
+   */
   @Get('expenses-summary')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getExpensesSummary(@Query() query: DateRangeQueryDto) {
-    return this.financialService.getExpensesSummary({
-      from: query.from,
-      to: query.to,
-    });
+    return this.financialService.getExpensesSummary(
+      {
+        from: query.from,
+        to: query.to,
+      },
+      query.leadType,
+    );
   }
 
+  /**
+   * GET /analytics/costs-breakdown
+   *
+   * Returns a detailed breakdown of all costs (Expenses + COGS) by category.
+   *
+   * Query params (all optional):
+   * - `from` / `to` — date range in YYYY-MM-DD (defaults to last 12 months).
+   * - `leadType` — scope filter: CONSTRUCTION | PLUMBING | ROOFING.
+   *   When omitted, company-wide data from the Cash P&L is returned.
+   *   When set, aggregates project-level P&Ls for all active projects in that scope.
+   */
   @Get('costs-breakdown')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getCostsBreakdown(@Query() query: DateRangeQueryDto) {
-    return this.financialService.getCostsBreakdown({
-      from: query.from,
-      to: query.to,
-    });
+    return this.financialService.getCostsBreakdown(
+      {
+        from: query.from,
+        to: query.to,
+      },
+      query.leadType,
+    );
   }
 
   @Get('quickbooks-revenue-report')
@@ -163,9 +230,20 @@ export class AnalyticsController {
     return this.projectsService.getProjectHealth(query.leadType);
   }
 
+  /**
+   * POST /analytics/refresh
+   *
+   * Clears all analytics caches:
+   * - QuickBooks API read cache.
+   * - In-memory aggregation cache (per-project P&L).
+   * - HTTP-level cache-manager cache.
+   *
+   * @returns { ok: true } on success.
+   */
   @Post('refresh')
   async refresh() {
     this.quickbooksApiService.clearReadCache();
+    this.financialService.clearAggregationCache();
     await this.cacheManager.clear();
     return { ok: true };
   }

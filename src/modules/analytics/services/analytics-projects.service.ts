@@ -5,6 +5,7 @@ import { ProjectsService } from '../../projects/project-management/services/proj
 import { QuickbooksJobCostingService } from '../../quickbooks/services/job-costing/quickbooks-job-costing.service';
 import { ProjectHealthDto } from '../dto/project-health.dto';
 import { isActiveProjectStatus } from '../utils/active-project-status.util';
+import { mapWithConcurrencyLimit } from '../utils/concurrency.util';
 
 @Injectable()
 export class AnalyticsProjectsService {
@@ -26,7 +27,7 @@ export class AnalyticsProjectsService {
       .filter((project) => Boolean(project.leadNumber))
       .slice(0, this.maxProjectsToAnalyze);
 
-    const health = await this.mapWithConcurrencyLimit(
+    const health = await mapWithConcurrencyLimit(
       activeProjects,
       this.maxConcurrentQboRequests,
       (project) => this.buildProjectHealth(project),
@@ -81,28 +82,6 @@ export class AnalyticsProjectsService {
       this.logger.warn(`Skipping project ${projectNumber} due to QBO error: ${message}`);
       return null;
     }
-  }
-
-  private async mapWithConcurrencyLimit<T, R>(
-    items: T[],
-    limit: number,
-    mapper: (item: T) => Promise<R>,
-  ): Promise<R[]> {
-    if (items.length === 0) return [];
-    const safeLimit = Math.max(1, Math.min(limit, items.length));
-    const results: R[] = [];
-    let index = 0;
-
-    const worker = async () => {
-      while (index < items.length) {
-        const current = index;
-        index += 1;
-        results[current] = await mapper(items[current]);
-      }
-    };
-
-    await Promise.all(Array.from({ length: safeLimit }, () => worker()));
-    return results;
   }
 
   private resolveRiskLevel(

@@ -14,6 +14,8 @@ export class QuickbooksFinancialsProfitLossService {
   async getProjectProfitAndLoss(
     projectNumber: string,
     realmId?: string,
+    range?: { startDate: string; endDate: string },
+    accountingMethod?: 'Cash' | 'Accrual',
   ): Promise<ProjectProfitAndLoss> {
     const effectiveRealmId = realmId ?? (await this.contextService.resolveDefaultRealmId());
     const { jobId } = await this.contextService.resolveSingleJob(projectNumber, effectiveRealmId);
@@ -33,6 +35,8 @@ export class QuickbooksFinancialsProfitLossService {
 
     const report = (await this.apiService.report(effectiveRealmId, 'ProfitAndLoss', {
       customer: jobId,
+      ...(range && { start_date: range.startDate, end_date: range.endDate }),
+      ...(accountingMethod && { accounting_method: accountingMethod }),
     })) as Record<string, unknown>;
 
     return parseProfitAndLoss(projectNumber, jobId, report);

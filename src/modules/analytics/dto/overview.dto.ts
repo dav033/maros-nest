@@ -8,4 +8,5 @@ export class KpiOverviewDto {
   outstandingTotal: number;
   backlogTotal: number;
   revenuePipelineTotal: number;
+  profit: number;
 }

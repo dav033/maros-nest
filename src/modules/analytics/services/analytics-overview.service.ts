@@ -26,6 +26,22 @@ export class AnalyticsOverviewService {
     private readonly financialService: AnalyticsFinancialService,
   ) {}
 
+  /**
+   * Returns aggregated KPI data for the dashboard overview.
+   *
+   * KPIs returned:
+   * - `leadsCount`, `wonLeadsCount`, `lostLeadsCount`, `winRate` — from the leads pipeline.
+   * - `projectsCount` — active projects.
+   * - `revenueTotal` — accrued revenue (income) for the period.
+   * - `revenuePipelineTotal` — cash-basis revenue (payments received).
+   * - `outstandingTotal` — total outstanding AR filtered by lead type.
+   * - `backlogTotal` — total backlog filtered by lead type.
+   * - `profit` — **new**: Net Income from company-wide P&L (General scope) or
+   *   aggregated from project-level P&Ls (Construction, Plumbing, Roofing).
+   *
+   * @param params - Optional date range and lead type scope filter.
+   * @returns A promise resolving to the complete KPI overview DTO.
+   */
   async getOverview(params?: OverviewParams): Promise<KpiOverviewDto> {
     const leadType = params?.leadType;
     const [leadStatusCounts, projectsCount] = await Promise.all([
@@ -44,11 +60,12 @@ export class AnalyticsOverviewService {
     );
 
     const { from, to } = this.resolveDateRange(params);
-    const [revenueTotal, revenuePipelineTotal, outstanding, backlog] = await Promise.all([
+    const [revenueTotal, revenuePipelineTotal, outstanding, backlog, profit] = await Promise.all([
       this.financialService.getRevenueAccrual({ from, to }, leadType),
       this.financialService.getRevenueCash({ from, to }, leadType),
       this.quickbooksReportsService.getOutstandingBalances(),
       this.quickbooksReportsService.getBacklog(),
+      this.financialService.getProfit({ from, to }, leadType),
     ]);
 
     const winRateBase = totals.won + totals.lost;
@@ -71,6 +88,7 @@ export class AnalyticsOverviewService {
       outstandingTotal,
       backlogTotal,
       revenuePipelineTotal,
+      profit,
     };
   }
 

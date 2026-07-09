@@ -226,7 +226,7 @@ export function parseProfitAndLoss(
     if (group === 'Income') result.income = { total: totalVal, categories };
     else if (group === 'COGS') result.costOfGoodsSold = { total: totalVal, categories };
     else if (group === 'Expenses') result.expenses = { total: totalVal, categories };
-    else if (group === 'NetIncome') result.netProfit = totalVal;
+    else if (group.toLowerCase().replace(/\s/g, '') === 'netincome') result.netProfit = totalVal;
   }
 
   result.grossProfit = result.income.total - result.costOfGoodsSold.total;

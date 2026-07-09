@@ -111,8 +111,15 @@ export class QuickbooksFinancialsService {
   async getProjectProfitAndLoss(
     projectNumber: string,
     realmId?: string,
+    range?: { startDate: string; endDate: string },
+    accountingMethod?: 'Cash' | 'Accrual',
   ): Promise<ProjectProfitAndLoss> {
-    return this.profitLossService.getProjectProfitAndLoss(projectNumber, realmId);
+    return this.profitLossService.getProjectProfitAndLoss(
+      projectNumber,
+      realmId,
+      range,
+      accountingMethod,
+    );
   }
 
   async getProjectFullProfile(
