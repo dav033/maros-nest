@@ -13,6 +13,7 @@ import { QuickbooksFinancialsAttachmentsService } from './services/financials/qu
 import { QuickbooksFinancialsProjectsService } from './services/financials/quickbooks-financials-projects.service';
 import { QuickbooksFinancialsProfitLossService } from './services/financials/quickbooks-financials-profit-loss.service';
 import { QuickbooksFinancialsProfileService } from './services/financials/quickbooks-financials-profile.service';
+import { QuickbooksEstimateWriteService } from './services/financials/quickbooks-estimate-write.service';
 import { QuickbooksReportsService } from './services/reports/quickbooks-reports.service';
 import { QuickbooksReportsContextService } from './services/reports/quickbooks-reports.context.service';
 import { QuickbooksReportsOperationalService } from './services/reports/quickbooks-reports-operational.service';
@@ -47,6 +48,7 @@ import { QuickbooksController } from './quickbooks.controller';
     QuickbooksFinancialsProjectsService,
     QuickbooksFinancialsProfitLossService,
     QuickbooksFinancialsProfileService,
+    QuickbooksEstimateWriteService,
     QuickbooksReportsService,
     QuickbooksReportsContextService,
     QuickbooksReportsOperationalService,

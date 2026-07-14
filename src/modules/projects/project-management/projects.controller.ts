@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Body,
   Param,
@@ -17,6 +18,7 @@ import { ProjectsService } from './services/projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { SendEstimateEmailDto } from './dto/send-estimate-email.dto';
+import { UpdateEstimateDto } from './dto/update-estimate.dto';
 
 @ApiTags('projects')
 @Controller('projects')
@@ -66,6 +68,20 @@ export class ProjectsController {
     @Body() dto: SendEstimateEmailDto,
   ) {
     return this.projectsService.sendEstimateEmail(id, dto);
+  }
+
+  @Patch(':id/estimate')
+  @ApiOperation({
+    summary:
+      'Update the project estimate total and sync it to QuickBooks (edits the most recent estimate or creates one)',
+  })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({ status: 200, description: 'Estimate updated and synced to QuickBooks' })
+  async updateEstimate(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateEstimateDto,
+  ) {
+    return this.projectsService.updateProjectEstimate(id, dto.amount);
   }
 
   @Get(':id')

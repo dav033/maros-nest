@@ -78,30 +78,25 @@ export class ContactsService extends BaseService<any, number, Contact> {
       ? manager.getRepository(Company)
       : this.companyRepo;
 
-    // Nota: el nombre NO es único — dos personas distintas pueden llamarse igual.
-    // Solo email y teléfono se validan como únicos.
-
-    // Validar email (case-insensitive) en el mismo contexto de persistencia
-    if (dto.email && dto.email.trim() !== '') {
-      const emailCount = await contactRepo
+    // Regla de duplicados: un contacto SÍ puede compartir teléfono y/o email
+    // con su empresa u otro contacto (p. ej. el dueño de una pequeña empresa).
+    // Solo se bloquea el duplicado real: misma persona = mismo nombre + email +
+    // teléfono a la vez. Si falta alguno de los tres, se permite guardar.
+    if (
+      dto.name?.trim() &&
+      dto.email?.trim() &&
+      dto.phone?.trim()
+    ) {
+      const identical = await contactRepo
         .createQueryBuilder('contact')
-        .where('LOWER(contact.email) = LOWER(:email)', { email: dto.email })
-        .getCount();
-      if (emailCount > 0) {
+        .where('LOWER(contact.name) = LOWER(:name)', { name: dto.name })
+        .andWhere('LOWER(contact.email) = LOWER(:email)', { email: dto.email })
+        .andWhere('contact.phone = :phone', { phone: dto.phone })
+        .getOne();
+      if (identical) {
         throw ValidationException.format(
-          'Ya existe un contacto con ese email: %s',
-          dto.email,
-        );
-      }
-    }
-
-    // Validar teléfono
-    if (dto.phone && dto.phone.trim() !== '') {
-      const phoneCount = await contactRepo.count({ where: { phone: dto.phone } });
-      if (phoneCount > 0) {
-        throw ValidationException.format(
-          'Ya existe un contacto con ese teléfono: %s',
-          dto.phone,
+          'Ya existe un contacto idéntico (mismo nombre, email y teléfono): %s',
+          dto.name,
         );
       }
     }
@@ -129,28 +124,37 @@ export class ContactsService extends BaseService<any, number, Contact> {
   async update(id: number, dto: UpdateContactDto): Promise<any> {
     const startTime = Date.now();
 
-    // Nota: el nombre NO es único — dos personas distintas pueden llamarse igual.
-    // Solo email y teléfono se validan como únicos.
-
-    // Validar email
-    if (dto.email && dto.email.trim() !== '' && await this.contactsRepository.existsByEmailIgnoreCaseAndIdNot(dto.email, id)) {
-      throw ValidationException.format('Ya existe un contacto con ese email: %s', dto.email);
-    }
-
-    // Validar teléfono
-    if (dto.phone && dto.phone.trim() !== '' && await this.contactsRepository.existsByPhoneAndIdNot(dto.phone, id)) {
-      throw ValidationException.format('Ya existe un contacto con ese teléfono: %s', dto.phone);
-    }
-
     // Optimización: Solo cargar relaciones si se está actualizando companyId
     const needsCompanyRelation = dto.companyId !== undefined;
-    const entity = await this.contactRepo.findOne({ 
-      where: { id }, 
+    const entity = await this.contactRepo.findOne({
+      where: { id },
       relations: needsCompanyRelation ? ['company'] : []
     });
-    
+
     if (!entity) {
       throw new ResourceNotFoundException(`Contact not found with id: ${id}`);
+    }
+
+    // Regla de duplicados (igual que en create): se permite compartir teléfono
+    // y/o email con la empresa u otro contacto. Solo se bloquea el duplicado
+    // real: misma persona = mismo nombre + email + teléfono a la vez. Como el
+    // DTO puede ser parcial, se combinan los campos entrantes con los actuales.
+    const effectiveName = (dto.name ?? entity.name ?? '').trim();
+    const effectiveEmail = (dto.email ?? entity.email ?? '').trim();
+    const effectivePhone = (dto.phone ?? entity.phone ?? '').trim();
+    if (effectiveName && effectiveEmail && effectivePhone) {
+      const identical = await this.contactsRepository.findIdenticalContactExcludingId(
+        effectiveName,
+        effectiveEmail,
+        effectivePhone,
+        id,
+      );
+      if (identical) {
+        throw ValidationException.format(
+          'Ya existe un contacto idéntico (mismo nombre, email y teléfono): %s',
+          effectiveName,
+        );
+      }
     }
 
     this.contactMapper.updateEntity(dto, entity);
@@ -218,41 +222,33 @@ export class ContactsService extends BaseService<any, number, Contact> {
     phone?: string,
     excludeId?: number,
   ): Promise<ContactValidationResponse> {
-    let nameOk = true;
-    let emailOk = true;
-    let phoneOk = true;
-    let nameReason = 'OK';
-    let emailReason = 'OK';
-    let phoneReason = 'OK';
-
-    if (name && name.trim() !== '') {
-      nameOk = excludeId
-        ? !(await this.contactsRepository.existsByNameIgnoreCaseAndIdNot(name, excludeId))
-        : !(await this.contactsRepository.existsByNameIgnoreCase(name));
-      if (!nameOk) nameReason = 'Name already exists';
+    // La regla de duplicados ya no bloquea email/teléfono por separado: un
+    // contacto puede compartirlos con su empresa u otro contacto. Solo hay
+    // conflicto cuando coinciden nombre + email + teléfono (misma persona).
+    let duplicate = false;
+    if (name?.trim() && email?.trim() && phone?.trim()) {
+      const identical = excludeId
+        ? await this.contactsRepository.findIdenticalContactExcludingId(
+            name,
+            email,
+            phone,
+            excludeId,
+          )
+        : await this.contactsRepository.findIdenticalContact(name, email, phone);
+      duplicate = !!identical;
     }
 
-    if (email && email.trim() !== '') {
-      emailOk = excludeId
-        ? !(await this.contactsRepository.existsByEmailIgnoreCaseAndIdNot(email, excludeId))
-        : !(await this.contactsRepository.existsByEmailIgnoreCase(email));
-      if (!emailOk) emailReason = 'Email already exists';
-    }
-
-    if (phone && phone.trim() !== '') {
-      phoneOk = excludeId
-        ? !(await this.contactsRepository.existsByPhoneAndIdNot(phone, excludeId))
-        : !(await this.contactsRepository.existsByPhone(phone));
-      if (!phoneOk) phoneReason = 'Phone already exists';
-    }
+    const reason = duplicate
+      ? 'Duplicate contact (same name, email and phone)'
+      : 'OK';
 
     return {
-      nameAvailable: nameOk,
-      emailAvailable: emailOk,
-      phoneAvailable: phoneOk,
-      nameReason,
-      emailReason,
-      phoneReason,
+      nameAvailable: !duplicate,
+      emailAvailable: !duplicate,
+      phoneAvailable: !duplicate,
+      nameReason: reason,
+      emailReason: reason,
+      phoneReason: reason,
     };
   }
 

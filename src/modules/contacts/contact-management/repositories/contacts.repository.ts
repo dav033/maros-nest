@@ -58,6 +58,42 @@ export class ContactsRepository {
     return count > 0;
   }
 
+  /**
+   * Busca un contacto "idéntico": mismo nombre, email y teléfono (nombre/email
+   * case-insensitive). Se usa para bloquear SOLO duplicados reales de la misma
+   * persona, permitiendo que un contacto comparta teléfono/email con su empresa
+   * u otro contacto. Devuelve null si falta cualquiera de los tres datos.
+   */
+  async findIdenticalContact(
+    name: string,
+    email: string,
+    phone: string,
+  ): Promise<Contact | null> {
+    if (!name?.trim() || !email?.trim() || !phone?.trim()) return null;
+    return this.repo
+      .createQueryBuilder('contact')
+      .where('LOWER(contact.name) = LOWER(:name)', { name })
+      .andWhere('LOWER(contact.email) = LOWER(:email)', { email })
+      .andWhere('contact.phone = :phone', { phone })
+      .getOne();
+  }
+
+  async findIdenticalContactExcludingId(
+    name: string,
+    email: string,
+    phone: string,
+    id: number,
+  ): Promise<Contact | null> {
+    if (!name?.trim() || !email?.trim() || !phone?.trim()) return null;
+    return this.repo
+      .createQueryBuilder('contact')
+      .where('LOWER(contact.name) = LOWER(:name)', { name })
+      .andWhere('LOWER(contact.email) = LOWER(:email)', { email })
+      .andWhere('contact.phone = :phone', { phone })
+      .andWhere('contact.id != :id', { id })
+      .getOne();
+  }
+
   async findByCustomerTrue(): Promise<Contact[]> {
     return this.repo.find({ where: { customer: true } });
   }

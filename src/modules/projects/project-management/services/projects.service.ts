@@ -17,6 +17,7 @@ import { ProjectProgressStatus } from '../../../../common/enums/project-progress
 import { LeadType } from '../../../../common/enums/lead-type.enum';
 import { LeadStatus } from '../../../../common/enums/lead-status.enum';
 import { ProjectQboEnrichmentService } from '../../../quickbooks/services/crm-bridge/project-qbo-enrichment.service';
+import { QuickbooksFinancialsService } from '../../../quickbooks/services/financials/quickbooks-financials.service';
 import { S3Service } from '../../../s3/services/s3.service';
 import { MailService } from '../../../mail/services/mail.service';
 
@@ -32,6 +33,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
     private readonly leadRepo: Repository<Lead>,
     private readonly projectMapper: ProjectMapper,
     private readonly qboEnrichment: ProjectQboEnrichmentService,
+    private readonly qboFinancials: QuickbooksFinancialsService,
     private readonly s3Service: S3Service,
     private readonly mailService: MailService,
     private readonly dataSource: DataSource,
@@ -397,6 +399,46 @@ export class ProjectsService extends BaseService<any, number, Project> {
     this.logger.log(`Lead ${lead.id} status reset to FOLLOW_UP after revert`);
 
     return { leadId: lead.id };
+  }
+
+  /**
+   * Edita el valor del estimate del proyecto desde la plataforma y lo
+   * sincroniza con QuickBooks. `amount` es el total del proyecto que se ve en la
+   * UI (suma de todos los estimates); el ajuste se hace sobre el estimate más
+   * reciente para que la suma quede igual a `amount` (o crea uno si no existe).
+   * Devuelve el estimate normalizado y el resumen financiero recalculado.
+   */
+  async updateProjectEstimate(
+    id: number,
+    amount: number,
+  ): Promise<{ estimate: unknown; financial: unknown }> {
+    const project = await this.projectRepo.findOne({
+      where: { id },
+      relations: ['lead'],
+    });
+    if (!project) {
+      throw new ResourceNotFoundException(`Project not found with id: ${id}`);
+    }
+
+    const leadNumber = project.lead?.leadNumber;
+    if (!leadNumber) {
+      throw ValidationException.format(
+        'El proyecto %s no tiene un número de lead asociado, no se puede sincronizar el estimate con QuickBooks.',
+        id.toString(),
+      );
+    }
+
+    const estimate = await this.qboFinancials.setProjectEstimateTotal(
+      leadNumber,
+      amount,
+    );
+
+    // Recalcula el resumen financiero para que la UI refleje el nuevo total.
+    const [financial] = await this.qboFinancials.getProjectFinancials([
+      leadNumber,
+    ]);
+
+    return { estimate, financial: financial ?? null };
   }
 
   async findEstimateFile(

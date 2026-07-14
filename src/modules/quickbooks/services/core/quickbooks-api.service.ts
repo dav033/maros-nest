@@ -86,6 +86,30 @@ export class QuickbooksApiService {
     );
   }
 
+  /**
+   * Creates or updates a QBO entity (write operation).
+   *
+   * QBO uses the same POST `/{entity}` endpoint for both: it treats the call as
+   * an update when the body carries `Id` + `SyncToken`, otherwise as a create.
+   * Pass `sparse: true` in the body for partial updates.
+   *
+   * After a successful write the in-memory read cache is cleared so subsequent
+   * reads reflect the mutation instead of serving stale cached data.
+   */
+  async mutateEntity(
+    realmId: string,
+    entityType: string,
+    body: Record<string, unknown>,
+  ): Promise<unknown> {
+    const result = await this.withRetry(realmId, (client) =>
+      client
+        .post<unknown>(`/${entityType.toLowerCase()}`, body)
+        .then((r) => r.data),
+    );
+    this.clearReadCache();
+    return result;
+  }
+
   /** Retrieves CompanyInfo — used for health checks. */
   async getCompanyInfo(realmId: string): Promise<unknown> {
     return this.withRetry(realmId, (client) =>

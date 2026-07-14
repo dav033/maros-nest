@@ -17,6 +17,7 @@ import { QuickbooksFinancialsContextService } from './quickbooks-financials-cont
 import { QuickbooksFinancialsProfileService } from './quickbooks-financials-profile.service';
 import { QuickbooksFinancialsProfitLossService } from './quickbooks-financials-profit-loss.service';
 import { QuickbooksFinancialsProjectsService } from './quickbooks-financials-projects.service';
+import { QuickbooksEstimateWriteService } from './quickbooks-estimate-write.service';
 
 export type {
   AttachmentItem,
@@ -36,6 +37,7 @@ export class QuickbooksFinancialsService {
     private readonly projectsService: QuickbooksFinancialsProjectsService,
     private readonly profitLossService: QuickbooksFinancialsProfitLossService,
     private readonly profileService: QuickbooksFinancialsProfileService,
+    private readonly estimateWriteService: QuickbooksEstimateWriteService,
   ) {}
 
   async getProjectFinancials(
@@ -78,6 +80,22 @@ export class QuickbooksFinancialsService {
     realmId?: string,
   ): Promise<QboNormalizedTransaction> {
     return this.projectsService.getEstimateById(estimateId, realmId);
+  }
+
+  /**
+   * Fija el total del Estimate del proyecto (edita el más reciente o crea uno)
+   * y lo sincroniza con QuickBooks. Devuelve el Estimate ya normalizado.
+   */
+  async setProjectEstimateTotal(
+    projectNumber: string,
+    total: number,
+    realmId?: string,
+  ): Promise<QboNormalizedTransaction> {
+    return this.estimateWriteService.setProjectEstimateTotal(
+      projectNumber,
+      total,
+      realmId,
+    );
   }
 
   async getPaymentsByProject(
