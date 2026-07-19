@@ -42,61 +42,64 @@ export class ProjectsService extends BaseService<any, number, Project> {
   }
 
   async create(dto: CreateProjectDto): Promise<any> {
-    // Validate that lead exists and load contact relation
-    const lead = await this.leadRepo.findOne({
-      where: { id: dto.leadId },
-      relations: ['contact'],
-    });
-    if (!lead) {
-      throw ValidationException.format(
-        'Lead not found with id: %s',
-        dto.leadId.toString(),
-      );
-    }
+    const result = await this.dataSource.transaction(async (manager) => {
+      const leadRepo = manager.getRepository(Lead);
+      const projectRepo = manager.getRepository(Project);
 
-    // Check if lead already has a project (1:1 relationship)
-    const existingProject = await this.projectRepo.findOne({
-      where: { lead: { id: dto.leadId } },
-      relations: ['lead'],
-    });
-    if (existingProject) {
-      throw ValidationException.format(
-        'Lead with id %s already has a project',
-        dto.leadId.toString(),
-      );
-    }
+      const lockedLead = await leadRepo.findOne({
+        where: { id: dto.leadId },
+        select: ['id'],
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!lockedLead) {
+        throw ValidationException.format(
+          'Lead not found with id: %s',
+          dto.leadId.toString(),
+        );
+      }
 
-    const entity = this.projectMapper.toEntity(dto);
-    entity.lead = lead;
+      const lead = await leadRepo.findOne({
+        where: { id: dto.leadId },
+        relations: ['contact'],
+      });
+      if (!lead) {
+        throw ValidationException.format(
+          'Lead not found with id: %s',
+          dto.leadId.toString(),
+        );
+      }
 
-    // Igual que la conversión automática por WON: el proyecto hereda los
-    // attachments del lead (ahí vive el archivo del estimate) para que no se
-    // pierdan al convertir manualmente.
-    if (!entity.attachments?.length && lead.attachments?.length) {
-      entity.attachments = [...lead.attachments];
-    }
+      const existingProject = await projectRepo.findOne({
+        where: { lead: { id: dto.leadId } },
+      });
+      if (existingProject) {
+        throw ValidationException.format(
+          'Lead with id %s already has a project',
+          dto.leadId.toString(),
+        );
+      }
 
-    const wasNotWon = lead.status !== LeadStatus.WON;
+      const entity = this.projectMapper.toEntity(dto);
+      entity.lead = lead;
+      if (!entity.attachments?.length && lead.attachments?.length) {
+        entity.attachments = [...lead.attachments];
+      }
 
-    // Transacción: la creación del proyecto y el cambio de estado del lead a WON
-    // se persisten atómicamente. Si falla cualquiera de los dos, ninguno queda
-    // aplicado (evita un proyecto creado con el lead en estado inconsistente).
-    const saved = await this.dataSource.transaction(async (manager) => {
-      const savedProject = await manager.getRepository(Project).save(entity);
+      const wasNotWon = lead.status !== LeadStatus.WON;
+      const savedProject = await projectRepo.save(entity);
       if (wasNotWon) {
         lead.status = LeadStatus.WON;
-        await manager.getRepository(Lead).save(lead);
+        await leadRepo.save(lead);
         this.logger.log(
           `Lead #${lead.id} status set to WON after project #${savedProject.id} creation`,
         );
       }
-      return savedProject;
+      return { savedProject, lead };
     });
 
-    // El email se envía tras confirmar la transacción y ya es tolerante a fallos.
-    await this.sendWonNotificationEmail(lead, saved.id);
+    await this.sendWonNotificationEmail(result.lead, result.savedProject.id);
 
-    return this.projectMapper.toDto(saved);
+    return this.projectMapper.toDto(result.savedProject);
   }
 
   private async sendWonNotificationEmail(lead: Lead, projectId: number): Promise<void> {

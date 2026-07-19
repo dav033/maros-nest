@@ -8,13 +8,14 @@ import {
   Param,
   Query,
   ParseIntPipe,
+  ParseEnumPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { LeadsService } from './leads.service';
 import { CreateLeadByNewContactDto } from './dto/create-lead-by-new-contact.dto';
 import { CreateLeadByExistingContactDto } from './dto/create-lead-by-existing-contact.dto';
 import { GetLeadsByTypeDto } from './dto/get-leads-by-type.dto';
-import { CreateLeadDto } from './dto/create-lead.dto';
+import { UpdateLeadRequestDto } from './dto/update-lead.dto';
 import { LeadNumberValidationResponseDto } from './dto/lead-number-validation-response.dto';
 import { LeadType } from '../../../common/enums/lead-type.enum';
 
@@ -44,7 +45,9 @@ export class LeadsController {
   @ApiOperation({ summary: 'Get leads by type (GET with query param)' })
   @ApiQuery({ name: 'type', enum: LeadType })
   @ApiResponse({ status: 200, description: 'Returns leads filtered by type' })
-  async getLeadsByTypeGet(@Query('type') type: LeadType) {
+  async getLeadsByTypeGet(
+    @Query('type', new ParseEnumPipe(LeadType)) type: LeadType,
+  ) {
     return this.leadsService.getLeadsByType(type, { includeQbo: true });
   }
 
@@ -150,7 +153,7 @@ export class LeadsController {
   @ApiResponse({ status: 404, description: 'Lead not found' })
   async updateLead(
     @Param('leadId', ParseIntPipe) leadId: number,
-    @Body() request: { lead: CreateLeadDto },
+    @Body() request: UpdateLeadRequestDto,
   ) {
     return this.leadsService.updateLead(leadId, request.lead);
   }

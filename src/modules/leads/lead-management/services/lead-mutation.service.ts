@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { Lead } from '../../../../entities/lead.entity';
 import { Contact } from '../../../../entities/contact.entity';
 import { ProjectType } from '../../../../entities/project-type.entity';
 import { Project } from '../../../../entities/project.entity';
 import { LeadMapper } from '../mappers/lead.mapper';
-import { CreateLeadDto } from '../dto/create-lead.dto';
+import { UpdateLeadDto } from '../dto/update-lead.dto';
 import {
   ContactExceptions,
   LeadExceptions,
@@ -59,7 +59,7 @@ export class LeadMutationService {
     return this.leadMapper.toDto(updated);
   }
 
-  isNotesOnlyUpdate(patchDto: CreateLeadDto): boolean {
+  isNotesOnlyUpdate(patchDto: UpdateLeadDto): boolean {
     if (
       patchDto.leadNumber !== undefined ||
       patchDto.name !== undefined ||
@@ -77,7 +77,11 @@ export class LeadMutationService {
     return patchDto.notes !== undefined;
   }
 
-  async updateEntityFields(dto: CreateLeadDto, entity: Lead): Promise<void> {
+  async updateEntityFields(
+    dto: UpdateLeadDto,
+    entity: Lead,
+    manager?: EntityManager,
+  ): Promise<void> {
     if (
       dto.leadNumber !== undefined &&
       dto.leadNumber !== null &&
@@ -110,7 +114,10 @@ export class LeadMutationService {
       if (dto.contactId === null) {
         entity.contact = null;
       } else {
-        const contactEntity = await this.contactRepo.findOne({
+        const contactRepo = manager
+          ? manager.getRepository(Contact)
+          : this.contactRepo;
+        const contactEntity = await contactRepo.findOne({
           where: { id: dto.contactId },
         });
         if (!contactEntity) {
@@ -120,7 +127,10 @@ export class LeadMutationService {
       }
     }
     if (dto.projectTypeId !== undefined) {
-      const projectTypeEntity = await this.projectTypeRepo.findOne({
+      const projectTypeRepo = manager
+        ? manager.getRepository(ProjectType)
+        : this.projectTypeRepo;
+      const projectTypeEntity = await projectTypeRepo.findOne({
         where: { id: dto.projectTypeId },
       });
       if (!projectTypeEntity) {

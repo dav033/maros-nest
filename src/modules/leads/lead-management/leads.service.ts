@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, EntityManager } from 'typeorm';
+import { Repository, DataSource, EntityManager, Not } from 'typeorm';
 import { Lead } from '../../../entities/lead.entity';
 import { Contact } from '../../../entities/contact.entity';
 import { Company } from '../../../entities/company.entity';
@@ -10,6 +10,7 @@ import { LeadMapper } from './mappers/lead.mapper';
 import { ContactsService } from '../../contacts/contact-management/services/contacts.service';
 import { CreateContactDto } from '../../contacts/contact-management/dto/create-contact.dto';
 import { CreateLeadDto } from './dto/create-lead.dto';
+import { UpdateLeadDto } from './dto/update-lead.dto';
 import { LeadType } from '../../../common/enums/lead-type.enum';
 import { LeadStatus } from '../../../common/enums/lead-status.enum';
 import { LeadNumberValidationResponseDto } from './dto/lead-number-validation-response.dto';
@@ -307,7 +308,7 @@ export class LeadsService {
     }
   }
 
-  async updateLead(id: number, patchDto: CreateLeadDto): Promise<any> {
+  async updateLead(id: number, patchDto: UpdateLeadDto): Promise<any> {
     // Optimización: Si solo se están actualizando las notas, usar método optimizado
     const isNotesOnlyUpdate = this.leadMutationService.isNotesOnlyUpdate(
       patchDto,
@@ -319,88 +320,115 @@ export class LeadsService {
       );
     }
 
-    // Verificar existencia primero (sin cargar relaciones si no es necesario)
-    const exists = await this.leadRepo.findOne({
-      where: { id },
-      select: ['id', 'leadNumber'],
-    });
+    const result = await this.dataSource.transaction(async (manager) => {
+      const leadRepo = manager.getRepository(Lead);
+      const projectRepo = manager.getRepository(Project);
 
-    if (!exists) {
-      throw new LeadExceptions.LeadNotFoundException(id);
-    }
-
-    // Validar leadNumber si está cambiando
-    if (patchDto.leadNumber && patchDto.leadNumber !== exists.leadNumber) {
-      const leadNumberExists =
-        await this.leadsRepository.existsByLeadNumberAndIdNot(
-          patchDto.leadNumber,
-          id,
-        );
-      if (leadNumberExists) {
-        throw ValidationException.format(
-          'Lead number already exists: %s',
-          patchDto.leadNumber,
-        );
+      // Serializes every conversion path for this lead until the transaction commits.
+      const lockedLead = await leadRepo.findOne({
+        where: { id },
+        select: ['id'],
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!lockedLead) {
+        throw new LeadExceptions.LeadNotFoundException(id);
       }
-    }
 
-    // Cargar entity completo solo si necesitamos actualizar relaciones
-    const needsRelations =
-      patchDto.contactId !== undefined || patchDto.projectTypeId !== undefined || patchDto.status !== undefined;
-    const entity = await this.leadRepo.findOne({
-      where: { id },
-      relations: needsRelations ? ['contact', 'projectType'] : [],
-    });
-
-    if (!entity) {
-      throw new LeadExceptions.LeadNotFoundException(id);
-    }
-
-    const previousStatus = entity.status;
-
-    await this.leadMutationService.updateEntityFields(patchDto, entity);
-    await this.dataSource.manager.save(entity);
-
-    let conversion: { converted: boolean; projectId?: number } = {
-      converted: false,
-    };
-
-    const becameWon =
-      previousStatus !== LeadStatus.WON && entity.status === LeadStatus.WON;
-    this.logger.log(`updateLead #${id} — previousStatus: ${previousStatus}, newStatus: ${entity.status}, becameWon: ${becameWon}`);
-    if (becameWon) {
-      let project = await this.projectRepo.findOne({ where: { lead: { id } } });
-      if (!project) {
-        this.logger.log(`Creating new project for lead #${id}`);
-        project = this.projectRepo.create();
-        project.lead = entity;
-        project.attachments = entity.attachments ?? [];
-        project = await this.projectRepo.save(project);
-        this.logger.log(`Created project #${project.id} for lead #${id}`);
-      } else {
-        this.logger.log(`Existing project #${project.id} found for lead #${id}`);
+      const needsRelations =
+        patchDto.contactId !== undefined ||
+        patchDto.projectTypeId !== undefined ||
+        patchDto.status !== undefined;
+      const entity = await leadRepo.findOne({
+        where: { id },
+        relations: needsRelations ? ['contact', 'projectType'] : [],
+      });
+      if (!entity) {
+        throw new LeadExceptions.LeadNotFoundException(id);
       }
-      entity.project = project;
-      conversion = { converted: true, projectId: project.id };
 
-      const leadLabel = entity.leadNumber ?? entity.name ?? `Lead #${id}`;
-      const contactEmail = entity.contact?.email;
-      this.logger.log(`Sending WON notification email for lead "${leadLabel}" (id: ${id}, project: ${project.id}, contactEmail: ${contactEmail ?? 'none'})`);
-      try {
-        const textBody = `El lead "${entity.name ?? entity.leadNumber}" ha pasado a estado WON y se ha creado el proyecto #${project.id}.\n\nFecha: ${new Date().toLocaleString()}${contactEmail ? `\n\nContacto: ${entity.contact?.name ?? 'N/A'} <${contactEmail}>` : ''}`;
-        const mailResult = await this.mailService.sendMail({
-          to: ['agonzalez@marosconstruction.com'],
-          subject: `Lead Won: ${leadLabel} convertido a proyecto`,
-          text: textBody,
+      if (patchDto.leadNumber && patchDto.leadNumber !== entity.leadNumber) {
+        const leadNumberExists = await leadRepo.count({
+          where: { leadNumber: patchDto.leadNumber, id: Not(id) },
         });
-        this.logger.log(`WON notification email sent — messageId: ${mailResult.messageId ?? 'N/A'}`);
-      } catch (err) {
-        this.logger.warn(`WON notification email failed: ${err instanceof Error ? err.message : String(err)}`);
+        if (leadNumberExists > 0) {
+          throw ValidationException.format(
+            'Lead number already exists: %s',
+            patchDto.leadNumber,
+          );
+        }
       }
+
+      const previousStatus = entity.status;
+      await this.leadMutationService.updateEntityFields(
+        patchDto,
+        entity,
+        manager,
+      );
+      await leadRepo.save(entity);
+
+      let conversion: { converted: boolean; projectId?: number } = {
+        converted: false,
+      };
+      const becameWon =
+        previousStatus !== LeadStatus.WON && entity.status === LeadStatus.WON;
+
+      if (entity.status === LeadStatus.WON) {
+        let project = await projectRepo.findOne({
+          where: { lead: { id } },
+        });
+        let createdProject = false;
+
+        if (!project) {
+          project = projectRepo.create({
+            lead: entity,
+            attachments: entity.attachments ?? [],
+          });
+          project = await projectRepo.save(project);
+          createdProject = true;
+          this.logger.log(`Created project #${project.id} for lead #${id}`);
+        }
+
+        entity.project = project;
+        if (becameWon || createdProject) {
+          conversion = { converted: true, projectId: project.id };
+        }
+      }
+
+      return { entity, conversion };
+    });
+
+    if (result.conversion.converted && result.conversion.projectId) {
+      await this.sendWonNotificationEmail(
+        result.entity,
+        result.conversion.projectId,
+      );
     }
 
-    const dto = this.leadMapper.toDto(entity);
-    return { ...dto, conversion };
+    const dto = this.leadMapper.toDto(result.entity);
+    return { ...dto, conversion: result.conversion };
+  }
+
+  private async sendWonNotificationEmail(
+    lead: Lead,
+    projectId: number,
+  ): Promise<void> {
+    const leadLabel = lead.leadNumber ?? lead.name ?? `Lead #${lead.id}`;
+    const contactEmail = lead.contact?.email;
+    try {
+      const textBody = `El lead "${lead.name ?? lead.leadNumber}" ha pasado a estado WON y se ha creado el proyecto #${projectId}.\n\nFecha: ${new Date().toLocaleString()}${contactEmail ? `\n\nContacto: ${lead.contact?.name ?? 'N/A'} <${contactEmail}>` : ''}`;
+      const mailResult = await this.mailService.sendMail({
+        to: ['agonzalez@marosconstruction.com'],
+        subject: `Lead Won: ${leadLabel} convertido a proyecto`,
+        text: textBody,
+      });
+      this.logger.log(
+        `WON notification email sent - messageId: ${mailResult.messageId ?? 'N/A'}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `WON notification email failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   async getLeadRejectionInfo(id: number): Promise<{
