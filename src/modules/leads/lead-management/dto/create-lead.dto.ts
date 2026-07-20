@@ -61,6 +61,11 @@ export class CreateLeadDto {
   @IsOptional()
   attachments?: string[];
 
+  @ApiPropertyOptional({ description: 'Manual estimated value of the lead (independent of QuickBooks)' })
+  @IsNumber()
+  @IsOptional()
+  estimate?: number;
+
   @ApiPropertyOptional({ description: 'Whether the lead is in review', default: false })
   @IsBoolean()
   @IsOptional()

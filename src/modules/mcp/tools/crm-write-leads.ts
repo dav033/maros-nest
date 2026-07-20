@@ -23,6 +23,10 @@ const leadWritableShape = {
     .array(z.string())
     .optional()
     .describe('Attachment S3 keys for the lead'),
+  estimate: z
+    .number()
+    .optional()
+    .describe('Manual estimated value of the lead (independent of QuickBooks)'),
   inReview: z.boolean().optional().describe('Whether the lead is in review'),
 };
 

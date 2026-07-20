@@ -146,6 +146,9 @@ export class LeadMutationService {
     if (dto.attachments !== undefined) {
       entity.attachments = dto.attachments;
     }
+    if (dto.estimate !== undefined) {
+      entity.estimate = dto.estimate;
+    }
     if (dto.inReview !== undefined) {
       entity.inReview = dto.inReview;
     }

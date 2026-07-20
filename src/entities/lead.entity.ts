@@ -49,9 +49,10 @@ export class Lead {
   @Column({ type: 'jsonb', nullable: true, name: 'attachments', default: [] })
   attachments?: string[];
 
-  // El monto estimado ya no se persiste en el CRM: la única fuente de verdad
-  // son los Estimates de QuickBooks (vía ProjectQboEnrichmentService). La
-  // columna "estimate" sigue en la BD hasta que se elimine con una migración.
+  // Estimado manual editable desde el CRM. Independiente del Estimate real de
+  // QuickBooks (vía ProjectQboEnrichmentService, expuesto como financial.estimatedAmount).
+  @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true, name: 'estimate' })
+  estimate?: number;
 
   @Column({ name: 'in_review', type: 'boolean', default: false })
   inReview: boolean;
