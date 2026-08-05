@@ -11,6 +11,8 @@ import { QuickbooksVendorMatchingService } from '../../quickbooks/services/vendo
 import { QuickbooksNormalizerService } from '../../quickbooks/services/core/quickbooks-normalizer.service';
 import { S3Service } from '../../s3/services/s3.service';
 import { TrelloService } from '../../trello/services/trello.service';
+import { NotesService } from '../../notes/note-management/notes.service';
+import { NoteTagsService } from '../../notes/note-management/services/note-tags.service';
 
 export type QboMcpPayload = {
   summary: Record<string, unknown>;
@@ -45,6 +47,8 @@ export type McpToolDeps = {
   qboNormalizer: QuickbooksNormalizerService;
   s3Service: S3Service;
   trelloService: TrelloService;
+  notesService: NotesService;
+  noteTagsService: NoteTagsService;
 };
 
 export function jsonContent(data: unknown) {

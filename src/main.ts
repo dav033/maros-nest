@@ -95,6 +95,7 @@ async function bootstrap() {
     .addTag('leads', 'Lead management endpoints')
     .addTag('projects', 'Project management endpoints')
     .addTag('crm-summary', 'CRM summary and metrics endpoints')
+    .addTag('notes', 'Notes / documentation page endpoints')
     .addBearerAuth() // If authentication is needed
     .build();
 

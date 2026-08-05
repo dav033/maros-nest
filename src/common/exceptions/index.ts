@@ -7,3 +7,4 @@ export * from './external-service.exception';
 export * from './domain/contact.exceptions';
 export * from './domain/lead.exceptions';
 export * from './domain/project-type.exceptions';
+export * from './domain/note.exceptions';

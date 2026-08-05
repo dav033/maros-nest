@@ -13,6 +13,8 @@ import { QuickbooksVendorMatchingService } from '../quickbooks/services/vendor/q
 import { QuickbooksNormalizerService } from '../quickbooks/services/core/quickbooks-normalizer.service';
 import { S3Service } from '../s3/services/s3.service';
 import { TrelloService } from '../trello/services/trello.service';
+import { NotesService } from '../notes/note-management/notes.service';
+import { NoteTagsService } from '../notes/note-management/services/note-tags.service';
 import {
   registerLeadTools,
   registerCompanyTools,
@@ -39,6 +41,7 @@ import {
 import { registerQboProxyTools } from './tools/qbo-proxy';
 import { registerS3Tools } from './tools/s3';
 import { registerTrelloTools } from './tools/trello';
+import { registerNoteTools } from './tools/notes';
 import { McpToolDeps } from './tools/shared';
 
 @Injectable()
@@ -57,6 +60,8 @@ export class McpService {
     private readonly qboNormalizer: QuickbooksNormalizerService,
     private readonly s3Service: S3Service,
     private readonly trelloService: TrelloService,
+    private readonly notesService: NotesService,
+    private readonly noteTagsService: NoteTagsService,
   ) {}
 
   createServer(): McpServer {
@@ -79,6 +84,8 @@ export class McpService {
       qboNormalizer: this.qboNormalizer,
       s3Service: this.s3Service,
       trelloService: this.trelloService,
+      notesService: this.notesService,
+      noteTagsService: this.noteTagsService,
     };
 
     registerLeadTools(server, deps);
@@ -99,6 +106,7 @@ export class McpService {
     registerQboProxyTools(server, deps);
     registerS3Tools(server, deps);
     registerTrelloTools(server, deps);
+    registerNoteTools(server, deps);
 
     return server;
   }

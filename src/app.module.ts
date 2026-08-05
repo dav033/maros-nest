@@ -22,6 +22,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { McpModule } from './modules/mcp/mcp.module';
 import { QuickbooksModule } from './modules/quickbooks/quickbooks.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
+import { NotesModule } from './modules/notes/notes.module';
 
 @Module({
   imports: [
@@ -67,6 +68,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
     McpModule,
     QuickbooksModule,
     AnalyticsModule,
+    NotesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
