@@ -147,6 +147,10 @@ export class EnvironmentVariables {
   @IsOptional()
   MCP_TOKEN: string;
 
+  // Session auth — signs/verifies the maros_session JWT (must match maros-next's AUTH_SECRET)
+  @IsString()
+  AUTH_SECRET: string;
+
   // QuickBooks Online
   @IsString()
   @IsOptional()

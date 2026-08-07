@@ -1,15 +1,16 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { WinstonModule } from 'nest-winston';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { SessionAuthGuard } from './common/guards/session-auth.guard';
 import { getDatabaseConfig } from './config/database.config';
 import { getLoggerConfig } from './config/logger.config';
 import { validate } from './config/env.validation';
-import n8nConfig from './config/n8n.config';
 import s3Config from './config/s3.config';
 import trelloConfig from './config/trello.config';
 import { CompaniesModule } from './modules/companies/companies.module';
@@ -18,7 +19,6 @@ import { LeadsModule } from './modules/leads/leads.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { ReportsModule } from './modules/reports/reports.module';
-import { AuthModule } from './modules/auth/auth.module';
 import { McpModule } from './modules/mcp/mcp.module';
 import { QuickbooksModule } from './modules/quickbooks/quickbooks.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
@@ -31,7 +31,7 @@ import { NotesModule } from './modules/notes/notes.module';
       isGlobal: true,
       envFilePath: ['.env.local', '.env'],
       validate,
-      load: [n8nConfig, trelloConfig, s3Config],
+      load: [trelloConfig, s3Config],
     }),
 
     // Global scheduling (cron jobs) — after Config so providers can inject ConfigService
@@ -58,7 +58,6 @@ import { NotesModule } from './modules/notes/notes.module';
     }),
 
     // Feature modules
-    AuthModule,
     CompaniesModule,
     ContactsModule,
     LeadsModule,
@@ -71,6 +70,9 @@ import { NotesModule } from './modules/notes/notes.module';
     NotesModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    { provide: APP_GUARD, useClass: SessionAuthGuard },
+  ],
 })
 export class AppModule {}
