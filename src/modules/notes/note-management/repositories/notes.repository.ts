@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { IsNull, Repository, SelectQueryBuilder } from 'typeorm';
 import { NotePage } from '../../../../entities/note-page.entity';
 
 export interface NoteSearchRow {
@@ -19,32 +19,55 @@ export class NotesRepository {
     private readonly repo: Repository<NotePage>,
   ) {}
 
-  async findAllActive(): Promise<NotePage[]> {
-    return this.repo.find({
-      where: { deletedAt: IsNull() },
-      relations: ['parent', 'tags'],
-      order: { position: 'ASC', id: 'ASC' },
-    });
+  /**
+   * A page is visible to userId unless it's a private standalone note owned by
+   * someone else — see note-access.util.ts for the same rule applied to a
+   * single already-fetched row. userId undefined (MCP's shared-token context,
+   * no per-user identity) skips the filter entirely and sees everything.
+   */
+  private applyVisibility(
+    qb: SelectQueryBuilder<NotePage>,
+    userId?: number,
+  ): SelectQueryBuilder<NotePage> {
+    if (userId === undefined) return qb;
+    return qb.andWhere(
+      '(page.entity_kind IS NOT NULL OR page.owner_id IS NULL OR page.owner_id = :userId)',
+      { userId },
+    );
+  }
+
+  async findAllActive(userId?: number): Promise<NotePage[]> {
+    const qb = this.repo
+      .createQueryBuilder('page')
+      .leftJoinAndSelect('page.parent', 'parent')
+      .leftJoinAndSelect('page.tags', 'tags')
+      .where('page.deleted_at IS NULL')
+      .orderBy('page.position', 'ASC')
+      .addOrderBy('page.id', 'ASC');
+    return this.applyVisibility(qb, userId).getMany();
   }
 
   /** Only the top-level page of each trashed subtree — cascaded descendants stay hidden. */
-  async findTrashedRoots(): Promise<NotePage[]> {
-    return this.repo
+  async findTrashedRoots(userId?: number): Promise<NotePage[]> {
+    const qb = this.repo
       .createQueryBuilder('page')
       .leftJoinAndSelect('page.parent', 'parent')
       .leftJoinAndSelect('page.tags', 'tags')
       .where('page.deleted_at IS NOT NULL')
       .andWhere('page.trashed_root_id = page.id')
-      .orderBy('page.deleted_at', 'DESC')
-      .getMany();
+      .orderBy('page.deleted_at', 'DESC');
+    return this.applyVisibility(qb, userId).getMany();
   }
 
-  async findFavorites(): Promise<NotePage[]> {
-    return this.repo.find({
-      where: { deletedAt: IsNull(), isFavorite: true },
-      relations: ['parent', 'tags'],
-      order: { updatedAt: 'DESC' },
-    });
+  async findFavorites(userId?: number): Promise<NotePage[]> {
+    const qb = this.repo
+      .createQueryBuilder('page')
+      .leftJoinAndSelect('page.parent', 'parent')
+      .leftJoinAndSelect('page.tags', 'tags')
+      .where('page.deleted_at IS NULL')
+      .andWhere('page.is_favorite = true')
+      .orderBy('page.updated_at', 'DESC');
+    return this.applyVisibility(qb, userId).getMany();
   }
 
   async findByIdActive(id: number): Promise<NotePage | null> {
@@ -177,7 +200,9 @@ export class NotesRepository {
     );
   }
 
-  async search(query: string, limit: number): Promise<NoteSearchRow[]> {
+  // $3 IS NULL makes the whole OR true — that's how MCP's undefined userId
+  // (no per-user identity, shared-token auth) bypasses the filter entirely.
+  async search(query: string, limit: number, userId?: number): Promise<NoteSearchRow[]> {
     return this.repo.query(
       `
       SELECT id, title, icon, parent_id, updated_at,
@@ -185,10 +210,11 @@ export class NotesRepository {
       FROM note_pages
       WHERE deleted_at IS NULL
         AND content_tsv @@ plainto_tsquery('simple', $1)
+        AND (entity_kind IS NOT NULL OR owner_id IS NULL OR owner_id = $3 OR $3::int IS NULL)
       ORDER BY rank DESC, updated_at DESC
       LIMIT $2
       `,
-      [query, limit],
+      [query, limit, userId ?? null],
     );
   }
 }

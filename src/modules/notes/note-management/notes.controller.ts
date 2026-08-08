@@ -25,6 +25,8 @@ import { SearchNotesDto } from './dto/search-notes.dto';
 import { CreateTagDto } from './dto/create-tag.dto';
 import { UpdateTagDto } from './dto/update-tag.dto';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
+import { CurrentUser } from '../../../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
 
 @ApiTags('notes')
 @Controller('notes')
@@ -41,8 +43,8 @@ export class NotesController {
   @Get()
   @ApiOperation({ summary: 'Get all note pages (flat list, no content)' })
   @ApiResponse({ status: 200, description: 'Returns all active note pages' })
-  async getAllNotes() {
-    return this.notesService.getAllNotes();
+  async getAllNotes(@CurrentUser() user: AuthenticatedUser) {
+    return this.notesService.getAllNotes(user.id);
   }
 
   @Get('by-entity')
@@ -60,22 +62,25 @@ export class NotesController {
   @Get('trash')
   @ApiOperation({ summary: 'Get trashed note pages (top-level of each trashed subtree)' })
   @ApiResponse({ status: 200, description: 'Returns trashed note pages' })
-  async getTrash() {
-    return this.notesService.getTrash();
+  async getTrash(@CurrentUser() user: AuthenticatedUser) {
+    return this.notesService.getTrash(user.id);
   }
 
   @Get('favorites')
   @ApiOperation({ summary: 'Get favorite note pages' })
   @ApiResponse({ status: 200, description: 'Returns favorite note pages' })
-  async getFavorites() {
-    return this.notesService.getFavorites();
+  async getFavorites(@CurrentUser() user: AuthenticatedUser) {
+    return this.notesService.getFavorites(user.id);
   }
 
   @Get('search')
   @ApiOperation({ summary: 'Full-text search over note titles and content' })
   @ApiResponse({ status: 200, description: 'Returns matching note pages, ranked' })
-  async searchNotes(@Query() query: SearchNotesDto) {
-    return this.notesService.searchNotes(query.q, query.limit ?? 20);
+  async searchNotes(
+    @Query() query: SearchNotesDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.notesService.searchNotes(query.q, query.limit ?? 20, user.id);
   }
 
   @Get('tags')
@@ -122,8 +127,11 @@ export class NotesController {
   @RequirePermissions('notes:write')
   @ApiOperation({ summary: 'Create a note page' })
   @ApiResponse({ status: 201, description: 'Note page created successfully' })
-  async createNote(@Body() dto: CreateNoteDto) {
-    return this.notesService.createNote(dto);
+  async createNote(
+    @Body() dto: CreateNoteDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.notesService.createNote(dto, user.id);
   }
 
   // --- ':id' routes below this point. ---
@@ -133,8 +141,11 @@ export class NotesController {
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 200, description: 'Returns the note page' })
   @ApiResponse({ status: 404, description: 'Note page not found' })
-  async getNoteById(@Param('id', ParseIntPipe) id: number) {
-    return this.notesService.getNoteById(id);
+  async getNoteById(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.notesService.getNoteById(id, user.id);
   }
 
   @Put(':id')
@@ -146,8 +157,9 @@ export class NotesController {
   async updateNote(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateNoteDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.updateNote(id, dto);
+    return this.notesService.updateNote(id, dto, user.id);
   }
 
   @Patch(':id/content')
@@ -160,8 +172,9 @@ export class NotesController {
   async updateNoteContent(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateNoteContentDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.updateNoteContent(id, dto);
+    return this.notesService.updateNoteContent(id, dto, user.id);
   }
 
   @Patch(':id/move')
@@ -174,8 +187,9 @@ export class NotesController {
   async moveNote(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: MoveNoteDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.moveNote(id, dto);
+    return this.notesService.moveNote(id, dto, user.id);
   }
 
   @Patch(':id/favorite')
@@ -186,8 +200,9 @@ export class NotesController {
   async setFavorite(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: SetFavoriteDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.setFavorite(id, dto.isFavorite);
+    return this.notesService.setFavorite(id, dto.isFavorite, user.id);
   }
 
   @Patch(':id/tags')
@@ -198,8 +213,9 @@ export class NotesController {
   async setTags(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: SetTagsDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.setTags(id, dto.tagIds);
+    return this.notesService.setTags(id, dto.tagIds, user.id);
   }
 
   @Post(':id/restore')
@@ -208,8 +224,11 @@ export class NotesController {
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 200, description: 'Note page restored' })
   @ApiResponse({ status: 404, description: 'Note page not found' })
-  async restoreNote(@Param('id', ParseIntPipe) id: number) {
-    return this.notesService.restoreNote(id);
+  async restoreNote(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.notesService.restoreNote(id, user.id);
   }
 
   @Delete(':id')
@@ -219,8 +238,11 @@ export class NotesController {
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 204, description: 'Note page trashed successfully' })
   @ApiResponse({ status: 404, description: 'Note page not found' })
-  async trashNote(@Param('id', ParseIntPipe) id: number) {
-    await this.notesService.trashNote(id);
+  async trashNote(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.notesService.trashNote(id, user.id);
   }
 
   @Delete(':id/purge')
@@ -230,7 +252,10 @@ export class NotesController {
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 204, description: 'Note page permanently deleted' })
   @ApiResponse({ status: 404, description: 'Note page not found' })
-  async purgeNote(@Param('id', ParseIntPipe) id: number) {
-    await this.notesService.purgeNote(id);
+  async purgeNote(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.notesService.purgeNote(id, user.id);
   }
 }

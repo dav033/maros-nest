@@ -221,3 +221,87 @@ describe('NotesService.setTags', () => {
     expect(result.tags).toEqual([{ id: 1, name: 'Urgent', color: 'red' }]);
   });
 });
+
+describe('NotesService — private note ownership', () => {
+  let service: NotesService;
+  let notesRepository: Record<string, jest.Mock>;
+
+  beforeEach(() => {
+    notesRepository = {
+      findByIdActive: jest.fn(),
+      findById: jest.fn(),
+      getMaxPositionUnderParent: jest.fn().mockResolvedValue(0),
+      save: jest.fn().mockImplementation((page: NotePage) =>
+        Promise.resolve(Object.assign(page, { id: page.id ?? 1 })),
+      ),
+      trashSubtree: jest.fn().mockResolvedValue(undefined),
+    };
+    service = makeService(notesRepository);
+  });
+
+  it('stamps the creator as owner on a new standalone note', async () => {
+    await service.createNote({ title: 'Scratch' }, 5);
+
+    const saved = notesRepository.save.mock.calls[0][0] as NotePage;
+    expect(saved.ownerId).toBe(5);
+  });
+
+  it('lets the owner read their own private note', async () => {
+    notesRepository.findByIdActive.mockResolvedValue(
+      Object.assign(new NotePage(), { id: 1, entityKind: undefined, ownerId: 5 }),
+    );
+
+    await expect(service.getNoteById(1, 5)).resolves.toMatchObject({ id: 1 });
+  });
+
+  it('hides another user\'s private note as 404, not the note\'s real content', async () => {
+    notesRepository.findByIdActive.mockResolvedValue(
+      Object.assign(new NotePage(), { id: 1, entityKind: undefined, ownerId: 5 }),
+    );
+
+    await expect(service.getNoteById(1, 6)).rejects.toThrow(NoteNotFoundException);
+  });
+
+  it('blocks a non-owner from editing a private note', async () => {
+    notesRepository.findByIdActive.mockResolvedValue(
+      Object.assign(new NotePage(), { id: 1, entityKind: undefined, ownerId: 5 }),
+    );
+
+    await expect(
+      service.updateNote(1, { title: 'Hijacked' }, 6),
+    ).rejects.toThrow(NoteNotFoundException);
+  });
+
+  it('blocks a non-owner from trashing a private note', async () => {
+    notesRepository.findByIdActive.mockResolvedValue(
+      Object.assign(new NotePage(), { id: 1, entityKind: undefined, ownerId: 5 }),
+    );
+
+    await expect(service.trashNote(1, 6)).rejects.toThrow(NoteNotFoundException);
+    expect(notesRepository.trashSubtree).not.toHaveBeenCalled();
+  });
+
+  it('never restricts a note linked to a CRM entity, regardless of owner', async () => {
+    notesRepository.findByIdActive.mockResolvedValue(
+      Object.assign(new NotePage(), { id: 1, entityKind: 'lead', ownerId: 5 }),
+    );
+
+    await expect(service.getNoteById(1, 999)).resolves.toMatchObject({ id: 1 });
+  });
+
+  it('never restricts a legacy note with no owner_id', async () => {
+    notesRepository.findByIdActive.mockResolvedValue(
+      Object.assign(new NotePage(), { id: 1, entityKind: undefined, ownerId: null }),
+    );
+
+    await expect(service.getNoteById(1, 999)).resolves.toMatchObject({ id: 1 });
+  });
+
+  it('MCP (no userId) reads a private note that would otherwise be hidden', async () => {
+    notesRepository.findByIdActive.mockResolvedValue(
+      Object.assign(new NotePage(), { id: 1, entityKind: undefined, ownerId: 5 }),
+    );
+
+    await expect(service.getNoteById(1)).resolves.toMatchObject({ id: 1 });
+  });
+});

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { NotesRepository } from '../repositories/notes.repository';
 import { NoteCycleException, NoteNotFoundException } from '../../../../common/exceptions';
 import { computeInsertPosition } from './note-position.util';
+import { assertNoteVisible } from './note-access.util';
 
 const POSITION_STEP = 1000;
 
@@ -40,15 +41,18 @@ export class NoteTreeService {
   async move(
     pageId: number,
     parentId: number | null,
+    userId?: number,
     beforeId?: number | null,
     afterId?: number | null,
   ): Promise<MoveNoteResult> {
     const page = await this.notesRepository.findByIdActive(pageId);
     if (!page) throw new NoteNotFoundException(pageId);
+    assertNoteVisible(page, userId);
 
     if (parentId != null) {
       const parent = await this.notesRepository.findByIdActive(parentId);
       if (!parent) throw new NoteNotFoundException(parentId);
+      assertNoteVisible(parent, userId);
       await this.assertNoCycle(pageId, parentId);
       page.parent = parent;
     } else {

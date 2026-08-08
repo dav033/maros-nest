@@ -54,6 +54,13 @@ export class NotePage {
   @Column({ name: 'entity_id', type: 'int', nullable: true })
   entityId?: number;
 
+  /**
+   * Set on notes created after this column existed; NULL on everything older.
+   * Only meaningful for privacy when entityKind is also null — see note-access.util.ts.
+   */
+  @Column({ name: 'owner_id', type: 'int', nullable: true })
+  ownerId?: number | null;
+
   @Column({ name: 'deleted_at', type: 'timestamp', nullable: true })
   deletedAt?: Date | null;
 

@@ -2,9 +2,26 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { Server } from 'node:http';
 import request from 'supertest';
+import type { NextFunction, Response } from 'express';
 import { NotesController } from './notes.controller';
 import { NotesService } from './notes.service';
 import { NoteTagsService } from './services/note-tags.service';
+import type { RequestWithUser } from '../../../common/auth/authenticated-user';
+
+const TEST_USER_ID = 7;
+
+/** Stands in for SessionAuthGuard, which isn't part of this isolated module. */
+function stubCurrentUser(req: RequestWithUser, _res: Response, next: NextFunction) {
+  req.user = {
+    id: TEST_USER_ID,
+    email: 'test@marosconstruction.com',
+    name: 'Test User',
+    picture: null,
+    role: { id: 1, name: 'admin' },
+    permissions: [],
+  };
+  next();
+}
 
 describe('NotesController route ordering and validation', () => {
   let app: INestApplication;
@@ -35,6 +52,7 @@ describe('NotesController route ordering and validation', () => {
     }).compile();
 
     app = moduleRef.createNestApplication();
+    app.use(stubCurrentUser);
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -79,12 +97,12 @@ describe('NotesController route ordering and validation', () => {
 
   it('GET /notes/search calls through with a valid query', async () => {
     await request(server).get('/notes/search?q=permit').expect(200);
-    expect(notesService.searchNotes).toHaveBeenCalledWith('permit', 20);
+    expect(notesService.searchNotes).toHaveBeenCalledWith('permit', 20, TEST_USER_ID);
   });
 
   it('GET /notes/:id falls through to getNoteById for a numeric id', async () => {
     const res = await request(server).get('/notes/42').expect(200);
-    expect(notesService.getNoteById).toHaveBeenCalledWith(42);
+    expect(notesService.getNoteById).toHaveBeenCalledWith(42, TEST_USER_ID);
     expect(res.body).toEqual({ id: 42 });
   });
 
@@ -104,7 +122,7 @@ describe('NotesController route ordering and validation', () => {
 
     await request(server).patch('/notes/1/content').send({ content: doc }).expect(200);
 
-    expect(notesService.updateNoteContent).toHaveBeenCalledWith(1, { content: doc });
+    expect(notesService.updateNoteContent).toHaveBeenCalledWith(1, { content: doc }, TEST_USER_ID);
   });
 
   it('rejects unknown top-level properties on create', async () => {

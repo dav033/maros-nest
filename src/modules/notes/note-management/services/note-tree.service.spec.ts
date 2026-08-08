@@ -85,7 +85,7 @@ describe('NoteTreeService.move', () => {
         { id: 3, position: 2000 },
       ]);
 
-    const result = await service.move(1, null, undefined, 2);
+    const result = await service.move(1, null, undefined, undefined, 2);
 
     expect(notesRepository.rebalanceSiblings).toHaveBeenCalledWith([2, 3], 1000);
     expect(result.position).toBe(1500);
