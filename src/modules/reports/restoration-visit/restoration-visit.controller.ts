@@ -13,13 +13,16 @@ import { ReportsService } from './restoration-visit.service';
 import { RestorationVisitDto } from './dto/restoration-visit.dto';
 import { RestorationVisitUrlResponseDto } from './dto/restoration-visit-url-response.dto';
 import { RestorationVisitResponseDto } from './dto/restoration-visit-response.dto';
+import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
 
 @ApiTags('reports')
 @Controller('reports')
+@RequirePermissions('reports:read')
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   @Post('restoration-visit/generate-url')
+  @RequirePermissions('reports:read')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Generate restoration visit report URL with base64 encoded data' })
   @ApiResponse({ 

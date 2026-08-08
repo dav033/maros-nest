@@ -8,6 +8,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { SessionAuthGuard } from './common/guards/session-auth.guard';
+import { PermissionsGuard } from './common/guards/permissions.guard';
 import { getDatabaseConfig } from './config/database.config';
 import { getLoggerConfig } from './config/logger.config';
 import { validate } from './config/env.validation';
@@ -23,6 +24,7 @@ import { McpModule } from './modules/mcp/mcp.module';
 import { QuickbooksModule } from './modules/quickbooks/quickbooks.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { NotesModule } from './modules/notes/notes.module';
+import { UsersModule } from './modules/users/users.module';
 
 @Module({
   imports: [
@@ -68,11 +70,15 @@ import { NotesModule } from './modules/notes/notes.module';
     QuickbooksModule,
     AnalyticsModule,
     NotesModule,
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
+    // Order matters: SessionAuthGuard populates request.user, which
+    // PermissionsGuard then checks against the route's @RequirePermissions.
     { provide: APP_GUARD, useClass: SessionAuthGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })
 export class AppModule {}

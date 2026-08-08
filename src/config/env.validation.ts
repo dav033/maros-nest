@@ -151,6 +151,16 @@ export class EnvironmentVariables {
   @IsString()
   AUTH_SECRET: string;
 
+  /** Comma-separated emails provisioned with the admin role on first login. */
+  @IsString()
+  @IsOptional()
+  AUTH_BOOTSTRAP_ADMINS: string;
+
+  /** Role assigned to everyone else on first login. */
+  @IsString()
+  @IsOptional()
+  AUTH_DEFAULT_ROLE: string = 'member';
+
   // QuickBooks Online
   @IsString()
   @IsOptional()

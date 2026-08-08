@@ -1,5 +1,8 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
+import { Controller, Get, Post, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Public } from '../../common/decorators/public.decorator';
+import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { IntakeTokenGuard } from '../../common/guards/intake-token.guard';
 import { ContactsService } from '../contacts/contact-management/services/contacts.service';
 import { CompaniesService } from '../companies/company-management/services/companies.service';
 import { LeadIntakeService } from './lead-intake/lead-intake.service';
@@ -11,6 +14,7 @@ import {
 
 @ApiTags('crm')
 @Controller('crm')
+@RequirePermissions('companies:read')
 export class CrmController {
   constructor(
     private readonly contactsService: ContactsService,
@@ -52,11 +56,15 @@ export class CrmController {
     };
   }
 
+  // Called by external automation with no session cookie, so it opts out of
+  // the global session guard and authenticates with LEAD_INTAKE_TOKEN instead.
   @Post('lead-intake')
-  @ApiOperation({ 
-    summary: 'Process lead intake from n8n',
+  @Public()
+  @UseGuards(IntakeTokenGuard)
+  @ApiOperation({
+    summary: 'Process lead intake from external automation',
     description: `
-      Unified endpoint for n8n lead intake automation.
+      Unified endpoint for external lead intake automation.
       Handles all 4 cases:
       1. No company, no contact: Creates both and associates them
       2. No company, has contact: Creates company and associates with existing contact

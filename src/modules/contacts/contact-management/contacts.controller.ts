@@ -17,9 +17,12 @@ import { ContactsService, ContactValidationResponse } from './services/contacts.
 import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 import { ContactValidationResponseDto } from './dto/contact-validation-response.dto';
+import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
 
 @ApiTags('contacts')
 @Controller('contacts')
+// Class-level default; write/delete routes override it below.
+@RequirePermissions('contacts:read')
 export class ContactsController {
   constructor(private readonly contactsService: ContactsService) {}
 
@@ -60,6 +63,7 @@ export class ContactsController {
   }
 
   @Post()
+  @RequirePermissions('contacts:write')
   @ApiOperation({ summary: 'Create contact' })
   @ApiResponse({ status: 200, description: 'Contact created successfully' })
   async createContact(@Body() contact: CreateContactDto) {
@@ -67,6 +71,7 @@ export class ContactsController {
   }
 
   @Put(':id')
+  @RequirePermissions('contacts:write')
   @ApiOperation({ summary: 'Update contact' })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 200, description: 'Contact updated successfully' })
@@ -88,6 +93,7 @@ export class ContactsController {
   }
 
   @Delete(':id')
+  @RequirePermissions('contacts:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete contact' })
   @ApiParam({ name: 'id', type: Number })

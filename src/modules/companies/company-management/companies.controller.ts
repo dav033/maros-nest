@@ -14,9 +14,12 @@ import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { CompaniesService } from './services/companies.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
+import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
 
 @ApiTags('companies')
 @Controller('companies')
+// Class-level default; write/delete routes override it below.
+@RequirePermissions('companies:read')
 export class CompaniesController {
   constructor(private readonly companiesService: CompaniesService) {}
 
@@ -37,6 +40,7 @@ export class CompaniesController {
   }
 
   @Post()
+  @RequirePermissions('companies:write')
   @ApiOperation({ summary: 'Create company' })
   @ApiResponse({ status: 200, description: 'Company created successfully' })
   async createCompany(@Body() company: CreateCompanyDto) {
@@ -44,6 +48,7 @@ export class CompaniesController {
   }
 
   @Put(':id')
+  @RequirePermissions('companies:write')
   @ApiOperation({ summary: 'Update company' })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 200, description: 'Company updated successfully' })
@@ -57,6 +62,7 @@ export class CompaniesController {
   }
 
   @Delete(':id')
+  @RequirePermissions('companies:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete company' })
   @ApiParam({ name: 'id', type: Number })
@@ -67,6 +73,7 @@ export class CompaniesController {
   }
 
   @Post(':id/contacts')
+  @RequirePermissions('companies:write')
   @ApiOperation({ summary: 'Assign contacts to company' })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 200, description: 'Contacts assigned successfully' })

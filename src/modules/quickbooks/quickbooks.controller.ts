@@ -12,6 +12,8 @@ import {
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { randomBytes } from 'crypto';
 import type { Response } from 'express';
+import { Public } from '../../common/decorators/public.decorator';
+import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { QuickbooksApiService } from './services/core/quickbooks-api.service';
 import { QuickbooksAuthService } from './services/core/quickbooks-auth.service';
 import {
@@ -25,6 +27,7 @@ const STATE_TTL_MS = 10 * 60 * 1000;
 
 @ApiTags('QuickBooks')
 @Controller('quickbooks')
+@RequirePermissions('finance:read')
 export class QuickbooksController {
   private readonly logger = new Logger(QuickbooksController.name);
 
@@ -60,8 +63,12 @@ export class QuickbooksController {
   /**
    * Step 2 — Intuit redirects here after the user grants consent.
    * Exchanges the one-time code for tokens and stores them encrypted.
+   *
+   * Public because the request originates from Intuit, not from the app, so it
+   * carries no session cookie. CSRF is covered by the `state` check below.
    */
   @Get('callback')
+  @Public()
   @ApiOperation({ summary: 'QuickBooks OAuth 2.0 callback handler' })
   async callback(
     @Query('code') code: string,

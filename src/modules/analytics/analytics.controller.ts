@@ -20,6 +20,7 @@ import { QuickbooksApiService } from '../quickbooks/services/core/quickbooks-api
 import { DateRangeQueryDto } from './dto/queries/date-range-query.dto';
 import { RevenueTrendQueryDto } from './dto/queries/revenue-trend-query.dto';
 import { TopClientsQueryDto } from './dto/queries/top-clients-query.dto';
+import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { LeadTypeQueryDto } from './dto/queries/lead-type-query.dto';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
@@ -38,6 +39,11 @@ const ANALYTICS_CACHE_TTL_MS = 5 * 60 * 1000;
 
 @Controller('analytics')
 @UseInterceptors(CacheInterceptor)
+// The money-bearing routes override this with 'finance:read'. They are gated
+// whole rather than having their payloads filtered per user, because
+// CacheInterceptor keys by URL — a permission-varying body would be served
+// from cache to whoever asked next.
+@RequirePermissions('dashboard:read')
 export class AnalyticsController {
   constructor(
     private readonly overviewService: AnalyticsOverviewService,
@@ -63,6 +69,7 @@ export class AnalyticsController {
    * aggregated from project-level P&Ls for scoped views.
    */
   @Get('overview')
+  @RequirePermissions('finance:read')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getOverview(@Query() query: DateRangeQueryDto) {
     return this.overviewService.getOverview({
@@ -110,6 +117,7 @@ export class AnalyticsController {
    * - `leadType` — scope filter: CONSTRUCTION | PLUMBING | ROOFING.
    */
   @Get('financial-snapshot')
+  @RequirePermissions('finance:read')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getFinancialSnapshot(@Query() query: LeadTypeQueryDto) {
     return this.financialService.getFinancialSnapshot(query.leadType);
@@ -127,6 +135,7 @@ export class AnalyticsController {
   }
 
   @Get('revenue-trend')
+  @RequirePermissions('finance:read')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getRevenueTrend(@Query() query: RevenueTrendQueryDto) {
     const months = query.months ?? 12;
@@ -138,6 +147,7 @@ export class AnalyticsController {
   }
 
   @Get('top-clients')
+  @RequirePermissions('finance:read')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getTopClients(@Query() query: TopClientsQueryDto) {
     const limit = query.limit ?? 5;
@@ -146,6 +156,7 @@ export class AnalyticsController {
   }
 
   @Get('outstanding-balances')
+  @RequirePermissions('finance:read')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getOutstandingBalances(@Query() query: ListLimitQueryDto) {
     return this.financialService.getOutstandingBalances(
@@ -155,6 +166,7 @@ export class AnalyticsController {
   }
 
   @Get('backlog')
+  @RequirePermissions('finance:read')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getBacklog(@Query() query: ListLimitQueryDto) {
     return this.financialService.getBacklog(query.limit ?? 100, query.leadType);
@@ -172,6 +184,7 @@ export class AnalyticsController {
    *   When set, aggregates project-level P&Ls for all active projects in that scope.
    */
   @Get('expenses-summary')
+  @RequirePermissions('finance:read')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getExpensesSummary(@Query() query: DateRangeQueryDto) {
     return this.financialService.getExpensesSummary(
@@ -195,6 +208,7 @@ export class AnalyticsController {
    *   When set, aggregates project-level P&Ls for all active projects in that scope.
    */
   @Get('costs-breakdown')
+  @RequirePermissions('finance:read')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getCostsBreakdown(@Query() query: DateRangeQueryDto) {
     return this.financialService.getCostsBreakdown(
@@ -207,6 +221,7 @@ export class AnalyticsController {
   }
 
   @Get('quickbooks-revenue-report')
+  @RequirePermissions('finance:read')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getQuickbooksRevenueReport(@Query() query: DateRangeQueryDto) {
     return this.financialService.getQuickbooksRevenueReport({
@@ -216,6 +231,7 @@ export class AnalyticsController {
   }
 
   @Get('project-financials')
+  @RequirePermissions('finance:read')
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getProjectFinancials(@Query() query: ListLimitQueryDto) {
     return this.financialService.getProjectFinancials(

@@ -24,9 +24,12 @@ import { SetTagsDto } from './dto/set-tags.dto';
 import { SearchNotesDto } from './dto/search-notes.dto';
 import { CreateTagDto } from './dto/create-tag.dto';
 import { UpdateTagDto } from './dto/update-tag.dto';
+import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
 
 @ApiTags('notes')
 @Controller('notes')
+// Class-level default; write/delete routes override it below.
+@RequirePermissions('notes:read')
 export class NotesController {
   constructor(
     private readonly notesService: NotesService,
@@ -83,6 +86,7 @@ export class NotesController {
   }
 
   @Post('tags')
+  @RequirePermissions('notes:write')
   @ApiOperation({ summary: 'Create a note tag' })
   @ApiResponse({ status: 201, description: 'Tag created successfully' })
   @ApiResponse({ status: 409, description: 'A tag with this name already exists' })
@@ -91,6 +95,7 @@ export class NotesController {
   }
 
   @Put('tags/:tagId')
+  @RequirePermissions('notes:write')
   @ApiOperation({ summary: 'Update a note tag' })
   @ApiParam({ name: 'tagId', type: Number })
   @ApiResponse({ status: 200, description: 'Tag updated successfully' })
@@ -103,6 +108,7 @@ export class NotesController {
   }
 
   @Delete('tags/:tagId')
+  @RequirePermissions('notes:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete a note tag' })
   @ApiParam({ name: 'tagId', type: Number })
@@ -113,6 +119,7 @@ export class NotesController {
   }
 
   @Post()
+  @RequirePermissions('notes:write')
   @ApiOperation({ summary: 'Create a note page' })
   @ApiResponse({ status: 201, description: 'Note page created successfully' })
   async createNote(@Body() dto: CreateNoteDto) {
@@ -131,6 +138,7 @@ export class NotesController {
   }
 
   @Put(':id')
+  @RequirePermissions('notes:write')
   @ApiOperation({ summary: 'Update note page title/icon' })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 200, description: 'Note page updated successfully' })
@@ -143,6 +151,7 @@ export class NotesController {
   }
 
   @Patch(':id/content')
+  @RequirePermissions('notes:write')
   @ApiOperation({ summary: 'Update note page content (autosave fast path)' })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 200, description: 'Note page content updated successfully' })
@@ -156,6 +165,7 @@ export class NotesController {
   }
 
   @Patch(':id/move')
+  @RequirePermissions('notes:write')
   @ApiOperation({ summary: 'Move/reorder a note page in the tree' })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 200, description: 'Note page moved successfully' })
@@ -169,6 +179,7 @@ export class NotesController {
   }
 
   @Patch(':id/favorite')
+  @RequirePermissions('notes:write')
   @ApiOperation({ summary: 'Mark/unmark a note page as favorite' })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 200, description: 'Favorite state updated' })
@@ -180,6 +191,7 @@ export class NotesController {
   }
 
   @Patch(':id/tags')
+  @RequirePermissions('notes:write')
   @ApiOperation({ summary: 'Set the complete tag list for a note page' })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 200, description: 'Tags updated' })
@@ -191,6 +203,7 @@ export class NotesController {
   }
 
   @Post(':id/restore')
+  @RequirePermissions('notes:write')
   @ApiOperation({ summary: 'Restore a trashed note page (and its subtree)' })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 200, description: 'Note page restored' })
@@ -200,6 +213,7 @@ export class NotesController {
   }
 
   @Delete(':id')
+  @RequirePermissions('notes:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Trash a note page (soft delete, cascades to descendants)' })
   @ApiParam({ name: 'id', type: Number })
@@ -210,6 +224,7 @@ export class NotesController {
   }
 
   @Delete(':id/purge')
+  @RequirePermissions('notes:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Permanently delete a trashed note page' })
   @ApiParam({ name: 'id', type: Number })

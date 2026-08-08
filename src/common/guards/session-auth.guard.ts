@@ -1,17 +1,28 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
-import { Request } from 'express';
 import { jwtVerify } from 'jose';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import type { RequestWithUser } from '../auth/authenticated-user';
+import { UsersService } from '../../modules/users/user-management/users.service';
 
 const SESSION_COOKIE = 'maros_session';
 
+/**
+ * Verifies the session cookie minted by the Next.js OAuth callback, then
+ * resolves that identity against the users table.
+ *
+ * The JWT proves *who* you are and nothing more — permissions deliberately do
+ * not travel in the token. Resolving them per request is what makes a role
+ * change or a deactivation take effect immediately instead of waiting out the
+ * token's 30-day lifetime.
+ */
 @Injectable()
 export class SessionAuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly configService: ConfigService,
+    private readonly usersService: UsersService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -23,7 +34,7 @@ export class SessionAuthGuard implements CanActivate {
       return true;
     }
 
-    const request = context.switchToHttp().getRequest<Request>();
+    const request = context.switchToHttp().getRequest<RequestWithUser>();
     const token = this.readSessionCookie(request);
     if (!token) {
       throw new UnauthorizedException('Missing session cookie');
@@ -34,16 +45,33 @@ export class SessionAuthGuard implements CanActivate {
       throw new UnauthorizedException('AUTH_SECRET is not configured');
     }
 
+    let email: string;
+    let name: string | undefined;
+    let picture: string | undefined;
     try {
       const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
-      (request as Request & { user?: unknown }).user = payload;
-      return true;
+      if (typeof payload.email !== 'string') {
+        throw new Error('Session token has no email claim');
+      }
+      email = payload.email;
+      name = typeof payload.name === 'string' ? payload.name : undefined;
+      picture = typeof payload.picture === 'string' ? payload.picture : undefined;
     } catch {
       throw new UnauthorizedException('Invalid or expired session');
     }
+
+    // Throws UserInactiveException (403) for deactivated accounts; provisions
+    // the row on a verified identity's first request.
+    request.user = await this.usersService.resolveForRequest({
+      email,
+      name,
+      picture,
+    });
+
+    return true;
   }
 
-  private readSessionCookie(request: Request): string | null {
+  private readSessionCookie(request: RequestWithUser): string | null {
     const header = request.headers['cookie'];
     if (!header) return null;
 

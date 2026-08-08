@@ -18,9 +18,12 @@ import { GetLeadsByTypeDto } from './dto/get-leads-by-type.dto';
 import { UpdateLeadRequestDto } from './dto/update-lead.dto';
 import { LeadNumberValidationResponseDto } from './dto/lead-number-validation-response.dto';
 import { LeadType } from '../../../common/enums/lead-type.enum';
+import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
 
 @ApiTags('leads')
 @Controller('leads')
+// Class-level default; write/delete routes override it below.
+@RequirePermissions('leads:read')
 export class LeadsController {
   constructor(private readonly leadsService: LeadsService) {}
 
@@ -66,6 +69,7 @@ export class LeadsController {
   }
 
   @Post('new-contact')
+  @RequirePermissions('leads:write')
   @ApiOperation({ summary: 'Create lead with new contact' })
   @ApiQuery({
     name: 'leadType',
@@ -86,6 +90,7 @@ export class LeadsController {
   }
 
   @Post('existing-contact')
+  @RequirePermissions('leads:write')
   @ApiOperation({ summary: 'Create lead with existing contact' })
   @ApiQuery({
     name: 'leadType',
@@ -147,6 +152,7 @@ export class LeadsController {
   }
 
   @Put(':leadId')
+  @RequirePermissions('leads:write')
   @ApiOperation({ summary: 'Update lead' })
   @ApiParam({ name: 'leadId', type: Number })
   @ApiResponse({ status: 200, description: 'Lead updated successfully' })
@@ -168,6 +174,7 @@ export class LeadsController {
   }
 
   @Delete(':leadId')
+  @RequirePermissions('leads:delete')
   @ApiOperation({ summary: 'Delete lead' })
   @ApiParam({ name: 'leadId', type: Number })
   @ApiQuery({ name: 'deleteContact', required: false, type: Boolean })

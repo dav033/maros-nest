@@ -19,9 +19,12 @@ import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { SendEstimateEmailDto } from './dto/send-estimate-email.dto';
 import { UpdateEstimateDto } from './dto/update-estimate.dto';
+import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
 
 @ApiTags('projects')
 @Controller('projects')
+// Class-level default; write/delete routes override it below.
+@RequirePermissions('projects:read')
 export class ProjectsController {
   constructor(private readonly projectsService: ProjectsService) {}
 
@@ -61,6 +64,7 @@ export class ProjectsController {
   }
 
   @Post(':id/send-estimate-email')
+  @RequirePermissions('projects:write')
   @ApiOperation({ summary: 'Send the project estimate by email (optionally without attachment)' })
   @ApiParam({ name: 'id', type: Number })
   async sendEstimateEmail(
@@ -71,6 +75,7 @@ export class ProjectsController {
   }
 
   @Patch(':id/estimate')
+  @RequirePermissions('projects:write')
   @ApiOperation({
     summary:
       'Update the project estimate total and sync it to QuickBooks (edits the most recent estimate or creates one)',
@@ -94,6 +99,7 @@ export class ProjectsController {
   }
 
   @Post()
+  @RequirePermissions('projects:write')
   @ApiOperation({ summary: 'Create project' })
   @ApiResponse({ status: 201, description: 'Project created successfully' })
   @ApiResponse({ status: 400, description: 'Bad request' })
@@ -102,6 +108,7 @@ export class ProjectsController {
   }
 
   @Put(':id')
+  @RequirePermissions('projects:write')
   @ApiOperation({ summary: 'Update project' })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 200, description: 'Project updated successfully' })
@@ -123,6 +130,7 @@ export class ProjectsController {
   }
 
   @Delete(':id')
+  @RequirePermissions('projects:delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Delete project (also deletes associated lead)' })
   @ApiParam({ name: 'id', type: Number })
@@ -133,6 +141,7 @@ export class ProjectsController {
   }
 
   @Post(':id/revert-to-lead')
+  @RequirePermissions('projects:write')
   @ApiOperation({ summary: 'Revert project back to lead (deletes project, resets lead status)' })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 200, description: 'Returns the lead id to navigate to' })
