@@ -21,6 +21,7 @@ import { UpdateNoteContentDto } from './dto/update-note-content.dto';
 import { MoveNoteDto } from './dto/move-note.dto';
 import { SetFavoriteDto } from './dto/set-favorite.dto';
 import { SetTagsDto } from './dto/set-tags.dto';
+import { SetEntityDto } from './dto/set-entity.dto';
 import { SearchNotesDto } from './dto/search-notes.dto';
 import { CreateTagDto } from './dto/create-tag.dto';
 import { UpdateTagDto } from './dto/update-tag.dto';
@@ -55,8 +56,9 @@ export class NotesController {
   async getNotesByEntity(
     @Query('entityKind') entityKind: string,
     @Query('entityId', ParseIntPipe) entityId: number,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.getNotesByEntity(entityKind, entityId);
+    return this.notesService.getNotesByEntity(entityKind, entityId, user.id);
   }
 
   @Get('trash')
@@ -203,6 +205,20 @@ export class NotesController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.notesService.setFavorite(id, dto.isFavorite, user.id);
+  }
+
+  @Patch(':id/entity')
+  @RequirePermissions('notes:write')
+  @ApiOperation({ summary: 'Link the note to a CRM entity, or clear the link' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({ status: 200, description: 'Entity link updated' })
+  @ApiResponse({ status: 404, description: 'Note page not found' })
+  async setEntityLink(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SetEntityDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.notesService.setEntityLink(id, dto, user.id);
   }
 
   @Patch(':id/tags')

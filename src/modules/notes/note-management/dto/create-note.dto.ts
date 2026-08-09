@@ -10,12 +10,24 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 export const NOTE_ENTITY_KINDS = ['lead', 'project', 'contact', 'company'] as const;
 export type NoteEntityKind = (typeof NOTE_ENTITY_KINDS)[number];
 
+export const NOTE_PAGE_KINDS = ['page', 'folder'] as const;
+export type NotePageKindDto = (typeof NOTE_PAGE_KINDS)[number];
+
 export class CreateNoteDto {
   @ApiPropertyOptional({ description: 'Page title', maxLength: 255, default: 'Untitled' })
   @IsString()
   @IsOptional()
   @MaxLength(255)
   title?: string;
+
+  @ApiPropertyOptional({
+    description: 'Whether this is an editable page or a folder that only groups pages',
+    enum: NOTE_PAGE_KINDS,
+    default: 'page',
+  })
+  @IsIn(NOTE_PAGE_KINDS)
+  @IsOptional()
+  kind?: NotePageKindDto;
 
   @ApiPropertyOptional({ description: 'Icon (emoji or lucide icon name)', maxLength: 50 })
   @IsString()

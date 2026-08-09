@@ -44,10 +44,18 @@ export class NoteTagNameConflictException extends BaseException {
   }
 }
 
+/** Folders group pages; they have no document of their own to write to. */
+export class NoteFolderHasNoContentException extends BusinessException {
+  constructor(id: number) {
+    super(`Note page ${id} is a folder and has no editable content`, 'NOTE_FOLDER_NO_CONTENT');
+  }
+}
+
 export const NoteExceptions = {
   NoteNotFoundException,
   NoteTagNotFoundException,
   NoteCycleException,
   NotePageStaleContentException,
   NoteTagNameConflictException,
+  NoteFolderHasNoContentException,
 };

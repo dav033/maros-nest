@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository, SelectQueryBuilder } from 'typeorm';
 import { NotePage } from '../../../../entities/note-page.entity';
+import { NotePageFavorite } from '../../../../entities/note-page-favorite.entity';
 
 export interface NoteSearchRow {
   id: number;
@@ -12,11 +13,16 @@ export interface NoteSearchRow {
   rank: number;
 }
 
+/** Relations every read needs: the parent (for parentId), tags, and the last editor. */
+const PAGE_RELATIONS = ['parent', 'tags', 'lastEditedBy'];
+
 @Injectable()
 export class NotesRepository {
   constructor(
     @InjectRepository(NotePage)
     private readonly repo: Repository<NotePage>,
+    @InjectRepository(NotePageFavorite)
+    private readonly favorites: Repository<NotePageFavorite>,
   ) {}
 
   /**
@@ -36,11 +42,16 @@ export class NotesRepository {
     );
   }
 
-  async findAllActive(userId?: number): Promise<NotePage[]> {
-    const qb = this.repo
+  private baseQuery(): SelectQueryBuilder<NotePage> {
+    return this.repo
       .createQueryBuilder('page')
       .leftJoinAndSelect('page.parent', 'parent')
       .leftJoinAndSelect('page.tags', 'tags')
+      .leftJoinAndSelect('page.lastEditedBy', 'lastEditedBy');
+  }
+
+  async findAllActive(userId?: number): Promise<NotePage[]> {
+    const qb = this.baseQuery()
       .where('page.deleted_at IS NULL')
       .orderBy('page.position', 'ASC')
       .addOrderBy('page.id', 'ASC');
@@ -49,45 +60,80 @@ export class NotesRepository {
 
   /** Only the top-level page of each trashed subtree — cascaded descendants stay hidden. */
   async findTrashedRoots(userId?: number): Promise<NotePage[]> {
-    const qb = this.repo
-      .createQueryBuilder('page')
-      .leftJoinAndSelect('page.parent', 'parent')
-      .leftJoinAndSelect('page.tags', 'tags')
+    const qb = this.baseQuery()
       .where('page.deleted_at IS NOT NULL')
       .andWhere('page.trashed_root_id = page.id')
       .orderBy('page.deleted_at', 'DESC');
     return this.applyVisibility(qb, userId).getMany();
   }
 
+  /**
+   * Favorites are per user. The MCP context (userId undefined, shared token, no
+   * per-user identity) has no favorites list of its own and gets an empty one.
+   */
   async findFavorites(userId?: number): Promise<NotePage[]> {
-    const qb = this.repo
-      .createQueryBuilder('page')
-      .leftJoinAndSelect('page.parent', 'parent')
-      .leftJoinAndSelect('page.tags', 'tags')
+    if (userId === undefined) return [];
+    const qb = this.baseQuery()
+      .innerJoin(
+        'note_page_favorites',
+        'fav',
+        'fav.note_page_id = page.id AND fav.user_id = :userId',
+        { userId },
+      )
       .where('page.deleted_at IS NULL')
-      .andWhere('page.is_favorite = true')
       .orderBy('page.updated_at', 'DESC');
     return this.applyVisibility(qb, userId).getMany();
+  }
+
+  /** Ids the user has starred, for stamping isFavorite onto a list in one extra query. */
+  async findFavoriteIds(userId?: number): Promise<Set<number>> {
+    if (userId === undefined) return new Set();
+    const rows = await this.favorites.find({
+      where: { userId },
+      select: { notePageId: true },
+    });
+    return new Set(rows.map((row) => row.notePageId));
+  }
+
+  async isFavorite(pageId: number, userId?: number): Promise<boolean> {
+    if (userId === undefined) return false;
+    const count = await this.favorites.count({ where: { notePageId: pageId, userId } });
+    return count > 0;
+  }
+
+  async addFavorite(pageId: number, userId: number): Promise<void> {
+    // Starring an already-starred page must stay a no-op: the UI fires this on every
+    // toggle without checking the current state first.
+    await this.favorites
+      .createQueryBuilder()
+      .insert()
+      .values({ notePageId: pageId, userId })
+      .orIgnore()
+      .execute();
+  }
+
+  async removeFavorite(pageId: number, userId: number): Promise<void> {
+    await this.favorites.delete({ notePageId: pageId, userId });
   }
 
   async findByIdActive(id: number): Promise<NotePage | null> {
     return this.repo.findOne({
       where: { id, deletedAt: IsNull() },
-      relations: ['parent', 'tags'],
+      relations: PAGE_RELATIONS,
     });
   }
 
   async findById(id: number): Promise<NotePage | null> {
     return this.repo.findOne({
       where: { id },
-      relations: ['parent', 'tags'],
+      relations: PAGE_RELATIONS,
     });
   }
 
   async findByEntity(entityKind: string, entityId: number): Promise<NotePage[]> {
     return this.repo.find({
       where: { entityKind, entityId, deletedAt: IsNull() },
-      relations: ['parent', 'tags'],
+      relations: PAGE_RELATIONS,
       order: { position: 'ASC', id: 'ASC' },
     });
   }

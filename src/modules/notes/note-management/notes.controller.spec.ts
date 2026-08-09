@@ -38,6 +38,7 @@ describe('NotesController route ordering and validation', () => {
       getNoteById: jest.fn().mockResolvedValue({ id: 42 }),
       updateNoteContent: jest.fn().mockResolvedValue({ id: 1 }),
       createNote: jest.fn().mockResolvedValue({ id: 1 }),
+      setEntityLink: jest.fn().mockResolvedValue({ id: 1 }),
     };
     noteTagsService = {
       listTags: jest.fn().mockResolvedValue([{ id: 1, name: 'Urgent', color: 'red' }]),
@@ -131,5 +132,39 @@ describe('NotesController route ordering and validation', () => {
       .send({ title: 'Doc', unexpected: true })
       .expect(400);
     expect(notesService.createNote).not.toHaveBeenCalled();
+  });
+
+  it('links a note to a CRM entity', async () => {
+    await request(server)
+      .patch('/notes/1/entity')
+      .send({ entityKind: 'lead', entityId: 42 })
+      .expect(200);
+
+    expect(notesService.setEntityLink).toHaveBeenCalledWith(
+      1,
+      { entityKind: 'lead', entityId: 42 },
+      TEST_USER_ID,
+    );
+  });
+
+  it('accepts an explicit null pair as "unlink"', async () => {
+    await request(server)
+      .patch('/notes/1/entity')
+      .send({ entityKind: null, entityId: null })
+      .expect(200);
+
+    expect(notesService.setEntityLink).toHaveBeenCalledWith(
+      1,
+      { entityKind: null, entityId: null },
+      TEST_USER_ID,
+    );
+  });
+
+  it('rejects an entity kind outside the CRM set', async () => {
+    await request(server)
+      .patch('/notes/1/entity')
+      .send({ entityKind: 'invoice', entityId: 42 })
+      .expect(400);
+    expect(notesService.setEntityLink).not.toHaveBeenCalled();
   });
 });

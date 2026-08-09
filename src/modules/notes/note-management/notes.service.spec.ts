@@ -2,6 +2,7 @@ import { NotesService } from './notes.service';
 import { NoteMapper } from './mappers/note.mapper';
 import { NotePage } from '../../../entities/note-page.entity';
 import {
+  NoteFolderHasNoContentException,
   NoteNotFoundException,
   NotePageStaleContentException,
 } from '../../../common/exceptions';
@@ -12,7 +13,12 @@ function makeService(
   noteTreeService: Record<string, jest.Mock> = {},
 ) {
   return new NotesService(
-    notesRepository as never,
+    {
+      // Every read stamps isFavorite from the caller's starred set; tests that aren't
+      // about favorites get an empty one rather than repeating the mock everywhere.
+      findFavoriteIds: jest.fn().mockResolvedValue(new Set<number>()),
+      ...notesRepository,
+    } as never,
     noteTagsRepository as never,
     noteTreeService as never,
     new NoteMapper(),
@@ -24,12 +30,16 @@ describe('NotesService.createNote', () => {
   let notesRepository: Record<string, jest.Mock>;
 
   beforeEach(() => {
+    // Writes re-read the row so the response carries the joined editor, so the
+    // findByIdActive mock has to answer with whatever was last saved.
+    let saved: NotePage | null = null;
     notesRepository = {
-      findByIdActive: jest.fn(),
+      findByIdActive: jest.fn().mockImplementation(() => Promise.resolve(saved)),
       getMaxPositionUnderParent: jest.fn().mockResolvedValue(0),
-      save: jest.fn().mockImplementation((page: NotePage) =>
-        Promise.resolve(Object.assign(page, { id: 1 })),
-      ),
+      save: jest.fn().mockImplementation((page: NotePage) => {
+        saved = Object.assign(page, { id: 1 });
+        return Promise.resolve(saved);
+      }),
     };
 
     service = makeService(notesRepository);
@@ -227,13 +237,15 @@ describe('NotesService — private note ownership', () => {
   let notesRepository: Record<string, jest.Mock>;
 
   beforeEach(() => {
+    let saved: NotePage | null = null;
     notesRepository = {
-      findByIdActive: jest.fn(),
+      findByIdActive: jest.fn().mockImplementation(() => Promise.resolve(saved)),
       findById: jest.fn(),
       getMaxPositionUnderParent: jest.fn().mockResolvedValue(0),
-      save: jest.fn().mockImplementation((page: NotePage) =>
-        Promise.resolve(Object.assign(page, { id: page.id ?? 1 })),
-      ),
+      save: jest.fn().mockImplementation((page: NotePage) => {
+        saved = Object.assign(page, { id: page.id ?? 1 });
+        return Promise.resolve(saved);
+      }),
       trashSubtree: jest.fn().mockResolvedValue(undefined),
     };
     service = makeService(notesRepository);
@@ -303,5 +315,175 @@ describe('NotesService — private note ownership', () => {
     );
 
     await expect(service.getNoteById(1)).resolves.toMatchObject({ id: 1 });
+  });
+});
+
+describe('NotesService — per-user favorites', () => {
+  let service: NotesService;
+  let notesRepository: Record<string, jest.Mock>;
+  let page: NotePage;
+
+  beforeEach(() => {
+    page = Object.assign(new NotePage(), { id: 1, title: 'Doc' });
+    notesRepository = {
+      findByIdActive: jest.fn().mockResolvedValue(page),
+      findFavoriteIds: jest.fn().mockResolvedValue(new Set<number>()),
+      findFavorites: jest.fn().mockResolvedValue([]),
+      addFavorite: jest.fn().mockResolvedValue(undefined),
+      removeFavorite: jest.fn().mockResolvedValue(undefined),
+      save: jest.fn().mockImplementation((p: NotePage) => Promise.resolve(p)),
+    };
+    service = makeService(notesRepository);
+  });
+
+  it('stars the page for the acting user only', async () => {
+    notesRepository.findFavoriteIds.mockResolvedValue(new Set([1]));
+
+    const result = await service.setFavorite(1, true, 5);
+
+    expect(notesRepository.addFavorite).toHaveBeenCalledWith(1, 5);
+    expect(result.isFavorite).toBe(true);
+  });
+
+  it('unstars through the join table rather than a column on the page', async () => {
+    const result = await service.setFavorite(1, false, 5);
+
+    expect(notesRepository.removeFavorite).toHaveBeenCalledWith(1, 5);
+    expect(result.isFavorite).toBe(false);
+  });
+
+  it("reports a page as unstarred when it is not in the reader's set", async () => {
+    notesRepository.findFavoriteIds.mockResolvedValue(new Set([99]));
+
+    await expect(service.getNoteById(1, 6)).resolves.toMatchObject({ isFavorite: false });
+  });
+
+  it('does nothing for the MCP context, which has no user to star for', async () => {
+    await service.setFavorite(1, true);
+
+    expect(notesRepository.addFavorite).not.toHaveBeenCalled();
+    expect(notesRepository.removeFavorite).not.toHaveBeenCalled();
+  });
+});
+
+describe('NotesService — authorship', () => {
+  let service: NotesService;
+  let notesRepository: Record<string, jest.Mock>;
+  let page: NotePage;
+
+  beforeEach(() => {
+    page = Object.assign(new NotePage(), { id: 1, title: 'Doc', content: {} });
+    notesRepository = {
+      findByIdActive: jest.fn().mockResolvedValue(page),
+      addFavorite: jest.fn().mockResolvedValue(undefined),
+      removeFavorite: jest.fn().mockResolvedValue(undefined),
+      save: jest.fn().mockImplementation((p: NotePage) => Promise.resolve(p)),
+    };
+    service = makeService(notesRepository);
+  });
+
+  it('stamps the editor when the content changes', async () => {
+    await service.updateNoteContent(1, { content: {} }, 7);
+
+    expect((notesRepository.save.mock.calls[0] as [NotePage])[0].lastEditedById).toBe(7);
+  });
+
+  it('stamps the editor when the title changes', async () => {
+    await service.updateNote(1, { title: 'Renamed' }, 7);
+
+    expect((notesRepository.save.mock.calls[0] as [NotePage])[0].lastEditedById).toBe(7);
+  });
+
+  it('does not count starring as an edit', async () => {
+    page.lastEditedById = 3;
+
+    await service.setFavorite(1, true, 7);
+
+    expect(page.lastEditedById).toBe(3);
+  });
+});
+
+describe('NotesService — folders', () => {
+  it('refuses to write a document into a folder', async () => {
+    const folder = Object.assign(new NotePage(), { id: 1, kind: 'folder', content: {} });
+    const notesRepository = {
+      findByIdActive: jest.fn().mockResolvedValue(folder),
+      save: jest.fn(),
+    };
+    const service = makeService(notesRepository);
+
+    await expect(service.updateNoteContent(1, { content: {} }, 5)).rejects.toThrow(
+      NoteFolderHasNoContentException,
+    );
+    expect(notesRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('creates a folder when kind says so', async () => {
+    let saved: NotePage | null = null;
+    const notesRepository = {
+      findByIdActive: jest.fn().mockImplementation(() => Promise.resolve(saved)),
+      getMaxPositionUnderParent: jest.fn().mockResolvedValue(0),
+      save: jest.fn().mockImplementation((page: NotePage) => {
+        saved = Object.assign(page, { id: 1 });
+        return Promise.resolve(saved);
+      }),
+    };
+    const service = makeService(notesRepository);
+
+    const result = await service.createNote({ title: 'Riverside', kind: 'folder' }, 5);
+
+    expect(result.kind).toBe('folder');
+  });
+});
+
+describe('NotesService.setEntityLink', () => {
+  let service: NotesService;
+  let notesRepository: Record<string, jest.Mock>;
+  let page: NotePage;
+
+  beforeEach(() => {
+    page = Object.assign(new NotePage(), { id: 1, title: 'Doc' });
+    notesRepository = {
+      findByIdActive: jest.fn().mockResolvedValue(page),
+      save: jest.fn().mockImplementation((p: NotePage) => Promise.resolve(p)),
+    };
+    service = makeService(notesRepository);
+  });
+
+  it('links the note to a lead', async () => {
+    await service.setEntityLink(1, { entityKind: 'lead', entityId: 42 }, 5);
+
+    expect(page.entityKind).toBe('lead');
+    expect(page.entityId).toBe(42);
+  });
+
+  it('writes real nulls when unlinking, not undefined', async () => {
+    page.entityKind = 'lead';
+    page.entityId = 42;
+
+    await service.setEntityLink(1, { entityKind: null, entityId: null }, 5);
+
+    expect(page.entityKind).toBeNull();
+    expect(page.entityId).toBeNull();
+  });
+
+  it("clears ownerId when unlinking someone else's note, so it stays shared", async () => {
+    page.entityKind = 'lead';
+    page.entityId = 42;
+    page.ownerId = 5;
+
+    await service.setEntityLink(1, { entityKind: null, entityId: null }, 6);
+
+    expect(page.ownerId).toBeNull();
+  });
+
+  it('leaves ownerId alone when the owner unlinks their own note', async () => {
+    page.entityKind = 'lead';
+    page.entityId = 42;
+    page.ownerId = 5;
+
+    await service.setEntityLink(1, { entityKind: null, entityId: null }, 5);
+
+    expect(page.ownerId).toBe(5);
   });
 });
