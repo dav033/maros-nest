@@ -45,6 +45,24 @@ export class UsersController {
     return user;
   }
 
+  /**
+   * Deliberately has no @RequirePermissions: a signed-in session is the whole check.
+   *
+   * Sharing a note means naming a colleague, and `users:read` is admin-only, so without
+   * this a member could never fill in the "share with" field. It answers id, name,
+   * email and picture for active users and nothing else — no role, no permissions, no
+   * status — which is the same information already visible on the byline of any note
+   * they have opened. Widening `users:read` to make sharing work would have handed over
+   * far more.
+   */
+  @Get('users/directory')
+  @ApiOperation({ summary: 'Active colleagues, for people pickers' })
+  @ApiResponse({ status: 200, description: 'id, name, email and picture only' })
+  async findUserDirectory(@CurrentUser() user: AuthenticatedUser | undefined) {
+    if (!user) throw new UnauthorizedException();
+    return this.usersService.findDirectory();
+  }
+
   // --- User administration ---
 
   @Get('users')

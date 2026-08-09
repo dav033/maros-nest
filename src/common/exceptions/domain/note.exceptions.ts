@@ -51,6 +51,90 @@ export class NoteFolderHasNoContentException extends BusinessException {
   }
 }
 
+/**
+ * Deliberately a 404 with the same message shape as NoteNotFoundException: a 403 would
+ * confirm that the note exists, which is exactly what someone walking ids is looking
+ * for. Distinct class so call sites read as intent; identical response on the wire.
+ */
+export class NoteAccessDeniedException extends ResourceNotFoundException {
+  constructor(id: number) {
+    super(`Note page not found with id: ${id}`);
+  }
+}
+
+/** Unknown, revoked, or pointing at a trashed page — all answer the same, on purpose. */
+export class NoteShareLinkNotFoundException extends ResourceNotFoundException {
+  constructor() {
+    super('Share link not found');
+  }
+}
+
+/**
+ * 410 rather than 404: the reader had a real link and deserves to be told it aged out,
+ * not left wondering whether they mistyped it. Nothing about the note leaks either way.
+ */
+export class NoteShareLinkExpiredException extends BaseException {
+  constructor() {
+    super('This share link has expired', HttpStatus.GONE, 'NOTE_LINK_EXPIRED');
+  }
+}
+
+export class NoteShareLinkPasswordRequiredException extends BaseException {
+  constructor() {
+    super(
+      'This share link is password protected',
+      HttpStatus.UNAUTHORIZED,
+      'NOTE_LINK_PASSWORD_REQUIRED',
+    );
+  }
+}
+
+export class NoteShareLinkPasswordInvalidException extends BaseException {
+  constructor() {
+    super('Incorrect password', HttpStatus.UNAUTHORIZED, 'NOTE_LINK_PASSWORD_INVALID');
+  }
+}
+
+/** Sharing a note with yourself: harmless, but always a mistake worth naming. */
+export class NoteSelfShareException extends BusinessException {
+  constructor() {
+    super('You already have access to this note', 'NOTE_SELF_SHARE');
+  }
+}
+
+export class NoteShareSubjectNotFoundException extends ResourceNotFoundException {
+  constructor(subjectType: string, subjectId: number) {
+    super(`No ${subjectType} found with id: ${subjectId}`);
+  }
+}
+
+export class NoteShareNotFoundException extends ResourceNotFoundException {
+  constructor(id: number) {
+    super(`Note share not found with id: ${id}`);
+  }
+}
+
+/**
+ * A grant written on an ancestor cannot be edited from the descendant it happens to
+ * reach — the fix belongs on the folder that carries it, or the change would silently
+ * affect every other page in that subtree.
+ */
+export class NoteInheritedShareException extends BusinessException {
+  constructor(grantedOnTitle: string) {
+    super(
+      `This access is inherited from "${grantedOnTitle}" — change it there`,
+      'NOTE_INHERITED_SHARE',
+    );
+  }
+}
+
+/** MCP authenticates with a shared token; publishing to the internet needs a person. */
+export class NoteSharingRequiresUserException extends BusinessException {
+  constructor() {
+    super('Sharing actions require a signed-in user', 'NOTE_SHARING_REQUIRES_USER');
+  }
+}
+
 export const NoteExceptions = {
   NoteNotFoundException,
   NoteTagNotFoundException,
@@ -58,4 +142,14 @@ export const NoteExceptions = {
   NotePageStaleContentException,
   NoteTagNameConflictException,
   NoteFolderHasNoContentException,
+  NoteAccessDeniedException,
+  NoteShareLinkNotFoundException,
+  NoteShareLinkExpiredException,
+  NoteShareLinkPasswordRequiredException,
+  NoteShareLinkPasswordInvalidException,
+  NoteSelfShareException,
+  NoteShareSubjectNotFoundException,
+  NoteShareNotFoundException,
+  NoteInheritedShareException,
+  NoteSharingRequiresUserException,
 };

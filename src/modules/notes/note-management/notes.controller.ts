@@ -28,6 +28,13 @@ import { UpdateTagDto } from './dto/update-tag.dto';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
+import { toNoteActor } from './services/note-access.service';
+import { NoteSharingService } from '../note-sharing/note-sharing.service';
+import { SetVisibilityDto } from './dto/set-visibility.dto';
+import { CreateNoteShareDto } from './dto/create-note-share.dto';
+import { UpdateNoteShareDto } from './dto/update-note-share.dto';
+import { CreateNoteLinkDto } from './dto/create-note-link.dto';
+import { UpdateNoteLinkDto } from './dto/update-note-link.dto';
 
 @ApiTags('notes')
 @Controller('notes')
@@ -37,6 +44,7 @@ export class NotesController {
   constructor(
     private readonly notesService: NotesService,
     private readonly noteTagsService: NoteTagsService,
+    private readonly sharingService: NoteSharingService,
   ) {}
 
   // --- Static routes first: they must never be shadowed by ':id'. ---
@@ -45,7 +53,7 @@ export class NotesController {
   @ApiOperation({ summary: 'Get all note pages (flat list, no content)' })
   @ApiResponse({ status: 200, description: 'Returns all active note pages' })
   async getAllNotes(@CurrentUser() user: AuthenticatedUser) {
-    return this.notesService.getAllNotes(user.id);
+    return this.notesService.getAllNotes(toNoteActor(user));
   }
 
   @Get('by-entity')
@@ -58,21 +66,56 @@ export class NotesController {
     @Query('entityId', ParseIntPipe) entityId: number,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.getNotesByEntity(entityKind, entityId, user.id);
+    return this.notesService.getNotesByEntity(entityKind, entityId, toNoteActor(user));
   }
 
   @Get('trash')
   @ApiOperation({ summary: 'Get trashed note pages (top-level of each trashed subtree)' })
   @ApiResponse({ status: 200, description: 'Returns trashed note pages' })
   async getTrash(@CurrentUser() user: AuthenticatedUser) {
-    return this.notesService.getTrash(user.id);
+    return this.notesService.getTrash(toNoteActor(user));
   }
 
   @Get('favorites')
   @ApiOperation({ summary: 'Get favorite note pages' })
   @ApiResponse({ status: 200, description: 'Returns favorite note pages' })
   async getFavorites(@CurrentUser() user: AuthenticatedUser) {
-    return this.notesService.getFavorites(user.id);
+    return this.notesService.getFavorites(toNoteActor(user));
+  }
+
+  @Get('shared-with-me')
+  @ApiOperation({ summary: 'Notes another user granted me access to' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Only pages reachable through a grant — anything already visible as a team ' +
+      'page, or owned by the caller, is left out',
+  })
+  async getSharedWithMe(@CurrentUser() user: AuthenticatedUser) {
+    return this.notesService.getSharedWithMe(toNoteActor(user));
+  }
+
+  @Get('links')
+  @RequirePermissions('users:write')
+  @ApiOperation({ summary: 'Every live public share link in the workspace (admin)' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'The panic button for the day somebody leaves and nobody remembers what they published',
+  })
+  async listAllShareLinks() {
+    return this.sharingService.listAllActiveLinks();
+  }
+
+  @Delete('links/:linkId')
+  @RequirePermissions('users:write')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Emergency revoke of any public note link (admin)' })
+  async adminRevokeShareLink(
+    @Param('linkId', ParseIntPipe) linkId: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.sharingService.revokeLinkAsAdmin(linkId, toNoteActor(user));
   }
 
   @Get('search')
@@ -82,7 +125,7 @@ export class NotesController {
     @Query() query: SearchNotesDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.searchNotes(query.q, query.limit ?? 20, user.id);
+    return this.notesService.searchNotes(query.q, query.limit ?? 20, toNoteActor(user));
   }
 
   @Get('tags')
@@ -133,7 +176,7 @@ export class NotesController {
     @Body() dto: CreateNoteDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.createNote(dto, user.id);
+    return this.notesService.createNote(dto, toNoteActor(user));
   }
 
   // --- ':id' routes below this point. ---
@@ -147,7 +190,7 @@ export class NotesController {
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.getNoteById(id, user.id);
+    return this.notesService.getNoteById(id, toNoteActor(user));
   }
 
   @Put(':id')
@@ -161,7 +204,7 @@ export class NotesController {
     @Body() dto: UpdateNoteDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.updateNote(id, dto, user.id);
+    return this.notesService.updateNote(id, dto, toNoteActor(user));
   }
 
   @Patch(':id/content')
@@ -176,7 +219,7 @@ export class NotesController {
     @Body() dto: UpdateNoteContentDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.updateNoteContent(id, dto, user.id);
+    return this.notesService.updateNoteContent(id, dto, toNoteActor(user));
   }
 
   @Patch(':id/move')
@@ -191,7 +234,7 @@ export class NotesController {
     @Body() dto: MoveNoteDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.moveNote(id, dto, user.id);
+    return this.notesService.moveNote(id, dto, toNoteActor(user));
   }
 
   @Patch(':id/favorite')
@@ -204,7 +247,7 @@ export class NotesController {
     @Body() dto: SetFavoriteDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.setFavorite(id, dto.isFavorite, user.id);
+    return this.notesService.setFavorite(id, dto.isFavorite, toNoteActor(user));
   }
 
   @Patch(':id/entity')
@@ -218,7 +261,7 @@ export class NotesController {
     @Body() dto: SetEntityDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.setEntityLink(id, dto, user.id);
+    return this.notesService.setEntityLink(id, dto, toNoteActor(user));
   }
 
   @Patch(':id/tags')
@@ -231,7 +274,7 @@ export class NotesController {
     @Body() dto: SetTagsDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.setTags(id, dto.tagIds, user.id);
+    return this.notesService.setTags(id, dto.tagIds, toNoteActor(user));
   }
 
   @Post(':id/restore')
@@ -244,7 +287,7 @@ export class NotesController {
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.notesService.restoreNote(id, user.id);
+    return this.notesService.restoreNote(id, toNoteActor(user));
   }
 
   @Delete(':id')
@@ -258,7 +301,7 @@ export class NotesController {
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    await this.notesService.trashNote(id, user.id);
+    await this.notesService.trashNote(id, toNoteActor(user));
   }
 
   @Delete(':id/purge')
@@ -272,6 +315,159 @@ export class NotesController {
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    await this.notesService.purgeNote(id, user.id);
+    await this.notesService.purgeNote(id, toNoteActor(user));
+  }
+
+  // ------------------------------------------------------------------
+  // Sharing
+  //
+  // Two different things live here, and the permission split reflects it: granting a
+  // colleague access needs `editor` on the note, publishing it to the internet needs
+  // `owner`. The first is reversible from the same dialog; the second is not, for
+  // anyone who already copied the URL.
+  // ------------------------------------------------------------------
+
+  @Get(':id/access')
+  @ApiOperation({ summary: 'Who can reach this note, and how — everything the share dialog shows' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({ status: 200, description: 'Visibility, grants (direct and inherited) and links' })
+  @ApiResponse({ status: 404, description: 'Note page not found, or not visible to you' })
+  async getAccess(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.sharingService.getAccessPanel(id, toNoteActor(user));
+  }
+
+  @Patch(':id/visibility')
+  @RequirePermissions('notes:write')
+  @ApiOperation({ summary: 'Switch a note between private and team-visible' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({ status: 200, description: 'Visibility updated' })
+  async setVisibility(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SetVisibilityDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.notesService.setVisibility(id, dto, toNoteActor(user));
+  }
+
+  @Post(':id/shares')
+  @RequirePermissions('notes:write')
+  @ApiOperation({ summary: 'Grant a user or role access to this note and its subtree' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({ status: 201, description: 'Access granted; returns the refreshed panel' })
+  @ApiResponse({ status: 422, description: 'Sharing with yourself' })
+  async addShare(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateNoteShareDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.sharingService.addShare(id, dto, toNoteActor(user));
+  }
+
+  @Patch(':id/shares/:shareId')
+  @RequirePermissions('notes:write')
+  @ApiOperation({ summary: 'Change an existing grant’s level or expiry' })
+  @ApiResponse({ status: 422, description: 'The grant is inherited — change it where it lives' })
+  async updateShare(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('shareId', ParseIntPipe) shareId: number,
+    @Body() dto: UpdateNoteShareDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.sharingService.updateShare(id, shareId, dto, toNoteActor(user));
+  }
+
+  @Delete(':id/shares/:shareId')
+  @RequirePermissions('notes:write')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Revoke a grant' })
+  @ApiResponse({ status: 204, description: 'Access revoked' })
+  async removeShare(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('shareId', ParseIntPipe) shareId: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.sharingService.removeShare(id, shareId, toNoteActor(user));
+  }
+
+  @Post(':id/links')
+  @RequirePermissions('notes:write')
+  @ApiOperation({ summary: 'Publish the note to a public URL' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({
+    status: 201,
+    description:
+      'The only response that ever carries the token in clear — only its SHA-256 is stored',
+  })
+  async createLink(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateNoteLinkDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.sharingService.createLink(id, dto, toNoteActor(user));
+  }
+
+  @Get(':id/links')
+  @ApiOperation({ summary: 'Share links for this note (no tokens — they are not recoverable)' })
+  @ApiParam({ name: 'id', type: Number })
+  async listLinks(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.sharingService.listLinks(id, toNoteActor(user));
+  }
+
+  @Patch(':id/links/:linkId')
+  @RequirePermissions('notes:write')
+  @ApiOperation({ summary: 'Change a link’s password, expiry, scope or indexing' })
+  async updateLink(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('linkId', ParseIntPipe) linkId: number,
+    @Body() dto: UpdateNoteLinkDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.sharingService.updateLink(id, linkId, dto, toNoteActor(user));
+  }
+
+  @Post(':id/links/:linkId/rotate')
+  @RequirePermissions('notes:write')
+  @ApiOperation({
+    summary: 'Issue a new URL and kill the old one, keeping the note published',
+  })
+  @ApiResponse({ status: 201, description: 'New link, with its token in clear once' })
+  async rotateLink(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('linkId', ParseIntPipe) linkId: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.sharingService.rotateLink(id, linkId, toNoteActor(user));
+  }
+
+  @Delete(':id/links/:linkId')
+  @RequirePermissions('notes:delete')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Unpublish. Soft revoke — the audit trail survives it' })
+  async revokeLink(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('linkId', ParseIntPipe) linkId: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.sharingService.revokeLink(id, linkId, toNoteActor(user));
+  }
+
+  @Get(':id/links/:linkId/views')
+  @ApiOperation({ summary: 'Who has been reading a published note, and when' })
+  @ApiResponse({
+    status: 200,
+    description: 'Totals, unique visitors by hashed IP, and a 30-day daily series',
+  })
+  async getLinkViews(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('linkId', ParseIntPipe) linkId: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.sharingService.getLinkStats(id, linkId, toNoteActor(user));
   }
 }

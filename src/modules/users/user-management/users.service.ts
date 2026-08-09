@@ -69,6 +69,19 @@ export class UsersService {
     return this.usersRepo.findAll();
   }
 
+  /** Minimal directory of active colleagues — see UsersController.findUserDirectory. */
+  async findDirectory(): Promise<
+    Array<{ id: number; name: string | null; email: string; picture: string | null }>
+  > {
+    const users = await this.usersRepo.findActiveDirectory();
+    return users.map((user) => ({
+      id: user.id,
+      name: user.name ?? null,
+      email: user.email,
+      picture: user.picture ?? null,
+    }));
+  }
+
   async findById(id: number): Promise<User> {
     const user = await this.usersRepo.findById(id);
     if (!user) throw new UserNotFoundException(id);

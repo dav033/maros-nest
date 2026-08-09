@@ -16,6 +16,15 @@ import { User } from './user.entity';
 
 export type NotePageKind = 'page' | 'folder';
 
+/**
+ * Who can reach the note from inside the CRM.
+ *
+ * `public` is deliberately absent: being published is a property of a share link (see
+ * NotePageLink), not of the note. A note can carry two links with different expiries,
+ * and unpublishing must not change who inside the company can read it.
+ */
+export type NotePageVisibility = 'private' | 'team';
+
 @Entity('note_pages')
 @Index('idx_note_pages_parent', ['parent'])
 @Index('idx_note_pages_entity', ['entityKind', 'entityId'])
@@ -66,10 +75,17 @@ export class NotePage {
 
   /**
    * Set on notes created after this column existed; NULL on everything older.
-   * Only meaningful for privacy when entityKind is also null — see note-access.util.ts.
+   *
+   * It used to double as the privacy key (private iff owner_id set and entity_kind
+   * null). `visibility` owns that now; owner_id means only "whose note is this", which
+   * is what grants the right to publish it or change its visibility.
    */
   @Column({ name: 'owner_id', type: 'int', nullable: true })
   ownerId?: number | null;
+
+  /** See NotePageVisibility. Backfilled from the old implicit rule in db/notes-sharing.sql. */
+  @Column({ type: 'varchar', length: 12, default: 'team' })
+  visibility: NotePageVisibility;
 
   @Column({ name: 'created_by_id', type: 'int', nullable: true })
   createdById?: number | null;

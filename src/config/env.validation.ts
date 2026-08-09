@@ -161,6 +161,25 @@ export class EnvironmentVariables {
   @IsOptional()
   AUTH_DEFAULT_ROLE: string = 'member';
 
+  // Public note share links
+  /**
+   * Origin the /p/<token> reader is served from, used to build the URL handed back when
+   * a link is created. The backend cannot infer it: the API and the app live on
+   * different hosts.
+   */
+  @IsString()
+  @IsOptional()
+  PUBLIC_APP_BASE_URL: string = 'http://localhost:3000';
+
+  /**
+   * Salt for hashing visitor IPs in the share-link view log. Without it the ip_hash
+   * column stays NULL — unique-visitor counts are lost, nothing else breaks, and no
+   * reversible address is ever written. Generate with: openssl rand -hex 32
+   */
+  @IsString()
+  @IsOptional()
+  NOTE_SHARE_IP_SALT: string;
+
   // QuickBooks Online
   @IsString()
   @IsOptional()

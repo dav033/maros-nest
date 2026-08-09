@@ -22,6 +22,23 @@ export class UsersRepository {
   }
 
   /**
+   * Active colleagues, name and picture only — the people-picker in the share dialog.
+   *
+   * Explicitly not findAll(): that one joins roles and is gated behind `users:read`,
+   * which members do not have. Selecting the columns here rather than mapping them
+   * afterwards means role and status never leave the database in the first place.
+   */
+  async findActiveDirectory(): Promise<
+    Array<Pick<User, 'id' | 'email' | 'name' | 'picture'>>
+  > {
+    return this.repo.find({
+      where: { isActive: true },
+      select: { id: true, email: true, name: true, picture: true },
+      order: { name: 'ASC', email: 'ASC' },
+    });
+  }
+
+  /**
    * Emails are stored lowercased, but match case-insensitively anyway so a
    * row created before that rule (or by hand in Supabase) still resolves.
    */

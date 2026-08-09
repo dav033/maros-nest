@@ -6,11 +6,16 @@ import type { NextFunction, Response } from 'express';
 import { NotesController } from './notes.controller';
 import { NotesService } from './notes.service';
 import { NoteTagsService } from './services/note-tags.service';
+import { NoteSharingService } from '../note-sharing/note-sharing.service';
 import type { RequestWithUser } from '../../../common/auth/authenticated-user';
 
 const TEST_USER_ID = 7;
 
-/** Stands in for SessionAuthGuard, which isn't part of this isolated module. */
+/**
+ * Stands in for SessionAuthGuard, which isn't part of this isolated module. The
+ * permissions matter: the controller turns the user into a NoteActor, and `canWrite`
+ * is read straight off this list.
+ */
 function stubCurrentUser(req: RequestWithUser, _res: Response, next: NextFunction) {
   req.user = {
     id: TEST_USER_ID,
@@ -18,7 +23,7 @@ function stubCurrentUser(req: RequestWithUser, _res: Response, next: NextFunctio
     name: 'Test User',
     picture: null,
     role: { id: 1, name: 'admin' },
-    permissions: [],
+    permissions: ['notes:read', 'notes:write', 'notes:delete'],
   };
   next();
 }
@@ -28,6 +33,7 @@ describe('NotesController route ordering and validation', () => {
   let server: Server;
   let notesService: Record<string, jest.Mock>;
   let noteTagsService: Record<string, jest.Mock>;
+  let sharingService: Record<string, jest.Mock>;
 
   beforeEach(async () => {
     notesService = {
@@ -39,6 +45,11 @@ describe('NotesController route ordering and validation', () => {
       updateNoteContent: jest.fn().mockResolvedValue({ id: 1 }),
       createNote: jest.fn().mockResolvedValue({ id: 1 }),
       setEntityLink: jest.fn().mockResolvedValue({ id: 1 }),
+      getSharedWithMe: jest.fn().mockResolvedValue([{ id: 3, title: 'Shared' }]),
+    };
+    sharingService = {
+      listAllActiveLinks: jest.fn().mockResolvedValue([]),
+      getAccessPanel: jest.fn().mockResolvedValue({ pageId: 42, myAccess: 'owner' }),
     };
     noteTagsService = {
       listTags: jest.fn().mockResolvedValue([{ id: 1, name: 'Urgent', color: 'red' }]),
@@ -49,6 +60,7 @@ describe('NotesController route ordering and validation', () => {
       providers: [
         { provide: NotesService, useValue: notesService },
         { provide: NoteTagsService, useValue: noteTagsService },
+        { provide: NoteSharingService, useValue: sharingService },
       ],
     }).compile();
 
@@ -78,6 +90,32 @@ describe('NotesController route ordering and validation', () => {
     expect(res.body).toEqual([{ id: 1, title: 'Trashed' }]);
   });
 
+  it('GET /notes/shared-with-me hits its own handler, not getNoteById', async () => {
+    // Every static segment added under /notes is one more chance to be swallowed by
+    // ':id'. That is what this whole suite exists to catch.
+    const res = await request(server).get('/notes/shared-with-me').expect(200);
+
+    expect(notesService.getSharedWithMe).toHaveBeenCalledTimes(1);
+    expect(notesService.getNoteById).not.toHaveBeenCalled();
+    expect(res.body).toEqual([{ id: 3, title: 'Shared' }]);
+  });
+
+  it('GET /notes/links lists workspace share links, not a note called "links"', async () => {
+    await request(server).get('/notes/links').expect(200);
+
+    expect(sharingService.listAllActiveLinks).toHaveBeenCalledTimes(1);
+    expect(notesService.getNoteById).not.toHaveBeenCalled();
+  });
+
+  it('GET /notes/:id/access reaches the sharing service', async () => {
+    await request(server).get('/notes/42/access').expect(200);
+
+    expect(sharingService.getAccessPanel).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({ id: TEST_USER_ID }),
+    );
+  });
+
   it('GET /notes/favorites hits the favorites handler, not getNoteById', async () => {
     await request(server).get('/notes/favorites').expect(200);
     expect(notesService.getFavorites).toHaveBeenCalledTimes(1);
@@ -98,12 +136,12 @@ describe('NotesController route ordering and validation', () => {
 
   it('GET /notes/search calls through with a valid query', async () => {
     await request(server).get('/notes/search?q=permit').expect(200);
-    expect(notesService.searchNotes).toHaveBeenCalledWith('permit', 20, TEST_USER_ID);
+    expect(notesService.searchNotes).toHaveBeenCalledWith('permit', 20, expect.objectContaining({ id: TEST_USER_ID }));
   });
 
   it('GET /notes/:id falls through to getNoteById for a numeric id', async () => {
     const res = await request(server).get('/notes/42').expect(200);
-    expect(notesService.getNoteById).toHaveBeenCalledWith(42, TEST_USER_ID);
+    expect(notesService.getNoteById).toHaveBeenCalledWith(42, expect.objectContaining({ id: TEST_USER_ID }));
     expect(res.body).toEqual({ id: 42 });
   });
 
@@ -123,7 +161,7 @@ describe('NotesController route ordering and validation', () => {
 
     await request(server).patch('/notes/1/content').send({ content: doc }).expect(200);
 
-    expect(notesService.updateNoteContent).toHaveBeenCalledWith(1, { content: doc }, TEST_USER_ID);
+    expect(notesService.updateNoteContent).toHaveBeenCalledWith(1, { content: doc }, expect.objectContaining({ id: TEST_USER_ID }));
   });
 
   it('rejects unknown top-level properties on create', async () => {
@@ -143,7 +181,7 @@ describe('NotesController route ordering and validation', () => {
     expect(notesService.setEntityLink).toHaveBeenCalledWith(
       1,
       { entityKind: 'lead', entityId: 42 },
-      TEST_USER_ID,
+      expect.objectContaining({ id: TEST_USER_ID }),
     );
   });
 
@@ -156,7 +194,7 @@ describe('NotesController route ordering and validation', () => {
     expect(notesService.setEntityLink).toHaveBeenCalledWith(
       1,
       { entityKind: null, entityId: null },
-      TEST_USER_ID,
+      expect.objectContaining({ id: TEST_USER_ID }),
     );
   });
 
