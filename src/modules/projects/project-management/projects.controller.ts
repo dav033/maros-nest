@@ -35,6 +35,13 @@ export class ProjectsController {
     return this.projectsService.findAll();
   }
 
+  @Get('picker')
+  @ApiOperation({ summary: 'Get lightweight projects for record pickers' })
+  @ApiResponse({ status: 200, description: 'Returns project id and linked lead label without QuickBooks enrichment' })
+  async getProjectsForPicker() {
+    return this.projectsService.findProjectsForPicker();
+  }
+
   @Get('by-lead-number')
   @ApiOperation({ summary: 'Get project by lead number' })
   @ApiQuery({ name: 'leadNumber', type: String, required: true })

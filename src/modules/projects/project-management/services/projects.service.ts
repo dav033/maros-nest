@@ -214,6 +214,21 @@ export class ProjectsService extends BaseService<any, number, Project> {
     return dtos;
   }
 
+  /** A small, local-only list used by selectors that must not wait on QuickBooks. */
+  async findProjectsForPicker(): Promise<
+    Array<{ id: number; name: string; leadNumber: string | null }>
+  > {
+    const projects = await this.projectRepo.find({ relations: ['lead'] });
+    return projects.map((project) => ({
+      id: project.id,
+      name:
+        project.lead?.name ??
+        project.lead?.leadNumber ??
+        `Project #${project.id}`,
+      leadNumber: project.lead?.leadNumber ?? null,
+    }));
+  }
+
   async findById(id: number): Promise<any> {
     const startTime = Date.now();
 

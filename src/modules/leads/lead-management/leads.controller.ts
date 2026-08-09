@@ -37,6 +37,13 @@ export class LeadsController {
     return this.leadsService.getAllLeads({ includeQbo: true });
   }
 
+  @Get('picker')
+  @ApiOperation({ summary: 'Get lightweight leads for record pickers' })
+  @ApiResponse({ status: 200, description: 'Returns lead id, name and number without QuickBooks enrichment' })
+  async getLeadsForPicker() {
+    return this.leadsService.getLeadsForPicker();
+  }
+
   @Post('type')
   @ApiOperation({ summary: 'Get leads by type (POST with body)' })
   @ApiResponse({ status: 200, description: 'Returns leads filtered by type' })

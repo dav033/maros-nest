@@ -50,6 +50,18 @@ export class LeadsService {
     return this.mapLeadList(this.leadsRepository.findAll(), options);
   }
 
+  /** A small, local-only list used by selectors that must not wait on QuickBooks. */
+  async getLeadsForPicker(): Promise<
+    Array<{ id: number; name: string; leadNumber: string | null }>
+  > {
+    const leads = await this.leadsRepository.findAll();
+    return leads.map((lead) => ({
+      id: lead.id,
+      name: lead.name ?? lead.leadNumber ?? `Lead #${lead.id}`,
+      leadNumber: lead.leadNumber ?? null,
+    }));
+  }
+
   async getPipelineLeads(options: { includeQbo?: boolean } = {}): Promise<any[]> {
     return this.mapLeadList(this.leadsRepository.findPipeline(), options);
   }
