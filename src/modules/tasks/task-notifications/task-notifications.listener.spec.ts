@@ -140,23 +140,27 @@ describe('TaskNotificationsListener watcher fanout', () => {
 });
 
 describe('TaskNotificationsListener assignment email', () => {
-  it('emails the new assignee', async () => {
+  it('emails the new assignee, with both a text and an HTML body', async () => {
     const { listener, mailService, usersRepository } = makeListener();
 
     await listener.onAssigned({ taskId: 1, assigneeUserId: 7, actorId: 3 });
 
     expect(usersRepository.findById).toHaveBeenCalledWith(7);
     expect(mailService.sendMail).toHaveBeenCalledWith(
-      expect.objectContaining({ to: ['crew@marosconstruction.com'] }),
+      expect.objectContaining({
+        to: ['crew@marosconstruction.com'],
+        text: expect.stringContaining('Task'),
+        html: expect.stringContaining('<html'),
+      }),
     );
   });
 
-  it('never emails for a self-assignment', async () => {
+  it('still emails on a self-assignment, even though the bell skips it', async () => {
     const { listener, mailService } = makeListener();
 
     await listener.onAssigned({ taskId: 1, assigneeUserId: 3, actorId: 3 });
 
-    expect(mailService.sendMail).not.toHaveBeenCalled();
+    expect(mailService.sendMail).toHaveBeenCalled();
   });
 
   it('skips the email when the assignee has no address on file', async () => {

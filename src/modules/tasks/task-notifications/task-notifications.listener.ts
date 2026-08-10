@@ -7,6 +7,7 @@ import { UsersRepository } from '../../users/user-management/repositories/users.
 import { TaskWatchersRepository } from '../task-management/repositories/task-watchers.repository';
 import { TasksRepository } from '../task-management/repositories/tasks.repository';
 import type { NotificationKind } from '../../../entities/notification.entity';
+import { renderTaskAssignedEmail } from './task-email-templates';
 
 interface TaskAssignedEvent {
   taskId: number;
@@ -40,6 +41,11 @@ interface TaskCommentedEvent {
  * comments stay in-app only; the daily digest (TaskDigestCron) is the other mail this
  * feature sends.
  *
+ * Self-assignment is the one deliberate exception to "never notify yourself": the
+ * in-app bell still skips it (you're already looking at the screen), but the email
+ * fires regardless — it doubles as a receipt/reminder in your inbox, and it's how the
+ * assignment mail pipeline gets exercised without needing a second test account.
+ *
  * Every handler is wrapped in try/catch: a failed notification insert or a bounced
  * email is not a reason to surface an error anywhere near the task mutation that
  * triggered it (which has already committed and responded by the time this runs) or to
@@ -61,19 +67,22 @@ export class TaskNotificationsListener {
 
   @OnEvent('task.assigned')
   async onAssigned(event: TaskAssignedEvent): Promise<void> {
-    // Assigning yourself a task is not news to you.
-    if (event.assigneeUserId === event.actorId) return;
     await this.safely('task.assigned', async () => {
       const task = await this.tasksRepository.findByIdActive(event.taskId);
       if (!task) return;
-      await this.notificationsService.create({
-        userId: event.assigneeUserId,
-        kind: 'task_assigned',
-        actorId: event.actorId,
-        entityKind: 'task',
-        entityId: event.taskId,
-        payload: { taskId: event.taskId, taskTitle: task.title },
-      });
+
+      // The bell still skips self-assignment — not news if you're the one who just
+      // did it. The email does not skip it; see the class doc comment for why.
+      if (event.assigneeUserId !== event.actorId) {
+        await this.notificationsService.create({
+          userId: event.assigneeUserId,
+          kind: 'task_assigned',
+          actorId: event.actorId,
+          entityKind: 'task',
+          entityId: event.taskId,
+          payload: { taskId: event.taskId, taskTitle: task.title },
+        });
+      }
       await this.sendAssignmentEmail(event.assigneeUserId, task.id, task.title);
     });
   }
@@ -135,11 +144,13 @@ export class TaskNotificationsListener {
       const frontendUrl =
         this.configService.get<string>('FRONTEND_URL') ?? 'https://marosconstruction.com';
       const taskUrl = `${frontendUrl}/tasks?task=${taskId}`;
+      const { subject, text, html } = renderTaskAssignedEmail({ taskTitle, taskId, taskUrl });
 
       const result = await this.mailService.sendMail({
         to: [assignee.email],
-        subject: `Task assigned: ${taskTitle}`,
-        text: `You were assigned "${taskTitle}" (T-${taskId}).\n\n${taskUrl}`,
+        subject,
+        text,
+        html,
       });
       this.logger.log(
         `Assignment email sent to ${assignee.email} — messageId: ${result.messageId ?? 'N/A'}`,

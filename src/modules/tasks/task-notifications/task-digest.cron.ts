@@ -6,6 +6,7 @@ import { User } from '../../../entities/user.entity';
 import { TasksRepository } from '../task-management/repositories/tasks.repository';
 import { TaskMapper } from '../task-management/mappers/task.mapper';
 import { MailService } from '../../mail/services/mail.service';
+import { renderTaskDigestEmail } from './task-email-templates';
 
 interface DigestEntry {
   user: User;
@@ -76,24 +77,17 @@ export class TaskDigestCron {
       const frontendUrl =
         this.configService.get<string>('FRONTEND_URL') ?? 'https://marosconstruction.com';
       const total = entry.overdue.length + entry.dueToday.length;
-
-      const lines: string[] = [];
-      if (entry.overdue.length > 0) {
-        lines.push(`Overdue (${entry.overdue.length}):`);
-        lines.push(...entry.overdue.map((t) => `  - ${t.title} (T-${t.id})`));
-        lines.push('');
-      }
-      if (entry.dueToday.length > 0) {
-        lines.push(`Due today (${entry.dueToday.length}):`);
-        lines.push(...entry.dueToday.map((t) => `  - ${t.title} (T-${t.id})`));
-        lines.push('');
-      }
-      lines.push(`${frontendUrl}/tasks/mine`);
+      const { subject, text, html } = renderTaskDigestEmail({
+        overdue: entry.overdue.map((t) => ({ id: t.id, title: t.title })),
+        dueToday: entry.dueToday.map((t) => ({ id: t.id, title: t.title })),
+        tasksUrl: `${frontendUrl}/tasks/mine`,
+      });
 
       const result = await this.mailService.sendMail({
         to: [entry.user.email],
-        subject: `${total} task${total === 1 ? '' : 's'} need${total === 1 ? 's' : ''} attention`,
-        text: lines.join('\n'),
+        subject,
+        text,
+        html,
       });
       this.logger.log(
         `Digest sent to ${entry.user.email} — ${total} task(s), messageId: ${result.messageId ?? 'N/A'}`,
