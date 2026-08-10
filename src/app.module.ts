@@ -25,6 +25,7 @@ import { QuickbooksModule } from './modules/quickbooks/quickbooks.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { NotesModule } from './modules/notes/notes.module';
 import { UsersModule } from './modules/users/users.module';
+import { TasksModule } from './modules/tasks/tasks.module';
 
 @Module({
   imports: [
@@ -71,6 +72,7 @@ import { UsersModule } from './modules/users/users.module';
     AnalyticsModule,
     NotesModule,
     UsersModule,
+    TasksModule,
   ],
   controllers: [AppController],
   providers: [
