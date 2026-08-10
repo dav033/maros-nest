@@ -98,6 +98,24 @@ export class TaskActivityService {
     });
   }
 
+  logCommented(taskId: number, actorId: number | null, commentId: number) {
+    return this.taskActivityRepository.log({
+      taskId,
+      actorId,
+      kind: 'commented',
+      toValue: String(commentId),
+    });
+  }
+
+  logAttachmentAdded(taskId: number, actorId: number | null, addedCount: number) {
+    return this.taskActivityRepository.log({
+      taskId,
+      actorId,
+      kind: 'attachment_added',
+      toValue: String(addedCount),
+    });
+  }
+
   findByTask(taskId: number): Promise<TaskActivity[]> {
     return this.taskActivityRepository.findByTask(taskId);
   }

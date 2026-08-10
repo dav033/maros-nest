@@ -4,6 +4,7 @@ import { TasksRepository } from './repositories/tasks.repository';
 import { TaskLabelsRepository } from './repositories/task-labels.repository';
 import { TaskWatchersRepository } from './repositories/task-watchers.repository';
 import { TaskActivityService } from './services/task-activity.service';
+import { TaskCommentsService } from './services/task-comments.service';
 import { TaskMapper } from './mappers/task.mapper';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
@@ -31,6 +32,7 @@ export class TasksService {
     private readonly taskLabelsRepository: TaskLabelsRepository,
     private readonly taskWatchersRepository: TaskWatchersRepository,
     private readonly taskActivity: TaskActivityService,
+    private readonly taskComments: TaskCommentsService,
     private readonly taskMapper: TaskMapper,
     private readonly eventEmitter: EventEmitter2,
   ) {}
@@ -38,11 +40,12 @@ export class TasksService {
   private async freshDetail(id: number): Promise<any> {
     const task = await this.tasksRepository.findByIdActive(id);
     if (!task) throw new TaskNotFoundException(id);
-    const [children, activity] = await Promise.all([
+    const [children, activity, comments] = await Promise.all([
       this.tasksRepository.findChildren(id),
       this.taskActivity.findByTask(id),
+      this.taskComments.list(id),
     ]);
-    return this.taskMapper.toDetailDto(task, children, activity);
+    return { ...this.taskMapper.toDetailDto(task, children, activity), comments };
   }
 
   async getBoard(): Promise<Record<string, any[]>> {
@@ -166,6 +169,16 @@ export class TasksService {
         throw new TaskBlockedReasonRequiredException();
       }
       task.blockedReason = dto.blockedReason;
+    }
+
+    if (dto.attachments !== undefined) {
+      // Only a net gain counts as "added" — reordering or removing isn't worth its own
+      // activity kind, and inventing "attachment_removed" for one caller isn't either.
+      const added = dto.attachments.length - task.attachments.length;
+      if (added > 0) {
+        await this.taskActivity.logAttachmentAdded(id, actor.id, added);
+      }
+      task.attachments = dto.attachments;
     }
 
     await this.tasksRepository.save(task);

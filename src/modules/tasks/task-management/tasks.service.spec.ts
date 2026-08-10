@@ -9,8 +9,8 @@ import {
   TaskBlockedReasonRequiredException,
 } from '../../../common/exceptions';
 
-function actor(id = 1): TaskActor {
-  return { id };
+function actor(id = 1, canDelete = false): TaskActor {
+  return { id, canDelete };
 }
 
 function task(overrides: Partial<Task> = {}): Task {
@@ -54,6 +54,8 @@ function makeService(tasksRepositoryOverrides: Record<string, jest.Mock> = {}) {
     log: jest.fn().mockResolvedValue(undefined),
     findByTask: jest.fn().mockResolvedValue([]),
   };
+  // freshDetail() splices this in alongside children/activity — see TasksService.
+  const taskComments = { list: jest.fn().mockResolvedValue([]) };
   const eventEmitter = { emit: jest.fn() };
 
   const service = new TasksService(
@@ -61,6 +63,7 @@ function makeService(tasksRepositoryOverrides: Record<string, jest.Mock> = {}) {
     taskLabelsRepository as never,
     taskWatchersRepository as never,
     new TaskActivityService(taskActivityRepository as never),
+    taskComments as never,
     new TaskMapper(),
     eventEmitter as never,
   );
@@ -352,5 +355,35 @@ describe('TasksService.setAssignee', () => {
     await service.setAssignee(1, { userId: null }, actor(3));
 
     expect(eventEmitter.emit).not.toHaveBeenCalledWith('task.assigned', expect.anything());
+  });
+});
+
+describe('TasksService.update', () => {
+  it('logs attachment_added when the attachment list grows', async () => {
+    const existing = task({ attachments: ['a.png'] });
+    const { service, taskActivityRepository } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      save: jest.fn().mockImplementation((t: Task) => Promise.resolve(t)),
+    });
+
+    await service.update(1, { attachments: ['a.png', 'b.png', 'c.png'] }, actor(4));
+
+    expect(taskActivityRepository.log).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 1, actorId: 4, kind: 'attachment_added', toValue: '2' }),
+    );
+  });
+
+  it('does not log an activity when attachments only shrink or reorder', async () => {
+    const existing = task({ attachments: ['a.png', 'b.png'] });
+    const { service, taskActivityRepository } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      save: jest.fn().mockImplementation((t: Task) => Promise.resolve(t)),
+    });
+
+    await service.update(1, { attachments: ['b.png'] }, actor(4));
+
+    expect(taskActivityRepository.log).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'attachment_added' }),
+    );
   });
 });

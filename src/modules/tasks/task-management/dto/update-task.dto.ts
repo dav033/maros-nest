@@ -1,4 +1,13 @@
-import { IsString, IsOptional, MaxLength, IsInt, IsIn, IsObject, IsDateString } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  MaxLength,
+  IsInt,
+  IsIn,
+  IsObject,
+  IsDateString,
+  IsArray,
+} from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { TASK_KINDS, TASK_PRIORITIES } from '../../../../entities/task.entity';
 import type { TaskKind, TaskPriority } from '../../../../entities/task.entity';
@@ -59,4 +68,13 @@ export class UpdateTaskDto {
   @IsOptional()
   @MaxLength(500)
   blockedReason?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Complete set of S3 attachment keys, in display order',
+    type: [String],
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  attachments?: string[];
 }

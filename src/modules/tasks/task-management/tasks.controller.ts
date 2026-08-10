@@ -15,6 +15,7 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { TasksService } from './tasks.service';
 import { TaskLabelsService } from './services/task-labels.service';
+import { TaskCommentsService } from './services/task-comments.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
@@ -24,6 +25,8 @@ import { SetEntityDto } from './dto/set-entity.dto';
 import { SearchTasksDto } from './dto/search-tasks.dto';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { UpdateLabelDto } from './dto/update-label.dto';
+import { CreateCommentDto } from './dto/create-comment.dto';
+import { UpdateCommentDto } from './dto/update-comment.dto';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
@@ -37,6 +40,7 @@ export class TasksController {
   constructor(
     private readonly tasksService: TasksService,
     private readonly taskLabelsService: TaskLabelsService,
+    private readonly taskCommentsService: TaskCommentsService,
   ) {}
 
   // --- Static routes first: they must never be shadowed by ':id'. ---
@@ -209,5 +213,60 @@ export class TasksController {
   @ApiResponse({ status: 404, description: 'Task not found' })
   async deleteTask(@Param('id', ParseIntPipe) id: number) {
     await this.tasksService.delete(id);
+  }
+
+  // --- Comments ---
+
+  @Get(':id/comments')
+  @ApiOperation({ summary: 'List a task’s comments, oldest first' })
+  @ApiParam({ name: 'id', type: Number })
+  async listComments(@Param('id', ParseIntPipe) id: number) {
+    return this.taskCommentsService.list(id);
+  }
+
+  @Post(':id/comments')
+  @RequirePermissions('tasks:write')
+  @ApiOperation({ summary: 'Add a comment. The author becomes a watcher.' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({ status: 201, description: 'Comment created successfully' })
+  @ApiResponse({ status: 404, description: 'Task not found' })
+  async createComment(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateCommentDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.taskCommentsService.create(id, dto, toTaskActor(user));
+  }
+
+  @Patch(':id/comments/:commentId')
+  @RequirePermissions('tasks:write')
+  @ApiOperation({ summary: 'Edit a comment — the author, or someone with tasks:delete' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiParam({ name: 'commentId', type: Number })
+  @ApiResponse({ status: 403, description: 'Not the author, and no tasks:delete' })
+  @ApiResponse({ status: 404, description: 'Comment not found on this task' })
+  async updateComment(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('commentId', ParseIntPipe) commentId: number,
+    @Body() dto: UpdateCommentDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.taskCommentsService.update(id, commentId, dto, toTaskActor(user));
+  }
+
+  @Delete(':id/comments/:commentId')
+  @RequirePermissions('tasks:write')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a comment — the author, or someone with tasks:delete' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiParam({ name: 'commentId', type: Number })
+  @ApiResponse({ status: 403, description: 'Not the author, and no tasks:delete' })
+  @ApiResponse({ status: 404, description: 'Comment not found on this task' })
+  async deleteComment(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('commentId', ParseIntPipe) commentId: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.taskCommentsService.delete(id, commentId, toTaskActor(user));
   }
 }

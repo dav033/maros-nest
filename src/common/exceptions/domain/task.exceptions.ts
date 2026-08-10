@@ -36,10 +36,17 @@ export class TaskBlockedReasonRequiredException extends BusinessException {
   }
 }
 
+export class TaskCommentNotFoundException extends ResourceNotFoundException {
+  constructor(id: number) {
+    super(`Task comment not found with id: ${id}`);
+  }
+}
+
 export const TaskExceptions = {
   TaskNotFoundException,
   TaskLabelNotFoundException,
   TaskLabelNameConflictException,
   TaskSubtaskNestingException,
   TaskBlockedReasonRequiredException,
+  TaskCommentNotFoundException,
 };
