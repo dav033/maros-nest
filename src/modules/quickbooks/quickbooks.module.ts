@@ -4,6 +4,7 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { QboConnection } from './entities/qbo-connection.entity';
 import { Company } from '../../entities/company.entity';
+import { Lead } from '../../entities/lead.entity';
 import { TokenCryptoService } from './services/core/token-crypto.service';
 import { QuickbooksAuthService } from './services/core/quickbooks-auth.service';
 import { QuickbooksApiService } from './services/core/quickbooks-api.service';
@@ -30,7 +31,7 @@ import { QuickbooksController } from './quickbooks.controller';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([QboConnection, Company]),
+    TypeOrmModule.forFeature([QboConnection, Company, Lead]),
     HttpModule,
     CacheModule.register({
       ttl: 300_000,

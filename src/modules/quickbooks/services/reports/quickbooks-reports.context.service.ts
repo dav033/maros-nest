@@ -4,8 +4,10 @@ import type { Cache } from 'cache-manager';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { QboConnection } from '../../entities/qbo-connection.entity';
+import { Lead } from '../../../../entities/lead.entity';
 import { QboReauthorizationRequiredException } from '../../exceptions/qbo-reauthorization-required.exception';
 import { QuickbooksApiService } from '../core/quickbooks-api.service';
+import { mapQboCustomersToProjects } from '../financials/quickbooks-financials.helpers';
 import {
   JobIndex,
   QboCustomer,
@@ -20,6 +22,8 @@ export class QuickbooksReportsContextService {
   constructor(
     @InjectRepository(QboConnection)
     private readonly connectionRepo: Repository<QboConnection>,
+    @InjectRepository(Lead)
+    private readonly leadRepo: Repository<Lead>,
     private readonly apiService: QuickbooksApiService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
@@ -43,15 +47,31 @@ export class QuickbooksReportsContextService {
       select: 'Id, DisplayName, FullyQualifiedName',
     })) as QboCustomer[];
 
+    const projectRows = await this.leadRepo
+      .createQueryBuilder('lead')
+      .innerJoin('lead.project', 'project')
+      .select('lead.leadNumber', 'leadNumber')
+      .where('lead.leadNumber IS NOT NULL')
+      .andWhere("lead.leadNumber <> ''")
+      .getRawMany<{ leadNumber: string }>();
+    const projectNumbers = projectRows
+      .map((row) => row.leadNumber)
+      .filter(Boolean);
+    const projectMatches = mapQboCustomersToProjects(projectNumbers, customers);
+    const projectNumberByCustomerId = new Map(
+      [...projectMatches.entries()].map(([projectNumber, customer]) => [
+        String(customer.Id),
+        projectNumber,
+      ]),
+    );
+
     const byId: JobIndex['byId'] = {};
     const projectNumberById: JobIndex['projectNumberById'] = {};
 
     for (const c of customers) {
       const id = String(c.Id);
       byId[id] = c;
-      const displayName = String(c.DisplayName ?? '').trim();
-      const prefix = displayName.split(',')[0].trim();
-      projectNumberById[id] = prefix || null;
+      projectNumberById[id] = projectNumberByCustomerId.get(id) ?? null;
     }
 
     const index: JobIndex = { byId, projectNumberById };
@@ -71,4 +91,3 @@ export class QuickbooksReportsContextService {
     return '';
   }
 }
-

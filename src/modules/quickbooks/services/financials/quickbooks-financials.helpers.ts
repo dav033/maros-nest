@@ -7,6 +7,7 @@ import {
   ProjectDetail,
   ProjectFinancials,
   ProjectProfitAndLoss,
+  QboCustomer,
   QboEstimateResponse,
   QboInvoiceResponse,
   QboTxnBase,
@@ -32,6 +33,108 @@ export function deduplicateProjectNumbers(raw: string[]): string[] {
     seen.add(trimmed);
     result.push(trimmed);
   }
+  return result;
+}
+
+/**
+ * Escapes a CRM project number before it is placed inside a regular expression.
+ * Lead numbers are user data, so treating them as regex syntax would both miss
+ * valid jobs and make punctuation such as `+` or `(` unsafe.
+ */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function projectNumberPatternPart(value: string): string {
+  // QBO occasionally inserts a space around the dash (`022 -0325`) even
+  // though the CRM stores the canonical `022-0325` form.
+  return escapeRegExp(value).replace(/-/g, '\\s*-\\s*');
+}
+
+/**
+ * QuickBooks job names are not consistent: some start with `001-0726,`, others
+ * use `[001-0726]`, a dash, or simply a space before the address. Match the
+ * project number as a complete token so `01-0726` cannot accidentally match
+ * `101-0726`.
+ */
+export function matchesProjectNumber(
+  projectNumber: string,
+  displayName: string,
+): boolean {
+  const number = projectNumber.trim();
+  const name = displayName.trim();
+  if (!number || !name) return false;
+
+  const pattern = new RegExp(
+    `(^|[^\\p{L}\\p{N}])${projectNumberPatternPart(number)}(?=$|[^\\p{L}\\p{N}])`,
+    'iu',
+  );
+  return pattern.test(name);
+}
+
+/**
+ * Selects the best matching QBO Customer/Job for a CRM project. A leading
+ * project number wins when multiple names contain the same token; otherwise
+ * the first complete-token match is safe to use.
+ */
+export function findQboCustomerForProject(
+  projectNumber: string,
+  customers: QboCustomer[],
+): QboCustomer | null {
+  const number = projectNumber.trim();
+  if (!number) return null;
+
+  const matches = customers.filter((customer) =>
+    matchesProjectNumber(number, String(customer.DisplayName ?? '')),
+  );
+  if (matches.length === 0) return null;
+
+  const escaped = projectNumberPatternPart(number);
+  const leadingNumber = new RegExp(
+    `^\\s*\\[?${escaped}\\]?(?=$|[\\s,|:-])`,
+    'iu',
+  );
+  return (
+    matches.find((customer) => leadingNumber.test(customer.DisplayName)) ??
+    matches[0]
+  );
+}
+
+/**
+ * Maps a QBO job list to CRM project numbers. Longer numbers win when a job
+ * contains both a base number and a change-order number (for example
+ * `020P-0725` and `020P-0725 CO01`). This prevents one QBO job being linked to
+ * two CRM projects.
+ */
+export function mapQboCustomersToProjects(
+  projectNumbers: string[],
+  customers: QboCustomer[],
+): Map<string, QboCustomer> {
+  const numbers = [
+    ...new Set(projectNumbers.map((number) => number.trim()).filter(Boolean)),
+  ].sort((a, b) => b.length - a.length);
+  const candidatesByProject = new Map<string, QboCustomer[]>();
+  const result = new Map<string, QboCustomer>();
+
+  for (const customer of customers) {
+    const matchedNumber = numbers.find((number) =>
+      matchesProjectNumber(number, String(customer.DisplayName ?? '')),
+    );
+    if (matchedNumber) {
+      const candidates = candidatesByProject.get(matchedNumber) ?? [];
+      candidates.push(customer);
+      candidatesByProject.set(matchedNumber, candidates);
+    }
+  }
+
+  for (const number of numbers) {
+    const customer = findQboCustomerForProject(
+      number,
+      candidatesByProject.get(number) ?? [],
+    );
+    if (customer) result.set(number, customer);
+  }
+
   return result;
 }
 
@@ -66,7 +169,9 @@ export function buildTxnQueries(
   jobIds: string[],
   includePayments: boolean,
 ): { estimateQuery: string; invoiceQuery: string; paymentQuery?: string } {
-  const inList = jobIds.map((id) => `'${String(id).replace(/'/g, "''")}'`).join(',');
+  const inList = jobIds
+    .map((id) => `'${String(id).replace(/'/g, "''")}'`)
+    .join(',');
   const where = `CustomerRef IN (${inList})`;
 
   return {
@@ -78,7 +183,9 @@ export function buildTxnQueries(
   };
 }
 
-export function extractCustomerRefId(ref: QboTxnBase['CustomerRef'] | undefined): string {
+export function extractCustomerRefId(
+  ref: QboTxnBase['CustomerRef'] | undefined,
+): string {
   if (!ref) return '';
   if (typeof ref === 'object' && 'value' in ref) return String(ref.value);
   return String(ref);
@@ -89,7 +196,9 @@ export function indexByJobId<T extends { CustomerRef?: unknown }>(
 ): Record<string, T[]> {
   const index: Record<string, T[]> = {};
   for (const item of items) {
-    const id = extractCustomerRefId(item.CustomerRef as QboTxnBase['CustomerRef']);
+    const id = extractCustomerRefId(
+      item.CustomerRef as QboTxnBase['CustomerRef'],
+    );
     if (!id) continue;
     if (!index[id]) index[id] = [];
     index[id].push(item);
@@ -151,7 +260,10 @@ export function aggregateFinancials(
     estByJob[id].count += 1;
   }
 
-  const invByJob: Record<string, { amount: number; count: number; outstanding: number }> = {};
+  const invByJob: Record<
+    string,
+    { amount: number; count: number; outstanding: number }
+  > = {};
   for (const i of invoices) {
     const id = extractCustomerRefId(i.CustomerRef);
     if (!id) continue;
@@ -191,8 +303,10 @@ export function parseProfitAndLoss(
   report: Record<string, unknown>,
 ): ProjectProfitAndLoss {
   const rows =
-    ((report['Rows'] as Record<string, unknown>)?.['Row'] as Record<string, unknown>[]) ??
-    [];
+    ((report['Rows'] as Record<string, unknown>)?.['Row'] as Record<
+      string,
+      unknown
+    >[]) ?? [];
 
   const result: ProjectProfitAndLoss = {
     projectNumber,
@@ -208,10 +322,14 @@ export function parseProfitAndLoss(
   for (const row of rows) {
     const group = stringValue(row['group']);
     const summary = row['Summary'] as Record<string, unknown>;
-    const summaryData = (summary?.['ColData'] as Record<string, unknown>[]) ?? [];
+    const summaryData =
+      (summary?.['ColData'] as Record<string, unknown>[]) ?? [];
     const totalVal = Number(summaryData[1]?.['value']) || 0;
     const innerRows =
-      ((row['Rows'] as Record<string, unknown>)?.['Row'] as Record<string, unknown>[]) ?? [];
+      ((row['Rows'] as Record<string, unknown>)?.['Row'] as Record<
+        string,
+        unknown
+      >[]) ?? [];
 
     const categories: PnlCategory[] = innerRows
       .filter((r) => r['type'] === 'Data')
@@ -224,12 +342,14 @@ export function parseProfitAndLoss(
       });
 
     if (group === 'Income') result.income = { total: totalVal, categories };
-    else if (group === 'COGS') result.costOfGoodsSold = { total: totalVal, categories };
-    else if (group === 'Expenses') result.expenses = { total: totalVal, categories };
-    else if (group.toLowerCase().replace(/\s/g, '') === 'netincome') result.netProfit = totalVal;
+    else if (group === 'COGS')
+      result.costOfGoodsSold = { total: totalVal, categories };
+    else if (group === 'Expenses')
+      result.expenses = { total: totalVal, categories };
+    else if (group.toLowerCase().replace(/\s/g, '') === 'netincome')
+      result.netProfit = totalVal;
   }
 
   result.grossProfit = result.income.total - result.costOfGoodsSold.total;
   return result;
 }
-
