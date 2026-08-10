@@ -26,6 +26,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { NotesModule } from './modules/notes/notes.module';
 import { UsersModule } from './modules/users/users.module';
 import { TasksModule } from './modules/tasks/tasks.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -72,6 +73,7 @@ import { TasksModule } from './modules/tasks/tasks.module';
     AnalyticsModule,
     NotesModule,
     UsersModule,
+    NotificationsModule,
     TasksModule,
   ],
   controllers: [AppController],

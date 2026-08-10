@@ -4,28 +4,39 @@ import { Task } from '../../entities/task.entity';
 import { TaskLabel } from '../../entities/task-label.entity';
 import { TaskActivity } from '../../entities/task-activity.entity';
 import { TaskWatcher } from '../../entities/task-watcher.entity';
+import { TaskComment } from '../../entities/task-comment.entity';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { TasksRepository } from './task-management/repositories/tasks.repository';
 import { TaskLabelsRepository } from './task-management/repositories/task-labels.repository';
 import { TaskActivityRepository } from './task-management/repositories/task-activity.repository';
 import { TaskWatchersRepository } from './task-management/repositories/task-watchers.repository';
+import { TaskCommentsRepository } from './task-management/repositories/task-comments.repository';
 import { TasksService } from './task-management/tasks.service';
 import { TaskLabelsService } from './task-management/services/task-labels.service';
 import { TaskActivityService } from './task-management/services/task-activity.service';
+import { TaskCommentsService } from './task-management/services/task-comments.service';
 import { TaskMapper } from './task-management/mappers/task.mapper';
 import { TasksController } from './task-management/tasks.controller';
+import { TaskNotificationsListener } from './task-notifications/task-notifications.listener';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Task, TaskLabel, TaskActivity, TaskWatcher])],
+  imports: [
+    TypeOrmModule.forFeature([Task, TaskLabel, TaskActivity, TaskWatcher, TaskComment]),
+    NotificationsModule,
+  ],
   controllers: [TasksController],
   providers: [
     TasksRepository,
     TaskLabelsRepository,
     TaskActivityRepository,
     TaskWatchersRepository,
+    TaskCommentsRepository,
     TasksService,
     TaskLabelsService,
     TaskActivityService,
+    TaskCommentsService,
     TaskMapper,
+    TaskNotificationsListener,
   ],
   exports: [TasksRepository, TasksService],
 })
