@@ -37,6 +37,10 @@ export const PERMISSIONS = [
   'notes:write',
   'notes:delete',
 
+  'tasks:read',
+  'tasks:write',
+  'tasks:delete',
+
   'reports:read',
 
   // Administering users and roles.
@@ -84,6 +88,11 @@ export const PERMISSION_GROUPS: ReadonlyArray<{
     key: 'notes',
     label: 'Notes',
     permissions: ['notes:read', 'notes:write', 'notes:delete'],
+  },
+  {
+    key: 'tasks',
+    label: 'Tasks',
+    permissions: ['tasks:read', 'tasks:write', 'tasks:delete'],
   },
   { key: 'reports', label: 'Reports', permissions: ['reports:read'] },
   {
