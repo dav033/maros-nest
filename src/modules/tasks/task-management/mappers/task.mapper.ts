@@ -7,8 +7,12 @@ const BOARD_STATUSES = TASK_STATUSES.filter((status) => status !== 'cancelled');
 
 @Injectable()
 export class TaskMapper {
-  /** Postgres `date` columns come back as strings in practice — see lead.mapper.ts. */
-  private formatDate(date: Date | string | null | undefined): string | null {
+  /**
+   * Postgres `date` columns come back as strings in practice — see lead.mapper.ts.
+   * Public: TaskDigestCron reuses this to bucket a task against `todayInBusinessTimezone()`
+   * without reimplementing the Date-vs-string normalization.
+   */
+  formatDate(date: Date | string | null | undefined): string | null {
     if (!date) return null;
     if (typeof date === 'string') return date.split('T')[0];
     if (date instanceof Date) return date.toISOString().split('T')[0];
@@ -116,7 +120,8 @@ export class TaskMapper {
     return buckets;
   }
 
-  private static todayInBusinessTimezone(): string {
+  /** Public: also the "today" cutoff TaskDigestCron filters and buckets due dates against. */
+  static todayInBusinessTimezone(): string {
     // en-CA happens to format as YYYY-MM-DD, matching the DATE columns it's compared
     // against exactly — no Date object round-trip, no timezone-conversion pitfalls.
     return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());

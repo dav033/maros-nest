@@ -6,6 +6,7 @@ import { TaskActivity } from '../../entities/task-activity.entity';
 import { TaskWatcher } from '../../entities/task-watcher.entity';
 import { TaskComment } from '../../entities/task-comment.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { MailModule } from '../mail/mail.module';
 import { TasksRepository } from './task-management/repositories/tasks.repository';
 import { TaskLabelsRepository } from './task-management/repositories/task-labels.repository';
 import { TaskActivityRepository } from './task-management/repositories/task-activity.repository';
@@ -18,11 +19,13 @@ import { TaskCommentsService } from './task-management/services/task-comments.se
 import { TaskMapper } from './task-management/mappers/task.mapper';
 import { TasksController } from './task-management/tasks.controller';
 import { TaskNotificationsListener } from './task-notifications/task-notifications.listener';
+import { TaskDigestCron } from './task-notifications/task-digest.cron';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Task, TaskLabel, TaskActivity, TaskWatcher, TaskComment]),
     NotificationsModule,
+    MailModule,
   ],
   controllers: [TasksController],
   providers: [
@@ -37,6 +40,7 @@ import { TaskNotificationsListener } from './task-notifications/task-notificatio
     TaskCommentsService,
     TaskMapper,
     TaskNotificationsListener,
+    TaskDigestCron,
   ],
   exports: [TasksRepository, TasksService],
 })

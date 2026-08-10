@@ -1,8 +1,13 @@
 import { TaskNotificationsListener } from './task-notifications.listener';
 import { Task } from '../../../entities/task.entity';
+import { User } from '../../../entities/user.entity';
 
 function task(overrides: Partial<Task> = {}): Task {
   return Object.assign(new Task(), { id: 1, title: 'Task', ...overrides });
+}
+
+function user(overrides: Partial<User> = {}): User {
+  return Object.assign(new User(), { id: 7, email: 'crew@marosconstruction.com', ...overrides });
 }
 
 function makeListener(
@@ -10,6 +15,9 @@ function makeListener(
     notificationsService?: Record<string, jest.Mock>;
     taskWatchersRepository?: Record<string, jest.Mock>;
     tasksRepository?: Record<string, jest.Mock>;
+    usersRepository?: Record<string, jest.Mock>;
+    mailService?: Record<string, jest.Mock>;
+    configService?: Record<string, jest.Mock>;
   } = {},
 ) {
   const notificationsService = {
@@ -24,14 +32,37 @@ function makeListener(
     findByIdActive: jest.fn().mockResolvedValue(task()),
     ...overrides.tasksRepository,
   };
+  const usersRepository = {
+    findById: jest.fn().mockResolvedValue(user()),
+    ...overrides.usersRepository,
+  };
+  const mailService = {
+    sendMail: jest.fn().mockResolvedValue({ sent: true, messageId: 'abc123' }),
+    ...overrides.mailService,
+  };
+  const configService = {
+    get: jest.fn().mockReturnValue(undefined),
+    ...overrides.configService,
+  };
 
   const listener = new TaskNotificationsListener(
     notificationsService as never,
     taskWatchersRepository as never,
     tasksRepository as never,
+    usersRepository as never,
+    mailService as never,
+    configService as never,
   );
 
-  return { listener, notificationsService, taskWatchersRepository, tasksRepository };
+  return {
+    listener,
+    notificationsService,
+    taskWatchersRepository,
+    tasksRepository,
+    usersRepository,
+    mailService,
+    configService,
+  };
 }
 
 describe('TaskNotificationsListener.onAssigned', () => {
@@ -105,5 +136,59 @@ describe('TaskNotificationsListener watcher fanout', () => {
         payload: expect.objectContaining({ commentId: 42 }),
       }),
     );
+  });
+});
+
+describe('TaskNotificationsListener assignment email', () => {
+  it('emails the new assignee', async () => {
+    const { listener, mailService, usersRepository } = makeListener();
+
+    await listener.onAssigned({ taskId: 1, assigneeUserId: 7, actorId: 3 });
+
+    expect(usersRepository.findById).toHaveBeenCalledWith(7);
+    expect(mailService.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: ['crew@marosconstruction.com'] }),
+    );
+  });
+
+  it('never emails for a self-assignment', async () => {
+    const { listener, mailService } = makeListener();
+
+    await listener.onAssigned({ taskId: 1, assigneeUserId: 3, actorId: 3 });
+
+    expect(mailService.sendMail).not.toHaveBeenCalled();
+  });
+
+  it('skips the email when the assignee has no address on file', async () => {
+    const { listener, mailService } = makeListener({
+      usersRepository: { findById: jest.fn().mockResolvedValue(null) },
+    });
+
+    await listener.onAssigned({ taskId: 1, assigneeUserId: 7, actorId: 3 });
+
+    expect(mailService.sendMail).not.toHaveBeenCalled();
+  });
+
+  it('does not throw, and still leaves the in-app notification in place, when mail fails', async () => {
+    const { listener, notificationsService } = makeListener({
+      mailService: { sendMail: jest.fn().mockRejectedValue(new Error('smtp down')) },
+    });
+
+    await expect(
+      listener.onAssigned({ taskId: 1, assigneeUserId: 7, actorId: 3 }),
+    ).resolves.toBeUndefined();
+    expect(notificationsService.create).toHaveBeenCalled();
+  });
+
+  it('does not email for status changes, blocks, or comments', async () => {
+    const { listener, mailService } = makeListener({
+      taskWatchersRepository: { findUserIdsForTask: jest.fn().mockResolvedValue([7]) },
+    });
+
+    await listener.onStatusChanged({ taskId: 1, actorId: 3, from: 'todo', to: 'in_progress' });
+    await listener.onBlocked({ taskId: 1, actorId: 3, reason: 'waiting on permit' });
+    await listener.onCommented({ taskId: 1, commentId: 42, actorId: 3 });
+
+    expect(mailService.sendMail).not.toHaveBeenCalled();
   });
 });

@@ -107,6 +107,22 @@ export class TasksRepository {
       .getMany();
   }
 
+  /**
+   * Assigned, still-open tasks due on or before `today` — the raw material for the
+   * daily digest. TaskDigestCron does the per-assignee grouping and overdue/due-today
+   * split; this only filters.
+   */
+  async findDueForDigest(today: string): Promise<Task[]> {
+    return this.baseQuery()
+      .where('task.deleted_at IS NULL')
+      .andWhere('task.assignee_user_id IS NOT NULL')
+      .andWhere('task.status NOT IN (:...closed)', { closed: ['done', 'cancelled'] })
+      .andWhere('task.due_date <= :today', { today })
+      .orderBy('task.assignee_user_id', 'ASC')
+      .addOrderBy('task.due_date', 'ASC')
+      .getMany();
+  }
+
   async findByEntity(entityKind: string, entityId: number): Promise<Task[]> {
     return this.baseQuery()
       .where('task.deleted_at IS NULL')
