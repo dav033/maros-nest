@@ -31,11 +31,11 @@ export class NotificationsRepository {
     const qb = this.repo
       .createQueryBuilder('n')
       .leftJoinAndSelect('n.actor', 'actor')
-      .where('n.user_id = :userId', { userId })
-      .orderBy('n.created_at', 'DESC')
+      .where('n.userId = :userId', { userId })
+      .orderBy('n.createdAt', 'DESC')
       .take(options.limit ?? 30);
     if (options.unreadOnly) {
-      qb.andWhere('n.read_at IS NULL');
+      qb.andWhere('n.readAt IS NULL');
     }
     return qb.getMany();
   }
