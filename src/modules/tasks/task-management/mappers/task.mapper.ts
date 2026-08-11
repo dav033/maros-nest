@@ -5,6 +5,12 @@ import { User } from '../../../../entities/user.entity';
 
 const BOARD_STATUSES = TASK_STATUSES.filter((status) => status !== 'cancelled');
 
+export interface TaskCounts {
+  subtasksTotal: number;
+  subtasksDone: number;
+  commentsCount: number;
+}
+
 @Injectable()
 export class TaskMapper {
   /**
@@ -28,7 +34,11 @@ export class TaskMapper {
     };
   }
 
-  toSummaryDto(entity: Task): any {
+  /**
+   * `counts` is optional so `toSummaryDto` stays usable on its own (defaults to zero) —
+   * every current caller in TasksService does look them up via buildCountsMap first.
+   */
+  toSummaryDto(entity: Task, counts?: TaskCounts): any {
     return {
       id: entity.id,
       parentId: entity.parent?.id ?? null,
@@ -50,15 +60,26 @@ export class TaskMapper {
         name: label.name,
         color: label.color,
       })),
+      subtasksTotal: counts?.subtasksTotal ?? 0,
+      subtasksDone: counts?.subtasksDone ?? 0,
+      commentsCount: counts?.commentsCount ?? 0,
       createdAt: entity.createdAt,
       updatedAt: entity.updatedAt,
     };
   }
 
-  /** Full task including description, subtasks and activity feed. */
-  toDetailDto(entity: Task, children: Task[], activity: TaskActivity[]): any {
+  /**
+   * Full task including description, subtasks and activity feed. `commentsCount` comes
+   * from the caller (freshDetail already fetches the full comment list for the thread,
+   * no separate count query needed) — `children` doubles as the subtask counts source.
+   */
+  toDetailDto(entity: Task, children: Task[], activity: TaskActivity[], commentsCount = 0): any {
     return {
-      ...this.toSummaryDto(entity),
+      ...this.toSummaryDto(entity, {
+        subtasksTotal: children.length,
+        subtasksDone: children.filter((child) => child.status === 'done').length,
+        commentsCount,
+      }),
       description: entity.description ?? {},
       createdBy: entity.createdBy ? this.userRef(entity.createdBy) : null,
       attachments: entity.attachments ?? [],
@@ -79,12 +100,12 @@ export class TaskMapper {
   }
 
   /** Groups top-level tasks by status for the board. `cancelled` is left off — see TaskBoard. */
-  groupByStatus(tasks: Task[]): Record<string, any[]> {
+  groupByStatus(tasks: Task[], countsByTaskId?: Map<number, TaskCounts>): Record<string, any[]> {
     const groups: Record<string, any[]> = {};
     for (const status of BOARD_STATUSES) groups[status] = [];
     for (const task of tasks) {
       if (task.status === 'cancelled') continue;
-      groups[task.status].push(this.toSummaryDto(task));
+      groups[task.status].push(this.toSummaryDto(task, countsByTaskId?.get(task.id)));
     }
     return groups;
   }
@@ -95,7 +116,7 @@ export class TaskMapper {
    * ISO calendar dates sort lexicographically, so no Date parsing — and none of its
    * timezone pitfalls — is needed to bucket them.
    */
-  bucketByDueDate(tasks: Task[]): Record<string, any[]> {
+  bucketByDueDate(tasks: Task[], countsByTaskId?: Map<number, TaskCounts>): Record<string, any[]> {
     const today = TaskMapper.todayInBusinessTimezone();
     const weekEnd = TaskMapper.addDays(today, 7);
 
@@ -108,7 +129,7 @@ export class TaskMapper {
     };
 
     for (const task of tasks) {
-      const dto = this.toSummaryDto(task);
+      const dto = this.toSummaryDto(task, countsByTaskId?.get(task.id));
       const due = this.formatDate(task.dueDate);
       if (!due) buckets.noDueDate.push(dto);
       else if (due < today) buckets.overdue.push(dto);

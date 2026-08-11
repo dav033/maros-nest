@@ -153,6 +153,42 @@ export class TasksRepository {
       .getCount();
   }
 
+  /**
+   * Bulk subtask total/done counts, one row per parent — the board/list/mine rows'
+   * "2/4 subtasks" footer. A single grouped query for however many parents are on
+   * screen, not N+1 per card.
+   */
+  async countSubtasksByParents(parentIds: number[]): Promise<Map<number, { total: number; done: number }>> {
+    const map = new Map<number, { total: number; done: number }>();
+    if (parentIds.length === 0) return map;
+    const rows: Array<{ parent_id: number; total: string; done: string }> = await this.repo.manager.query(
+      `SELECT parent_id, COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'done') AS done
+       FROM tasks
+       WHERE parent_id = ANY($1) AND deleted_at IS NULL
+       GROUP BY parent_id`,
+      [parentIds],
+    );
+    for (const row of rows) {
+      map.set(Number(row.parent_id), { total: Number(row.total), done: Number(row.done) });
+    }
+    return map;
+  }
+
+  /** Bulk comment counts, one row per task — same shape and reasoning as countSubtasksByParents. */
+  async countCommentsByTasks(taskIds: number[]): Promise<Map<number, number>> {
+    const map = new Map<number, number>();
+    if (taskIds.length === 0) return map;
+    const rows: Array<{ task_id: number; count: string }> = await this.repo.manager.query(
+      `SELECT task_id, COUNT(*) AS count
+       FROM task_comments
+       WHERE task_id = ANY($1) AND deleted_at IS NULL
+       GROUP BY task_id`,
+      [taskIds],
+    );
+    for (const row of rows) map.set(Number(row.task_id), Number(row.count));
+    return map;
+  }
+
   async save(task: Task): Promise<Task> {
     return this.repo.save(task);
   }

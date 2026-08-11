@@ -328,6 +328,24 @@ describe('TasksService.move', () => {
   });
 });
 
+describe('TasksService.getBoard', () => {
+  it('attaches subtask and comment counts looked up per task id', async () => {
+    const tasks = [task({ id: 1, status: 'todo' }), task({ id: 2, status: 'in_progress' })];
+    const { service } = makeService({
+      findForBoard: jest.fn().mockResolvedValue(tasks),
+      countSubtasksByParents: jest.fn().mockResolvedValue(
+        new Map([[1, { total: 3, done: 1 }]]),
+      ),
+      countCommentsByTasks: jest.fn().mockResolvedValue(new Map([[2, 4]])),
+    });
+
+    const board = await service.getBoard();
+
+    expect(board.todo[0]).toMatchObject({ subtasksTotal: 3, subtasksDone: 1, commentsCount: 0 });
+    expect(board.in_progress[0]).toMatchObject({ subtasksTotal: 0, subtasksDone: 0, commentsCount: 4 });
+  });
+});
+
 describe('TasksService.setAssignee', () => {
   it('adds the new assignee as a watcher and emits task.assigned', async () => {
     const existing = task({ assigneeUserId: null });

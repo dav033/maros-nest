@@ -5,7 +5,7 @@ import { TaskLabelsRepository } from './repositories/task-labels.repository';
 import { TaskWatchersRepository } from './repositories/task-watchers.repository';
 import { TaskActivityService } from './services/task-activity.service';
 import { TaskCommentsService } from './services/task-comments.service';
-import { TaskMapper } from './mappers/task.mapper';
+import { TaskMapper, TaskCounts } from './mappers/task.mapper';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
@@ -45,25 +45,53 @@ export class TasksService {
       this.taskActivity.findByTask(id),
       this.taskComments.list(id),
     ]);
-    return { ...this.taskMapper.toDetailDto(task, children, activity), comments };
+    return { ...this.taskMapper.toDetailDto(task, children, activity, comments.length), comments };
+  }
+
+  /**
+   * One grouped query per count kind for however many `tasks` are on screen, instead of
+   * per-card N+1s — see TasksRepository.countSubtasksByParents/countCommentsByTasks.
+   */
+  private async buildCountsMap(tasks: Task[]): Promise<Map<number, TaskCounts>> {
+    const ids = tasks.map((t) => t.id);
+    const [subtaskCounts, commentCounts] = await Promise.all([
+      this.tasksRepository.countSubtasksByParents(ids),
+      this.tasksRepository.countCommentsByTasks(ids),
+    ]);
+    const map = new Map<number, TaskCounts>();
+    for (const task of tasks) {
+      const subtasks = subtaskCounts.get(task.id);
+      map.set(task.id, {
+        subtasksTotal: subtasks?.total ?? 0,
+        subtasksDone: subtasks?.done ?? 0,
+        commentsCount: commentCounts.get(task.id) ?? 0,
+      });
+    }
+    return map;
   }
 
   async getBoard(): Promise<Record<string, any[]>> {
-    return this.taskMapper.groupByStatus(await this.tasksRepository.findForBoard());
+    const tasks = await this.tasksRepository.findForBoard();
+    const counts = await this.buildCountsMap(tasks);
+    return this.taskMapper.groupByStatus(tasks, counts);
   }
 
   async getMine(actor: TaskActor): Promise<Record<string, any[]>> {
-    return this.taskMapper.bucketByDueDate(await this.tasksRepository.findMine(actor.id));
+    const tasks = await this.tasksRepository.findMine(actor.id);
+    const counts = await this.buildCountsMap(tasks);
+    return this.taskMapper.bucketByDueDate(tasks, counts);
   }
 
   async findAll(filters: SearchTasksDto): Promise<any[]> {
     const tasks = await this.tasksRepository.findAll(filters);
-    return tasks.map((task) => this.taskMapper.toSummaryDto(task));
+    const counts = await this.buildCountsMap(tasks);
+    return tasks.map((task) => this.taskMapper.toSummaryDto(task, counts.get(task.id)));
   }
 
   async getByEntity(entityKind: string, entityId: number): Promise<any[]> {
     const tasks = await this.tasksRepository.findByEntity(entityKind, entityId);
-    return tasks.map((task) => this.taskMapper.toSummaryDto(task));
+    const counts = await this.buildCountsMap(tasks);
+    return tasks.map((task) => this.taskMapper.toSummaryDto(task, counts.get(task.id)));
   }
 
   async getById(id: number): Promise<any> {
