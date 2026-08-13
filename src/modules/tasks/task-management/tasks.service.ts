@@ -103,13 +103,24 @@ export class TasksService {
     return this.taskEntityResolver.resolveMany(links);
   }
 
-  async getBoard(): Promise<Record<string, any[]>> {
-    const tasks = await this.tasksRepository.findForBoard();
+  /**
+   * `doneTotalCount` is the true count behind the `done` column's windowed
+   * `columns.done` array (see TasksRepository.findForBoard) — the frontend uses the
+   * gap between the two to decide whether to show a "view all completed" link.
+   */
+  async getBoard(): Promise<{ columns: Record<string, any[]>; doneTotalCount: number }> {
+    const [tasks, doneTotalCount] = await Promise.all([
+      this.tasksRepository.findForBoard(),
+      this.tasksRepository.countDone(),
+    ]);
     const [counts, entityRefs] = await Promise.all([
       this.buildCountsMap(tasks),
       this.buildEntityRefsMap(tasks),
     ]);
-    return this.taskMapper.groupByStatus(tasks, counts, entityRefs);
+    return {
+      columns: this.taskMapper.groupByStatus(tasks, counts, entityRefs),
+      doneTotalCount,
+    };
   }
 
   async getMine(actor: TaskActor): Promise<Record<string, any[]>> {
@@ -121,13 +132,21 @@ export class TasksService {
     return this.taskMapper.bucketByDueDate(tasks, counts, entityRefs);
   }
 
-  async findAll(filters: SearchTasksDto): Promise<any[]> {
-    const tasks = await this.tasksRepository.findAll(filters);
+  /**
+   * `totalCount` is the true count behind the (possibly capped) `items` array — see
+   * TasksRepository.findAll's LIST_LIMIT — for the same "N of M, narrow to see more"
+   * treatment the board's done column gets.
+   */
+  async findAll(filters: SearchTasksDto): Promise<{ items: any[]; totalCount: number }> {
+    const { items: tasks, totalCount } = await this.tasksRepository.findAll(filters);
     const [counts, entityRefs] = await Promise.all([
       this.buildCountsMap(tasks),
       this.buildEntityRefsMap(tasks),
     ]);
-    return tasks.map((task) => this.taskMapper.toSummaryDto(task, counts.get(task.id), entityRefs));
+    return {
+      items: tasks.map((task) => this.taskMapper.toSummaryDto(task, counts.get(task.id), entityRefs)),
+      totalCount,
+    };
   }
 
   async getByEntity(entityKind: string, entityId: number): Promise<any[]> {

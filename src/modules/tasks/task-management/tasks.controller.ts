@@ -56,14 +56,24 @@ export class TasksController {
 
   @Get()
   @ApiOperation({ summary: 'List tasks, filtered — see SearchTasksDto' })
-  @ApiResponse({ status: 200, description: 'Returns matching tasks (top-level only unless includeSubtasks)' })
+  @ApiResponse({
+    status: 200,
+    description:
+      '{ items, totalCount } — top-level tasks only unless includeSubtasks, capped at 500; ' +
+      'totalCount is the true count behind that cap',
+  })
   async listTasks(@Query() query: SearchTasksDto) {
     return this.tasksService.findAll(query);
   }
 
   @Get('board')
   @ApiOperation({ summary: 'Top-level tasks grouped by status, for the kanban board' })
-  @ApiResponse({ status: 200, description: 'One array per status (cancelled excluded)' })
+  @ApiResponse({
+    status: 200,
+    description:
+      "{ columns, doneTotalCount } — one array per status (cancelled excluded), done windowed " +
+      'to the last 30 days/50 tasks; doneTotalCount is the true count behind that window',
+  })
   async getBoard() {
     return this.tasksService.getBoard();
   }

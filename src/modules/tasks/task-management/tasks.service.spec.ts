@@ -47,6 +47,9 @@ function makeService(tasksRepositoryOverrides: Record<string, jest.Mock> = {}) {
     // Entering 'done' always checks for open subtasks; 0 keeps tests that aren't about
     // that warning from having to mock it individually.
     countOpenChildren: jest.fn().mockResolvedValue(0),
+    // getBoard() always calls this alongside findForBoard() — 0 keeps tests that
+    // aren't about the done-column window from having to mock it individually.
+    countDone: jest.fn().mockResolvedValue(0),
     ...tasksRepositoryOverrides,
   };
 
@@ -356,6 +359,22 @@ describe('TasksService.move', () => {
   });
 });
 
+describe('TasksService.findAll', () => {
+  it('maps items and passes totalCount through untouched from the repository', async () => {
+    const tasks = [task({ id: 1 }), task({ id: 2 })];
+    const { service } = makeService({
+      findAll: jest.fn().mockResolvedValue({ items: tasks, totalCount: 137 }),
+      countSubtasksByParents: jest.fn().mockResolvedValue(new Map()),
+      countCommentsByTasks: jest.fn().mockResolvedValue(new Map()),
+    });
+
+    const result = await service.findAll({});
+
+    expect(result.items).toHaveLength(2);
+    expect(result.totalCount).toBe(137);
+  });
+});
+
 describe('TasksService.getBoard', () => {
   it('attaches subtask and comment counts looked up per task id', async () => {
     const tasks = [task({ id: 1, status: 'todo' }), task({ id: 2, status: 'in_progress' })];
@@ -369,8 +388,8 @@ describe('TasksService.getBoard', () => {
 
     const board = await service.getBoard();
 
-    expect(board.todo[0]).toMatchObject({ subtasksTotal: 3, subtasksDone: 1, commentsCount: 0 });
-    expect(board.in_progress[0]).toMatchObject({ subtasksTotal: 0, subtasksDone: 0, commentsCount: 4 });
+    expect(board.columns.todo[0]).toMatchObject({ subtasksTotal: 3, subtasksDone: 1, commentsCount: 0 });
+    expect(board.columns.in_progress[0]).toMatchObject({ subtasksTotal: 0, subtasksDone: 0, commentsCount: 4 });
   });
 
   it('attaches the resolved CRM link, looked up in one batched call across the board', async () => {
@@ -394,8 +413,25 @@ describe('TasksService.getBoard', () => {
     const board = await service.getBoard();
 
     expect(taskEntityResolver.resolveMany).toHaveBeenCalledWith([{ entityKind: 'lead', entityId: 42 }]);
-    expect(board.todo[0].entity).toEqual(resolved);
-    expect(board.in_progress[0].entity).toBeNull();
+    expect(board.columns.todo[0].entity).toEqual(resolved);
+    expect(board.columns.in_progress[0].entity).toBeNull();
+  });
+
+  it('reports the true done count separately from the windowed done column', async () => {
+    const tasks = [task({ id: 1, status: 'done' })];
+    const { service } = makeService({
+      findForBoard: jest.fn().mockResolvedValue(tasks),
+      countDone: jest.fn().mockResolvedValue(137),
+      countSubtasksByParents: jest.fn().mockResolvedValue(new Map()),
+      countCommentsByTasks: jest.fn().mockResolvedValue(new Map()),
+    });
+
+    const board = await service.getBoard();
+
+    // findForBoard already applied the window — the service trusts it, and only
+    // reports the true total alongside it, rather than recomputing anything.
+    expect(board.columns.done).toHaveLength(1);
+    expect(board.doneTotalCount).toBe(137);
   });
 });
 
