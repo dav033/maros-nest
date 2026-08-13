@@ -59,6 +59,9 @@ function makeService(tasksRepositoryOverrides: Record<string, jest.Mock> = {}) {
   // freshDetail() splices this in alongside children/activity — see TasksService.
   const taskComments = { list: jest.fn().mockResolvedValue([]) };
   const eventEmitter = { emit: jest.fn() };
+  // No task here links to a CRM entity by default — tests that care about the
+  // resolved link cover TaskEntityResolverService directly.
+  const taskEntityResolver = { resolveMany: jest.fn().mockResolvedValue(new Map()) };
 
   const service = new TasksService(
     tasksRepository as never,
@@ -67,10 +70,18 @@ function makeService(tasksRepositoryOverrides: Record<string, jest.Mock> = {}) {
     new TaskActivityService(taskActivityRepository as never),
     taskComments as never,
     new TaskMapper(),
+    taskEntityResolver as never,
     eventEmitter as never,
   );
 
-  return { service, tasksRepository, taskWatchersRepository, taskActivityRepository, eventEmitter };
+  return {
+    service,
+    tasksRepository,
+    taskWatchersRepository,
+    taskActivityRepository,
+    taskEntityResolver,
+    eventEmitter,
+  };
 }
 
 describe('TasksService.create', () => {
@@ -345,6 +356,31 @@ describe('TasksService.getBoard', () => {
 
     expect(board.todo[0]).toMatchObject({ subtasksTotal: 3, subtasksDone: 1, commentsCount: 0 });
     expect(board.in_progress[0]).toMatchObject({ subtasksTotal: 0, subtasksDone: 0, commentsCount: 4 });
+  });
+
+  it('attaches the resolved CRM link, looked up in one batched call across the board', async () => {
+    const tasks = [
+      task({ id: 1, status: 'todo', entityKind: 'lead', entityId: 42 }),
+      task({ id: 2, status: 'in_progress' }),
+    ];
+    const resolved = {
+      kind: 'lead' as const,
+      id: 42,
+      label: 'Kitchen remodel',
+      href: '/lead/42',
+    };
+    const { service, taskEntityResolver } = makeService({
+      findForBoard: jest.fn().mockResolvedValue(tasks),
+      countSubtasksByParents: jest.fn().mockResolvedValue(new Map()),
+      countCommentsByTasks: jest.fn().mockResolvedValue(new Map()),
+    });
+    taskEntityResolver.resolveMany.mockResolvedValue(new Map([['lead:42', resolved]]));
+
+    const board = await service.getBoard();
+
+    expect(taskEntityResolver.resolveMany).toHaveBeenCalledWith([{ entityKind: 'lead', entityId: 42 }]);
+    expect(board.todo[0].entity).toEqual(resolved);
+    expect(board.in_progress[0].entity).toBeNull();
   });
 });
 

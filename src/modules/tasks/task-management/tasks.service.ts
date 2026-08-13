@@ -6,6 +6,8 @@ import { TaskWatchersRepository } from './repositories/task-watchers.repository'
 import { TaskActivityService } from './services/task-activity.service';
 import { TaskCommentsService } from './services/task-comments.service';
 import { TaskMapper, TaskCounts } from './mappers/task.mapper';
+import { TaskEntityResolverService, TaskEntityRef } from './services/task-entity-resolver.service';
+import type { TaskEntityKind } from './dto/create-task.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
@@ -35,6 +37,7 @@ export class TasksService {
     private readonly taskActivity: TaskActivityService,
     private readonly taskComments: TaskCommentsService,
     private readonly taskMapper: TaskMapper,
+    private readonly taskEntityResolver: TaskEntityResolverService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -46,7 +49,11 @@ export class TasksService {
       this.taskActivity.findByTask(id),
       this.taskComments.list(id),
     ]);
-    return { ...this.taskMapper.toDetailDto(task, children, activity, comments.length), comments };
+    const entityRefs = await this.buildEntityRefsMap([task, ...children]);
+    return {
+      ...this.taskMapper.toDetailDto(task, children, activity, comments.length, entityRefs),
+      comments,
+    };
   }
 
   /**
@@ -71,28 +78,53 @@ export class TasksService {
     return map;
   }
 
+  /**
+   * Resolves every distinct CRM link across `tasks` in one grouped query per entity
+   * kind (see TaskEntityResolverService) — never one lookup per task, so a board or
+   * list full of tasks linked to the same handful of jobs costs the same as one linked
+   * to none.
+   */
+  private async buildEntityRefsMap(tasks: Task[]): Promise<Map<string, TaskEntityRef>> {
+    const links = tasks
+      .filter((t) => t.entityKind != null && t.entityId != null)
+      .map((t) => ({ entityKind: t.entityKind as TaskEntityKind, entityId: t.entityId as number }));
+    return this.taskEntityResolver.resolveMany(links);
+  }
+
   async getBoard(): Promise<Record<string, any[]>> {
     const tasks = await this.tasksRepository.findForBoard();
-    const counts = await this.buildCountsMap(tasks);
-    return this.taskMapper.groupByStatus(tasks, counts);
+    const [counts, entityRefs] = await Promise.all([
+      this.buildCountsMap(tasks),
+      this.buildEntityRefsMap(tasks),
+    ]);
+    return this.taskMapper.groupByStatus(tasks, counts, entityRefs);
   }
 
   async getMine(actor: TaskActor): Promise<Record<string, any[]>> {
     const tasks = await this.tasksRepository.findMine(actor.id);
-    const counts = await this.buildCountsMap(tasks);
-    return this.taskMapper.bucketByDueDate(tasks, counts);
+    const [counts, entityRefs] = await Promise.all([
+      this.buildCountsMap(tasks),
+      this.buildEntityRefsMap(tasks),
+    ]);
+    return this.taskMapper.bucketByDueDate(tasks, counts, entityRefs);
   }
 
   async findAll(filters: SearchTasksDto): Promise<any[]> {
     const tasks = await this.tasksRepository.findAll(filters);
-    const counts = await this.buildCountsMap(tasks);
-    return tasks.map((task) => this.taskMapper.toSummaryDto(task, counts.get(task.id)));
+    const [counts, entityRefs] = await Promise.all([
+      this.buildCountsMap(tasks),
+      this.buildEntityRefsMap(tasks),
+    ]);
+    return tasks.map((task) => this.taskMapper.toSummaryDto(task, counts.get(task.id), entityRefs));
   }
 
   async getByEntity(entityKind: string, entityId: number): Promise<any[]> {
     const tasks = await this.tasksRepository.findByEntity(entityKind, entityId);
-    const counts = await this.buildCountsMap(tasks);
-    return tasks.map((task) => this.taskMapper.toSummaryDto(task, counts.get(task.id)));
+    const [counts, entityRefs] = await Promise.all([
+      this.buildCountsMap(tasks),
+      this.buildEntityRefsMap(tasks),
+    ]);
+    return tasks.map((task) => this.taskMapper.toSummaryDto(task, counts.get(task.id), entityRefs));
   }
 
   async getById(id: number): Promise<any> {

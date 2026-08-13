@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { Task, TASK_STATUSES } from '../../../../entities/task.entity';
 import { TaskActivity } from '../../../../entities/task-activity.entity';
 import { User } from '../../../../entities/user.entity';
+import { resolveKey, type TaskEntityRef } from '../services/task-entity-resolver.service';
+import type { TaskEntityKind } from '../dto/create-task.dto';
 
 const BOARD_STATUSES = TASK_STATUSES.filter((status) => status !== 'cancelled');
 
@@ -34,11 +36,19 @@ export class TaskMapper {
     };
   }
 
+  /** Looks up a task's resolved CRM link in the batch map — see TaskEntityResolverService. */
+  private entityRefFor(entity: Task, entityRefsByKey?: Map<string, TaskEntityRef>): TaskEntityRef | null {
+    if (!entityRefsByKey || !entity.entityKind || entity.entityId == null) return null;
+    return entityRefsByKey.get(resolveKey(entity.entityKind as TaskEntityKind, entity.entityId)) ?? null;
+  }
+
   /**
-   * `counts` is optional so `toSummaryDto` stays usable on its own (defaults to zero) —
-   * every current caller in TasksService does look them up via buildCountsMap first.
+   * `counts` and `entityRefsByKey` are optional so `toSummaryDto` stays usable on its
+   * own (defaults to zero counts / no resolved entity) — every current caller in
+   * TasksService does look them up first, via buildCountsMap and
+   * TaskEntityResolverService respectively.
    */
-  toSummaryDto(entity: Task, counts?: TaskCounts): any {
+  toSummaryDto(entity: Task, counts?: TaskCounts, entityRefsByKey?: Map<string, TaskEntityRef>): any {
     return {
       id: entity.id,
       parentId: entity.parent?.id ?? null,
@@ -51,6 +61,7 @@ export class TaskMapper {
       reporter: entity.reporter ? this.userRef(entity.reporter) : null,
       entityKind: entity.entityKind ?? null,
       entityId: entity.entityId ?? null,
+      entity: this.entityRefFor(entity, entityRefsByKey),
       startDate: this.formatDate(entity.startDate),
       dueDate: this.formatDate(entity.dueDate),
       blockedReason: entity.blockedReason ?? null,
@@ -73,17 +84,27 @@ export class TaskMapper {
    * from the caller (freshDetail already fetches the full comment list for the thread,
    * no separate count query needed) — `children` doubles as the subtask counts source.
    */
-  toDetailDto(entity: Task, children: Task[], activity: TaskActivity[], commentsCount = 0): any {
+  toDetailDto(
+    entity: Task,
+    children: Task[],
+    activity: TaskActivity[],
+    commentsCount = 0,
+    entityRefsByKey?: Map<string, TaskEntityRef>,
+  ): any {
     return {
-      ...this.toSummaryDto(entity, {
-        subtasksTotal: children.length,
-        subtasksDone: children.filter((child) => child.status === 'done').length,
-        commentsCount,
-      }),
+      ...this.toSummaryDto(
+        entity,
+        {
+          subtasksTotal: children.length,
+          subtasksDone: children.filter((child) => child.status === 'done').length,
+          commentsCount,
+        },
+        entityRefsByKey,
+      ),
       description: entity.description ?? {},
       createdBy: entity.createdBy ? this.userRef(entity.createdBy) : null,
       attachments: entity.attachments ?? [],
-      subtasks: children.map((child) => this.toSummaryDto(child)),
+      subtasks: children.map((child) => this.toSummaryDto(child, undefined, entityRefsByKey)),
       activity: activity.map((row) => this.toActivityDto(row)),
     };
   }
@@ -100,12 +121,16 @@ export class TaskMapper {
   }
 
   /** Groups top-level tasks by status for the board. `cancelled` is left off — see TaskBoard. */
-  groupByStatus(tasks: Task[], countsByTaskId?: Map<number, TaskCounts>): Record<string, any[]> {
+  groupByStatus(
+    tasks: Task[],
+    countsByTaskId?: Map<number, TaskCounts>,
+    entityRefsByKey?: Map<string, TaskEntityRef>,
+  ): Record<string, any[]> {
     const groups: Record<string, any[]> = {};
     for (const status of BOARD_STATUSES) groups[status] = [];
     for (const task of tasks) {
       if (task.status === 'cancelled') continue;
-      groups[task.status].push(this.toSummaryDto(task, countsByTaskId?.get(task.id)));
+      groups[task.status].push(this.toSummaryDto(task, countsByTaskId?.get(task.id), entityRefsByKey));
     }
     return groups;
   }
@@ -116,7 +141,11 @@ export class TaskMapper {
    * ISO calendar dates sort lexicographically, so no Date parsing — and none of its
    * timezone pitfalls — is needed to bucket them.
    */
-  bucketByDueDate(tasks: Task[], countsByTaskId?: Map<number, TaskCounts>): Record<string, any[]> {
+  bucketByDueDate(
+    tasks: Task[],
+    countsByTaskId?: Map<number, TaskCounts>,
+    entityRefsByKey?: Map<string, TaskEntityRef>,
+  ): Record<string, any[]> {
     const today = TaskMapper.todayInBusinessTimezone();
     const weekEnd = TaskMapper.addDays(today, 7);
 
@@ -129,7 +158,7 @@ export class TaskMapper {
     };
 
     for (const task of tasks) {
-      const dto = this.toSummaryDto(task, countsByTaskId?.get(task.id));
+      const dto = this.toSummaryDto(task, countsByTaskId?.get(task.id), entityRefsByKey);
       const due = this.formatDate(task.dueDate);
       if (!due) buckets.noDueDate.push(dto);
       else if (due < today) buckets.overdue.push(dto);
