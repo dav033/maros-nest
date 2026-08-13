@@ -139,6 +139,45 @@ describe('TaskNotificationsListener watcher fanout', () => {
   });
 });
 
+describe('TaskNotificationsListener.onMentioned', () => {
+  it('notifies exactly the mentioned user, not the whole watcher list', async () => {
+    const { listener, notificationsService, taskWatchersRepository } = makeListener();
+
+    await listener.onMentioned({ taskId: 1, commentId: 42, actorId: 3, mentionedUserId: 9 });
+
+    // Targeted, unlike onCommented's fanout — no reason to even look up watchers.
+    expect(taskWatchersRepository.findUserIdsForTask).not.toHaveBeenCalled();
+    expect(notificationsService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 9,
+        kind: 'task_mentioned',
+        actorId: 3,
+        payload: expect.objectContaining({ commentId: 42 }),
+      }),
+    );
+  });
+
+  it('does nothing when the task no longer exists', async () => {
+    const { listener, notificationsService } = makeListener({
+      tasksRepository: { findByIdActive: jest.fn().mockResolvedValue(null) },
+    });
+
+    await listener.onMentioned({ taskId: 1, commentId: 42, actorId: 3, mentionedUserId: 9 });
+
+    expect(notificationsService.create).not.toHaveBeenCalled();
+  });
+
+  it('swallows errors instead of throwing', async () => {
+    const { listener } = makeListener({
+      tasksRepository: { findByIdActive: jest.fn().mockRejectedValue(new Error('db down')) },
+    });
+
+    await expect(
+      listener.onMentioned({ taskId: 1, commentId: 42, actorId: 3, mentionedUserId: 9 }),
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe('TaskNotificationsListener assignment email', () => {
   it('emails the new assignee, with both a text and an HTML body', async () => {
     const { listener, mailService, usersRepository } = makeListener();
@@ -184,7 +223,7 @@ describe('TaskNotificationsListener assignment email', () => {
     expect(notificationsService.create).toHaveBeenCalled();
   });
 
-  it('does not email for status changes, blocks, or comments', async () => {
+  it('does not email for status changes, blocks, comments, or mentions', async () => {
     const { listener, mailService } = makeListener({
       taskWatchersRepository: { findUserIdsForTask: jest.fn().mockResolvedValue([7]) },
     });
@@ -192,6 +231,7 @@ describe('TaskNotificationsListener assignment email', () => {
     await listener.onStatusChanged({ taskId: 1, actorId: 3, from: 'todo', to: 'in_progress' });
     await listener.onBlocked({ taskId: 1, actorId: 3, reason: 'waiting on permit' });
     await listener.onCommented({ taskId: 1, commentId: 42, actorId: 3 });
+    await listener.onMentioned({ taskId: 1, commentId: 42, actorId: 3, mentionedUserId: 9 });
 
     expect(mailService.sendMail).not.toHaveBeenCalled();
   });

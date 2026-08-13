@@ -10,6 +10,7 @@ import { TaskComment } from '../../../../entities/task-comment.entity';
 import type { TaskActor } from './task-actor';
 import { TaskNotFoundException, TaskCommentNotFoundException } from '../../../../common/exceptions';
 import { extractPlainTextFromTipTapDoc } from '../../../../common/utils/tiptap-text.util';
+import { extractMentionedUserIds } from '../../../../common/utils/tiptap-mentions.util';
 
 @Injectable()
 export class TaskCommentsService {
@@ -58,6 +59,7 @@ export class TaskCommentsService {
 
     // Commenting makes you a watcher — see PLAN-TAREAS.md section 3.
     await this.taskWatchersRepository.addMany(taskId, [actor.id]);
+    await this.notifyMentions(taskId, saved.id, dto.body, actor);
     await this.taskActivity.logCommented(taskId, actor.id, saved.id);
     this.eventEmitter.emit('task.commented', {
       taskId,
@@ -83,7 +85,42 @@ export class TaskCommentsService {
     }
 
     const saved = await this.taskCommentsRepository.save(comment);
+
+    if (dto.body !== undefined) {
+      await this.notifyMentions(taskId, saved.id, dto.body, actor);
+    }
+
     return this.toDto(saved);
+  }
+
+  /**
+   * Pulls every @mentioned user into the thread — added as a watcher (so every later
+   * comment/status change reaches them too, not just this one) and told once via
+   * task.mentioned. Mentioning yourself is a no-op: you're already reading this
+   * comment. Re-saving an edited comment re-scans the whole body rather than diffing
+   * against the previous version, so mentioning someone for the first time in an edit
+   * still notifies them — the cost is one extra watchers upsert (itself a no-op for
+   * already-mentioned people, per TaskWatchersRepository.addMany) against a comment
+   * body that's realistically a few mentions long at most.
+   */
+  private async notifyMentions(
+    taskId: number,
+    commentId: number,
+    body: Record<string, unknown>,
+    actor: TaskActor,
+  ): Promise<void> {
+    const mentionedUserIds = extractMentionedUserIds(body).filter((id) => id !== actor.id);
+    if (mentionedUserIds.length === 0) return;
+
+    await this.taskWatchersRepository.addMany(taskId, mentionedUserIds);
+    for (const userId of mentionedUserIds) {
+      this.eventEmitter.emit('task.mentioned', {
+        taskId,
+        commentId,
+        actorId: actor.id,
+        mentionedUserId: userId,
+      });
+    }
   }
 
   async delete(taskId: number, commentId: number, actor: TaskActor): Promise<void> {

@@ -34,12 +34,19 @@ interface TaskCommentedEvent {
   actorId: number;
 }
 
+interface TaskMentionedEvent {
+  taskId: number;
+  commentId: number;
+  actorId: number;
+  mentionedUserId: number;
+}
+
 /**
  * Turns task.* events into in-app notifications, plus one immediate email —
  * assignment, and only assignment. Per PLAN-TAREAS.md's mail policy: a crew that gets
- * a message for every comment stops reading messages. Status changes, blocks and
- * comments stay in-app only; the daily digest (TaskDigestCron) is the other mail this
- * feature sends.
+ * a message for every comment stops reading messages. Status changes, blocks,
+ * comments and mentions stay in-app only; the daily digest (TaskDigestCron) is the
+ * other mail this feature sends.
  *
  * Self-assignment is the one deliberate exception to "never notify yourself": the
  * in-app bell still skips it (you're already looking at the screen), but the email
@@ -123,6 +130,27 @@ export class TaskNotificationsListener {
         taskId: event.taskId,
         taskTitle: task.title,
         commentId: event.commentId,
+      });
+    });
+  }
+
+  /**
+   * Unlike onCommented (every watcher), this targets exactly the one person named in
+   * the @mention — see TaskCommentsService.notifyMentions, which already excludes a
+   * self-mention before this ever fires.
+   */
+  @OnEvent('task.mentioned')
+  async onMentioned(event: TaskMentionedEvent): Promise<void> {
+    await this.safely('task.mentioned', async () => {
+      const task = await this.tasksRepository.findByIdActive(event.taskId);
+      if (!task) return;
+      await this.notificationsService.create({
+        userId: event.mentionedUserId,
+        kind: 'task_mentioned',
+        actorId: event.actorId,
+        entityKind: 'task',
+        entityId: event.taskId,
+        payload: { taskId: event.taskId, taskTitle: task.title, commentId: event.commentId },
       });
     });
   }

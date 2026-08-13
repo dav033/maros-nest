@@ -20,6 +20,18 @@ function comment(overrides: Partial<TaskComment> = {}): TaskComment {
   });
 }
 
+function bodyMentioning(...userIds: number[]): Record<string, unknown> {
+  return {
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        content: userIds.map((id) => ({ type: 'mention', attrs: { id: String(id) } })),
+      },
+    ],
+  };
+}
+
 function makeService(
   overrides: {
     taskCommentsRepository?: Record<string, jest.Mock>;
@@ -110,6 +122,61 @@ describe('TaskCommentsService.create', () => {
       expect.objectContaining({ taskId: 10, commentId: 5, actorId: 3 }),
     );
   });
+
+  it('adds a mentioned user as a watcher and emits task.mentioned', async () => {
+    let saved: TaskComment | null = null;
+    const { service, taskWatchersRepository, eventEmitter } = makeService({
+      taskCommentsRepository: {
+        save: jest.fn().mockImplementation((c: TaskComment) => {
+          saved = Object.assign(c, { id: 5 });
+          return Promise.resolve(saved);
+        }),
+        findByIdActive: jest.fn().mockImplementation(() => Promise.resolve(saved)),
+      },
+    });
+
+    await service.create(10, { body: bodyMentioning(7) }, actor(3));
+
+    expect(taskWatchersRepository.addMany).toHaveBeenCalledWith(10, [7]);
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'task.mentioned',
+      expect.objectContaining({ taskId: 10, commentId: 5, actorId: 3, mentionedUserId: 7 }),
+    );
+  });
+
+  it('does not notify a self-mention', async () => {
+    let saved: TaskComment | null = null;
+    const { service, eventEmitter } = makeService({
+      taskCommentsRepository: {
+        save: jest.fn().mockImplementation((c: TaskComment) => {
+          saved = Object.assign(c, { id: 5 });
+          return Promise.resolve(saved);
+        }),
+        findByIdActive: jest.fn().mockImplementation(() => Promise.resolve(saved)),
+      },
+    });
+
+    await service.create(10, { body: bodyMentioning(3) }, actor(3));
+
+    expect(eventEmitter.emit).not.toHaveBeenCalledWith('task.mentioned', expect.anything());
+  });
+
+  it('mentioning nobody emits no task.mentioned event', async () => {
+    let saved: TaskComment | null = null;
+    const { service, eventEmitter } = makeService({
+      taskCommentsRepository: {
+        save: jest.fn().mockImplementation((c: TaskComment) => {
+          saved = Object.assign(c, { id: 5 });
+          return Promise.resolve(saved);
+        }),
+        findByIdActive: jest.fn().mockImplementation(() => Promise.resolve(saved)),
+      },
+    });
+
+    await service.create(10, { body: {} }, actor(3));
+
+    expect(eventEmitter.emit).not.toHaveBeenCalledWith('task.mentioned', expect.anything());
+  });
 });
 
 describe('TaskCommentsService authorship', () => {
@@ -120,6 +187,32 @@ describe('TaskCommentsService authorship', () => {
     });
 
     await expect(service.update(10, 1, { body: { x: 1 } }, actor(3))).resolves.toBeDefined();
+  });
+
+  it('notifies a mention newly added in an edit', async () => {
+    const existing = comment({ authorId: 3, taskId: 10, body: {} });
+    const { service, taskWatchersRepository, eventEmitter } = makeService({
+      taskCommentsRepository: { findByIdActive: jest.fn().mockResolvedValue(existing) },
+    });
+
+    await service.update(10, 1, { body: bodyMentioning(9) }, actor(3));
+
+    expect(taskWatchersRepository.addMany).toHaveBeenCalledWith(10, [9]);
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'task.mentioned',
+      expect.objectContaining({ taskId: 10, commentId: 1, actorId: 3, mentionedUserId: 9 }),
+    );
+  });
+
+  it('skips mention processing entirely when the edit does not touch the body', async () => {
+    const existing = comment({ authorId: 3 });
+    const { service, eventEmitter } = makeService({
+      taskCommentsRepository: { findByIdActive: jest.fn().mockResolvedValue(existing) },
+    });
+
+    await service.update(10, 1, {}, actor(3));
+
+    expect(eventEmitter.emit).not.toHaveBeenCalledWith('task.mentioned', expect.anything());
   });
 
   it('rejects a non-author without tasks:delete', async () => {
