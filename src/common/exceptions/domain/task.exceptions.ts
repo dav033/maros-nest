@@ -1,9 +1,23 @@
+import { HttpStatus } from '@nestjs/common';
 import { ResourceNotFoundException } from '../resource-not-found.exception';
 import { BusinessException } from '../business.exception';
+import { BaseException } from '../base.exception';
 
 export class TaskNotFoundException extends ResourceNotFoundException {
   constructor(id: number) {
     super(`Task not found with id: ${id}`);
+  }
+}
+
+/**
+ * Thrown by TasksService.update when the caller's `expectedUpdatedAt` no longer
+ * matches the row — someone else saved a change to this task in between the caller
+ * loading it and submitting this edit. 409, not 422/BusinessException: this isn't a
+ * validation problem with the payload, it's a stale read.
+ */
+export class TaskConflictException extends BaseException {
+  constructor() {
+    super('This task was changed by someone else. Reload to see the latest version.', HttpStatus.CONFLICT, 'TASK_CONFLICT');
   }
 }
 
@@ -44,6 +58,7 @@ export class TaskCommentNotFoundException extends ResourceNotFoundException {
 
 export const TaskExceptions = {
   TaskNotFoundException,
+  TaskConflictException,
   TaskLabelNotFoundException,
   TaskLabelNameConflictException,
   TaskSubtaskNestingException,

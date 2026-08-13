@@ -18,6 +18,7 @@ import type { TaskActor } from './services/task-actor';
 import { computeInsertPosition } from './services/task-position.util';
 import {
   TaskNotFoundException,
+  TaskConflictException,
   TaskSubtaskNestingException,
   TaskBlockedReasonRequiredException,
 } from '../../../common/exceptions';
@@ -161,6 +162,16 @@ export class TasksService {
     const task = await this.tasksRepository.findByIdActive(id);
     if (!task) throw new TaskNotFoundException(id);
 
+    // Only checked when the caller sent it — see UpdateTaskDto. A stale edit is
+    // rejected before any field is touched, so a conflicting request never partially
+    // applies.
+    if (
+      dto.expectedUpdatedAt !== undefined &&
+      new Date(dto.expectedUpdatedAt).getTime() !== task.updatedAt.getTime()
+    ) {
+      throw new TaskConflictException();
+    }
+
     if (dto.title !== undefined) task.title = dto.title.trim() || 'Untitled task';
 
     if (dto.description !== undefined) {
@@ -199,15 +210,55 @@ export class TasksService {
       task.blockedReason = dto.blockedReason;
     }
 
-    if (dto.attachments !== undefined) {
-      // Only a net gain counts as "added" — reordering or removing isn't worth its own
-      // activity kind, and inventing "attachment_removed" for one caller isn't either.
-      const added = dto.attachments.length - task.attachments.length;
-      if (added > 0) {
-        await this.taskActivity.logAttachmentAdded(id, actor.id, added);
-      }
-      task.attachments = dto.attachments;
-    }
+    await this.tasksRepository.save(task);
+    return this.freshDetail(id);
+  }
+
+  /**
+   * Attachments never go through `update()` — see PATCH's UpdateTaskDto, which no
+   * longer carries the field. Two browsers uploading to the same task at once each
+   * hold their own (possibly stale) copy of the list; a "send the whole array back"
+   * PATCH would let the second save silently erase the first upload. These three
+   * methods instead re-read the row and apply one operation to the server's current
+   * set, so the only way to lose an attachment is to remove it on purpose.
+   */
+  async addAttachments(id: number, keys: string[], actor: TaskActor): Promise<any> {
+    const task = await this.tasksRepository.findByIdActive(id);
+    if (!task) throw new TaskNotFoundException(id);
+
+    const existing = new Set(task.attachments);
+    const added = keys.filter((key) => !existing.has(key));
+    if (added.length === 0) return this.freshDetail(id);
+
+    task.attachments = [...task.attachments, ...added];
+    await this.tasksRepository.save(task);
+    await this.taskActivity.logAttachmentAdded(id, actor.id, added.length);
+    return this.freshDetail(id);
+  }
+
+  async removeAttachment(id: number, key: string): Promise<any> {
+    const task = await this.tasksRepository.findByIdActive(id);
+    if (!task) throw new TaskNotFoundException(id);
+
+    task.attachments = task.attachments.filter((existingKey) => existingKey !== key);
+    await this.tasksRepository.save(task);
+    return this.freshDetail(id);
+  }
+
+  /**
+   * Reconciled against the server's current set, not applied verbatim: a stale
+   * reorder (issued before a concurrent add/remove landed) must not resurrect a
+   * just-removed key or silently drop a just-added one. Keys the caller doesn't know
+   * about yet are appended at the end.
+   */
+  async reorderAttachments(id: number, orderedKeys: string[]): Promise<any> {
+    const task = await this.tasksRepository.findByIdActive(id);
+    if (!task) throw new TaskNotFoundException(id);
+
+    const current = new Set(task.attachments);
+    const reordered = orderedKeys.filter((key) => current.has(key));
+    const missing = task.attachments.filter((key) => !reordered.includes(key));
+    task.attachments = [...reordered, ...missing];
 
     await this.tasksRepository.save(task);
     return this.freshDetail(id);

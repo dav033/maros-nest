@@ -27,6 +27,9 @@ import { CreateLabelDto } from './dto/create-label.dto';
 import { UpdateLabelDto } from './dto/update-label.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
+import { AddAttachmentsDto } from './dto/add-attachments.dto';
+import { RemoveAttachmentDto } from './dto/remove-attachment.dto';
+import { ReorderAttachmentsDto } from './dto/reorder-attachments.dto';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
@@ -144,6 +147,7 @@ export class TasksController {
   @ApiOperation({ summary: "Update a task's own fields (not status — see /move)" })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 404, description: 'Task not found' })
+  @ApiResponse({ status: 409, description: 'expectedUpdatedAt no longer matches — someone else edited it first' })
   async updateTask(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateTaskDto,
@@ -203,6 +207,45 @@ export class TasksController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.tasksService.setEntityLink(id, dto, toTaskActor(user));
+  }
+
+  // --- Attachments: additive, never a full-list replace — see TasksService docblock. ---
+
+  @Post(':id/attachments')
+  @RequirePermissions('tasks:write')
+  @ApiOperation({ summary: 'Add S3 attachment keys to the task (already-present keys are ignored)' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({ status: 404, description: 'Task not found' })
+  async addAttachments(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AddAttachmentsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.tasksService.addAttachments(id, dto.keys, toTaskActor(user));
+  }
+
+  @Post(':id/attachments/remove')
+  @RequirePermissions('tasks:write')
+  @ApiOperation({ summary: 'Remove one attachment by key' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({ status: 404, description: 'Task not found' })
+  async removeAttachment(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RemoveAttachmentDto,
+  ) {
+    return this.tasksService.removeAttachment(id, dto.key);
+  }
+
+  @Put(':id/attachments/order')
+  @RequirePermissions('tasks:write')
+  @ApiOperation({ summary: 'Reorder attachments, reconciled against the server\'s current set' })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({ status: 404, description: 'Task not found' })
+  async reorderAttachments(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ReorderAttachmentsDto,
+  ) {
+    return this.tasksService.reorderAttachments(id, dto.keys);
   }
 
   @Delete(':id')

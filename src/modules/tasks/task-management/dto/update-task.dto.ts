@@ -6,7 +6,6 @@ import {
   IsIn,
   IsObject,
   IsDateString,
-  IsArray,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { TASK_KINDS, TASK_PRIORITIES } from '../../../../entities/task.entity';
@@ -70,11 +69,13 @@ export class UpdateTaskDto {
   blockedReason?: string | null;
 
   @ApiPropertyOptional({
-    description: 'Complete set of S3 attachment keys, in display order',
-    type: [String],
+    description:
+      'The updatedAt this edit was based on (ISO datetime). When present and it no ' +
+      'longer matches the row, the request fails with 409 TASK_CONFLICT instead of ' +
+      'silently overwriting a change made in between. Omit for callers where the last ' +
+      'write legitimately wins (the board drag, the one-tap status button).',
   })
-  @IsArray()
-  @IsString({ each: true })
+  @IsDateString()
   @IsOptional()
-  attachments?: string[];
+  expectedUpdatedAt?: string;
 }

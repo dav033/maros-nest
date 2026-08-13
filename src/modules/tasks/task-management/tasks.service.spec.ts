@@ -5,6 +5,7 @@ import { Task } from '../../../entities/task.entity';
 import type { TaskActor } from './services/task-actor';
 import {
   TaskNotFoundException,
+  TaskConflictException,
   TaskSubtaskNestingException,
   TaskBlockedReasonRequiredException,
 } from '../../../common/exceptions';
@@ -27,6 +28,7 @@ function task(overrides: Partial<Task> = {}): Task {
     completedAt: null,
     attachments: [],
     labels: [],
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
   });
 }
@@ -376,32 +378,146 @@ describe('TasksService.setAssignee', () => {
   });
 });
 
-describe('TasksService.update', () => {
-  it('logs attachment_added when the attachment list grows', async () => {
-    const existing = task({ attachments: ['a.png'] });
-    const { service, taskActivityRepository } = makeService({
+describe('TasksService.update — optimistic concurrency', () => {
+  it('rejects a stale expectedUpdatedAt with a conflict, before touching any field', async () => {
+    const existing = task({ title: 'Original', updatedAt: new Date('2026-01-01T00:00:00.000Z') });
+    const { service, tasksRepository } = makeService({
       findByIdActive: jest.fn().mockResolvedValue(existing),
       save: jest.fn().mockImplementation((t: Task) => Promise.resolve(t)),
     });
 
-    await service.update(1, { attachments: ['a.png', 'b.png', 'c.png'] }, actor(4));
+    await expect(
+      service.update(
+        1,
+        { title: 'Someone else already renamed this', expectedUpdatedAt: '2025-12-31T00:00:00.000Z' },
+        actor(4),
+      ),
+    ).rejects.toThrow(TaskConflictException);
 
+    expect(existing.title).toBe('Original');
+    expect(tasksRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('accepts the write when expectedUpdatedAt matches the row', async () => {
+    const existing = task({ title: 'Original', updatedAt: new Date('2026-01-01T00:00:00.000Z') });
+    const { service, tasksRepository } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      save: jest.fn().mockImplementation((t: Task) => Promise.resolve(t)),
+    });
+
+    await service.update(
+      1,
+      { title: 'Renamed', expectedUpdatedAt: '2026-01-01T00:00:00.000Z' },
+      actor(4),
+    );
+
+    expect(tasksRepository.save).toHaveBeenCalled();
+  });
+
+  it('skips the check entirely when the caller sends no expectedUpdatedAt', async () => {
+    // The board drag and the one-tap status button never send it — last write wins
+    // there by design (see UpdateTaskDto).
+    const existing = task({ title: 'Original', updatedAt: new Date('2026-01-01T00:00:00.000Z') });
+    const { service, tasksRepository } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      save: jest.fn().mockImplementation((t: Task) => Promise.resolve(t)),
+    });
+
+    await service.update(1, { title: 'Renamed without a version check' }, actor(4));
+
+    expect(tasksRepository.save).toHaveBeenCalled();
+  });
+});
+
+describe('TasksService.addAttachments', () => {
+  it('unions new keys onto whatever the server currently holds, not the caller\'s copy', async () => {
+    // The server already gained 'b.png' from a concurrent upload the caller doesn't
+    // know about — addAttachments must never require (or accept) the full list, so
+    // that upload can't be lost.
+    const existing = task({ attachments: ['a.png', 'b.png'] });
+    let saved: Task | null = null;
+    const { service, taskActivityRepository } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      save: jest.fn().mockImplementation((t: Task) => {
+        saved = t;
+        return Promise.resolve(t);
+      }),
+    });
+
+    await service.addAttachments(1, ['c.png'], actor(4));
+
+    expect(saved?.attachments).toEqual(['a.png', 'b.png', 'c.png']);
     expect(taskActivityRepository.log).toHaveBeenCalledWith(
-      expect.objectContaining({ taskId: 1, actorId: 4, kind: 'attachment_added', toValue: '2' }),
+      expect.objectContaining({ taskId: 1, actorId: 4, kind: 'attachment_added', toValue: '1' }),
     );
   });
 
-  it('does not log an activity when attachments only shrink or reorder', async () => {
-    const existing = task({ attachments: ['a.png', 'b.png'] });
-    const { service, taskActivityRepository } = makeService({
+  it('ignores keys already present and logs nothing when nothing new was added', async () => {
+    const existing = task({ attachments: ['a.png'] });
+    const { service, tasksRepository, taskActivityRepository } = makeService({
       findByIdActive: jest.fn().mockResolvedValue(existing),
       save: jest.fn().mockImplementation((t: Task) => Promise.resolve(t)),
     });
 
-    await service.update(1, { attachments: ['b.png'] }, actor(4));
+    await service.addAttachments(1, ['a.png'], actor(4));
 
+    expect(tasksRepository.save).not.toHaveBeenCalled();
     expect(taskActivityRepository.log).not.toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'attachment_added' }),
     );
+  });
+});
+
+describe('TasksService.removeAttachment', () => {
+  it('removes only the given key, against the server\'s current set', async () => {
+    const existing = task({ attachments: ['a.png', 'b.png', 'c.png'] });
+    let saved: Task | null = null;
+    const { service } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      save: jest.fn().mockImplementation((t: Task) => {
+        saved = t;
+        return Promise.resolve(t);
+      }),
+    });
+
+    await service.removeAttachment(1, 'b.png');
+
+    expect(saved?.attachments).toEqual(['a.png', 'c.png']);
+  });
+});
+
+describe('TasksService.reorderAttachments', () => {
+  it('applies the requested order for keys the server still has', async () => {
+    const existing = task({ attachments: ['a.png', 'b.png', 'c.png'] });
+    let saved: Task | null = null;
+    const { service } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      save: jest.fn().mockImplementation((t: Task) => {
+        saved = t;
+        return Promise.resolve(t);
+      }),
+    });
+
+    await service.reorderAttachments(1, ['c.png', 'a.png', 'b.png']);
+
+    expect(saved?.attachments).toEqual(['c.png', 'a.png', 'b.png']);
+  });
+
+  it('drops keys the server no longer has and appends keys the caller did not know about', async () => {
+    // Caller's reorder was computed before a concurrent add ('d.png') and a concurrent
+    // remove ('b.png') landed on the server.
+    const existing = task({ attachments: ['a.png', 'c.png', 'd.png'] });
+    let saved: Task | null = null;
+    const { service } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      save: jest.fn().mockImplementation((t: Task) => {
+        saved = t;
+        return Promise.resolve(t);
+      }),
+    });
+
+    await service.reorderAttachments(1, ['c.png', 'b.png', 'a.png']);
+
+    expect(saved?.attachments).toEqual(['c.png', 'a.png', 'd.png']);
   });
 });
