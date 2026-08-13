@@ -41,6 +41,18 @@ export class TasksService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
+  /**
+   * Fired on every mutation, on top of whatever narrower event already exists
+   * (task.assigned, task.status_changed, ...) — the one signal TaskEventsBridgeService
+   * relays over SSE for the live board/list/mine views. Deliberately generic (just
+   * "this task changed"), not a per-field diff: the SSE payload doesn't have to be
+   * kept in lockstep with every future field TasksService can touch, and a background
+   * refetch on the receiving end is cheap. See TaskEventsBridgeService.
+   */
+  private emitTaskChanged(taskId: number, actorId: number): void {
+    this.eventEmitter.emit('task.changed', { taskId, actorId });
+  }
+
   private async freshDetail(id: number): Promise<any> {
     const task = await this.tasksRepository.findByIdActive(id);
     if (!task) throw new TaskNotFoundException(id);
@@ -186,6 +198,7 @@ export class TasksService {
         actorId: actor.id,
       });
     }
+    this.emitTaskChanged(saved.id, actor.id);
 
     return this.freshDetail(saved.id);
   }
@@ -243,6 +256,7 @@ export class TasksService {
     }
 
     await this.tasksRepository.save(task);
+    this.emitTaskChanged(id, actor.id);
     return this.freshDetail(id);
   }
 
@@ -265,15 +279,17 @@ export class TasksService {
     task.attachments = [...task.attachments, ...added];
     await this.tasksRepository.save(task);
     await this.taskActivity.logAttachmentAdded(id, actor.id, added.length);
+    this.emitTaskChanged(id, actor.id);
     return this.freshDetail(id);
   }
 
-  async removeAttachment(id: number, key: string): Promise<any> {
+  async removeAttachment(id: number, key: string, actor: TaskActor): Promise<any> {
     const task = await this.tasksRepository.findByIdActive(id);
     if (!task) throw new TaskNotFoundException(id);
 
     task.attachments = task.attachments.filter((existingKey) => existingKey !== key);
     await this.tasksRepository.save(task);
+    this.emitTaskChanged(id, actor.id);
     return this.freshDetail(id);
   }
 
@@ -283,7 +299,7 @@ export class TasksService {
    * just-removed key or silently drop a just-added one. Keys the caller doesn't know
    * about yet are appended at the end.
    */
-  async reorderAttachments(id: number, orderedKeys: string[]): Promise<any> {
+  async reorderAttachments(id: number, orderedKeys: string[], actor: TaskActor): Promise<any> {
     const task = await this.tasksRepository.findByIdActive(id);
     if (!task) throw new TaskNotFoundException(id);
 
@@ -293,6 +309,7 @@ export class TasksService {
     task.attachments = [...reordered, ...missing];
 
     await this.tasksRepository.save(task);
+    this.emitTaskChanged(id, actor.id);
     return this.freshDetail(id);
   }
 
@@ -333,6 +350,10 @@ export class TasksService {
     }
 
     await this.tasksRepository.save(task);
+    // Unconditional — unlike task.status_changed below, this also covers a
+    // same-column reorder (fromStatus === toStatus), the most common drag on a
+    // kanban board and otherwise the one move that broadcast nothing at all.
+    this.emitTaskChanged(id, actor.id);
 
     let openSubtasks: number | undefined;
 
@@ -412,15 +433,17 @@ export class TasksService {
     } else {
       await this.taskActivity.logUnassigned(id, actor.id, previousAssigneeId);
     }
+    this.emitTaskChanged(id, actor.id);
 
     return this.freshDetail(id);
   }
 
-  async setLabels(id: number, dto: SetLabelsDto): Promise<any> {
+  async setLabels(id: number, dto: SetLabelsDto, actor: TaskActor): Promise<any> {
     const task = await this.tasksRepository.findByIdActive(id);
     if (!task) throw new TaskNotFoundException(id);
     task.labels = await this.taskLabelsRepository.findByIds(dto.labelIds);
     await this.tasksRepository.save(task);
+    this.emitTaskChanged(id, actor.id);
     return this.freshDetail(id);
   }
 
@@ -439,14 +462,16 @@ export class TasksService {
       await this.tasksRepository.save(task);
       await this.taskActivity.logEntityLinked(id, actor.id, dto.entityKind, dto.entityId as number);
     }
+    this.emitTaskChanged(id, actor.id);
 
     return this.freshDetail(id);
   }
 
   /** Soft delete. Direct subtasks go with it (one level, no recursion) — see PLAN-TAREAS.md section 0.5. */
-  async delete(id: number): Promise<void> {
+  async delete(id: number, actor: TaskActor): Promise<void> {
     const task = await this.tasksRepository.findByIdActive(id);
     if (!task) throw new TaskNotFoundException(id);
     await this.tasksRepository.softDeleteWithChildren(id);
+    this.emitTaskChanged(id, actor.id);
   }
 }

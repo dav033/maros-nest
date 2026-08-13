@@ -5,17 +5,22 @@ import {
   Put,
   Patch,
   Delete,
+  Sse,
   Body,
   Param,
   Query,
   ParseIntPipe,
   HttpCode,
   HttpStatus,
+  MessageEvent,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
+import { Observable, interval, merge } from 'rxjs';
+import { filter, map } from 'rxjs/operators';
 import { TasksService } from './tasks.service';
 import { TaskLabelsService } from './services/task-labels.service';
 import { TaskCommentsService } from './services/task-comments.service';
+import { TaskEventsBridgeService } from './services/task-events-bridge.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
@@ -44,6 +49,7 @@ export class TasksController {
     private readonly tasksService: TasksService,
     private readonly taskLabelsService: TaskLabelsService,
     private readonly taskCommentsService: TaskCommentsService,
+    private readonly taskEventsBridge: TaskEventsBridgeService,
   ) {}
 
   // --- Static routes first: they must never be shadowed by ':id'. ---
@@ -87,6 +93,32 @@ export class TasksController {
   @ApiOperation({ summary: 'Get all task labels' })
   async listLabels() {
     return this.taskLabelsService.listLabels();
+  }
+
+  /**
+   * The live-board transport: one `task.changed` message per mutation, filtered so a
+   * client never receives its own change back (its own mutation's onSuccess already
+   * has the fresh result — see useTaskMutations on the frontend). Deliberately not a
+   * per-field diff — see TaskEventsBridgeService — so the receiving client just
+   * refetches whatever query group the changed task belongs to.
+   *
+   * A 20s heartbeat comment keeps the connection alive through reverse proxies that
+   * would otherwise time out an idle keep-alive HTTP connection; EventSource's own
+   * auto-reconnect (with the browser's default backoff) is the recovery path if the
+   * connection drops anyway, so there's no reconnection logic to write here or on
+   * the client.
+   */
+  @Sse('events/stream')
+  @ApiOperation({ summary: 'Live task.changed events — the board/list/mine views\' real-time transport' })
+  streamEvents(@CurrentUser() user: AuthenticatedUser): Observable<MessageEvent> {
+    const changes$ = this.taskEventsBridge.changes$.pipe(
+      filter((event) => event.actorId !== user.id),
+      map((event) => ({ type: 'task.changed', data: event }) satisfies MessageEvent),
+    );
+    const heartbeat$ = interval(20_000).pipe(
+      map(() => ({ type: 'heartbeat', data: {} }) satisfies MessageEvent),
+    );
+    return merge(changes$, heartbeat$);
   }
 
   @Post('labels')
@@ -192,8 +224,9 @@ export class TasksController {
   async setLabels(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: SetLabelsDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.tasksService.setLabels(id, dto);
+    return this.tasksService.setLabels(id, dto, toTaskActor(user));
   }
 
   @Put(':id/entity')
@@ -232,8 +265,9 @@ export class TasksController {
   async removeAttachment(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: RemoveAttachmentDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.tasksService.removeAttachment(id, dto.key);
+    return this.tasksService.removeAttachment(id, dto.key, toTaskActor(user));
   }
 
   @Put(':id/attachments/order')
@@ -244,8 +278,9 @@ export class TasksController {
   async reorderAttachments(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: ReorderAttachmentsDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.tasksService.reorderAttachments(id, dto.keys);
+    return this.tasksService.reorderAttachments(id, dto.keys, toTaskActor(user));
   }
 
   @Delete(':id')
@@ -254,8 +289,11 @@ export class TasksController {
   @ApiOperation({ summary: 'Soft-delete a task and its direct subtasks' })
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 404, description: 'Task not found' })
-  async deleteTask(@Param('id', ParseIntPipe) id: number) {
-    await this.tasksService.delete(id);
+  async deleteTask(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.tasksService.delete(id, toTaskActor(user));
   }
 
   // --- Comments ---

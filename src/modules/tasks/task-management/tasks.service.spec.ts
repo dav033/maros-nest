@@ -339,6 +339,21 @@ describe('TasksService.move', () => {
 
     expect(result.openSubtasksWarning).toBe(2);
   });
+
+  it('emits task.changed even for a same-column reorder — the most common drag, and the one that changes no status', async () => {
+    const existing = task({ status: 'todo' });
+    const { service, eventEmitter } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      getSiblingsInColumn: jest.fn().mockResolvedValue([{ id: 2, position: 1000 }]),
+      save: jest.fn().mockImplementation((t: Task) => Promise.resolve(t)),
+    });
+
+    await service.move(1, { status: 'todo', afterId: 2 }, actor(7));
+
+    expect(eventEmitter.emit).toHaveBeenCalledWith('task.changed', { taskId: 1, actorId: 7 });
+    // No status transition — the narrower event must not fire.
+    expect(eventEmitter.emit).not.toHaveBeenCalledWith('task.status_changed', expect.anything());
+  });
 });
 
 describe('TasksService.getBoard', () => {
@@ -465,6 +480,56 @@ describe('TasksService.update — optimistic concurrency', () => {
   });
 });
 
+describe('TasksService — task.changed broadcast', () => {
+  it('emits on update()', async () => {
+    const existing = task();
+    const { service, eventEmitter } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      save: jest.fn().mockImplementation((t: Task) => Promise.resolve(t)),
+    });
+
+    await service.update(1, { title: 'Renamed' }, actor(9));
+
+    expect(eventEmitter.emit).toHaveBeenCalledWith('task.changed', { taskId: 1, actorId: 9 });
+  });
+
+  it('emits on setEntityLink()', async () => {
+    const existing = task();
+    const { service, eventEmitter } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      save: jest.fn().mockImplementation((t: Task) => Promise.resolve(t)),
+    });
+
+    await service.setEntityLink(1, { entityKind: 'lead', entityId: 42 }, actor(9));
+
+    expect(eventEmitter.emit).toHaveBeenCalledWith('task.changed', { taskId: 1, actorId: 9 });
+  });
+
+  it('emits on setLabels()', async () => {
+    const existing = task();
+    const { service, eventEmitter } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      save: jest.fn().mockImplementation((t: Task) => Promise.resolve(t)),
+    });
+
+    await service.setLabels(1, { labelIds: [] }, actor(9));
+
+    expect(eventEmitter.emit).toHaveBeenCalledWith('task.changed', { taskId: 1, actorId: 9 });
+  });
+
+  it('emits on delete()', async () => {
+    const existing = task();
+    const { service, eventEmitter } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      softDeleteWithChildren: jest.fn().mockResolvedValue(undefined),
+    });
+
+    await service.delete(1, actor(9));
+
+    expect(eventEmitter.emit).toHaveBeenCalledWith('task.changed', { taskId: 1, actorId: 9 });
+  });
+});
+
 describe('TasksService.addAttachments', () => {
   it('unions new keys onto whatever the server currently holds, not the caller\'s copy', async () => {
     // The server already gained 'b.png' from a concurrent upload the caller doesn't
@@ -516,7 +581,7 @@ describe('TasksService.removeAttachment', () => {
       }),
     });
 
-    await service.removeAttachment(1, 'b.png');
+    await service.removeAttachment(1, 'b.png', actor());
 
     expect(saved?.attachments).toEqual(['a.png', 'c.png']);
   });
@@ -534,7 +599,7 @@ describe('TasksService.reorderAttachments', () => {
       }),
     });
 
-    await service.reorderAttachments(1, ['c.png', 'a.png', 'b.png']);
+    await service.reorderAttachments(1, ['c.png', 'a.png', 'b.png'], actor());
 
     expect(saved?.attachments).toEqual(['c.png', 'a.png', 'b.png']);
   });
@@ -552,7 +617,7 @@ describe('TasksService.reorderAttachments', () => {
       }),
     });
 
-    await service.reorderAttachments(1, ['c.png', 'b.png', 'a.png']);
+    await service.reorderAttachments(1, ['c.png', 'b.png', 'a.png'], actor());
 
     expect(saved?.attachments).toEqual(['c.png', 'a.png', 'd.png']);
   });

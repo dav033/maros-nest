@@ -21,6 +21,7 @@ import { TaskLabelsService } from './task-management/services/task-labels.servic
 import { TaskActivityService } from './task-management/services/task-activity.service';
 import { TaskCommentsService } from './task-management/services/task-comments.service';
 import { TaskEntityResolverService } from './task-management/services/task-entity-resolver.service';
+import { TaskEventsBridgeService } from './task-management/services/task-events-bridge.service';
 import { TaskMapper } from './task-management/mappers/task.mapper';
 import { TasksController } from './task-management/tasks.controller';
 import { TaskNotificationsListener } from './task-notifications/task-notifications.listener';
@@ -54,6 +55,7 @@ import { TaskDigestCron } from './task-notifications/task-digest.cron';
     TaskActivityService,
     TaskCommentsService,
     TaskEntityResolverService,
+    TaskEventsBridgeService,
     TaskMapper,
     TaskNotificationsListener,
     TaskDigestCron,
