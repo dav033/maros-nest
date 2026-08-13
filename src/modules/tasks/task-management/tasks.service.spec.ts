@@ -39,7 +39,10 @@ function task(overrides: Partial<Task> = {}): Task {
  * matter what TasksService actually recorded. Only the repository layer is mocked, same
  * approach as notes.service.spec.ts.
  */
-function makeService(tasksRepositoryOverrides: Record<string, jest.Mock> = {}) {
+function makeService(
+  tasksRepositoryOverrides: Record<string, jest.Mock> = {},
+  taskLabelsRepositoryOverrides: Record<string, jest.Mock> = {},
+) {
   const tasksRepository = {
     findChildren: jest.fn().mockResolvedValue([]),
     getMaxPositionInColumn: jest.fn().mockResolvedValue(0),
@@ -53,7 +56,7 @@ function makeService(tasksRepositoryOverrides: Record<string, jest.Mock> = {}) {
     ...tasksRepositoryOverrides,
   };
 
-  const taskLabelsRepository = { findByIds: jest.fn().mockResolvedValue([]) };
+  const taskLabelsRepository = { findByIds: jest.fn().mockResolvedValue([]), ...taskLabelsRepositoryOverrides };
   const taskWatchersRepository = { addMany: jest.fn().mockResolvedValue(undefined) };
   const taskActivityRepository = {
     log: jest.fn().mockResolvedValue(undefined),
@@ -656,5 +659,88 @@ describe('TasksService.reorderAttachments', () => {
     await service.reorderAttachments(1, ['c.png', 'b.png', 'a.png'], actor());
 
     expect(saved?.attachments).toEqual(['c.png', 'a.png', 'd.png']);
+  });
+});
+
+describe('TasksService.addLabelsToTask', () => {
+  it('unions new labels onto whatever the task already has, without duplicating', async () => {
+    const urgent = { id: 1, name: 'urgent', color: 'red' };
+    const existingLabel = { id: 2, name: 'permit', color: 'blue' };
+    const existing = task({ labels: [existingLabel] as never });
+    let saved: Task | null = null;
+    const { service } = makeService(
+      {
+        findByIdActive: jest.fn().mockResolvedValue(existing),
+        save: jest.fn().mockImplementation((t: Task) => {
+          saved = t;
+          return Promise.resolve(t);
+        }),
+      },
+      { findByIds: jest.fn().mockResolvedValue([urgent, existingLabel]) },
+    );
+
+    await service.addLabelsToTask(1, [1, 2], actor(4));
+
+    // 'permit' (id 2) was already there — the union doesn't duplicate it.
+    expect(saved?.labels).toEqual([existingLabel, urgent]);
+  });
+});
+
+describe('TasksService bulk actions', () => {
+  it('bulkSetAssignee assigns every task and reports them all succeeded', async () => {
+    const { service, tasksRepository } = makeService({
+      // A distinct object per id — sharing one fixture across ids would let the
+      // second call see the first call's already-applied assigneeUserId and
+      // short-circuit as a no-op (setAssignee skips saving when nothing changed).
+      findByIdActive: jest.fn().mockImplementation((id: number) =>
+        Promise.resolve(task({ id, assigneeUserId: null })),
+      ),
+      save: jest.fn().mockImplementation((t: Task) => Promise.resolve(t)),
+    });
+
+    const result = await service.bulkSetAssignee([1, 2, 3], 9, actor(4));
+
+    expect(result.succeeded).toEqual([1, 2, 3]);
+    expect(result.failed).toEqual([]);
+    expect(tasksRepository.save).toHaveBeenCalledTimes(3);
+  });
+
+  it('isolates a per-task failure — the rest of the batch still succeeds', async () => {
+    const { service } = makeService({
+      findByIdActive: jest.fn().mockImplementation((id: number) =>
+        Promise.resolve(id === 2 ? null : task({ id })),
+      ),
+      save: jest.fn().mockImplementation((t: Task) => Promise.resolve(t)),
+    });
+
+    const result = await service.bulkSetAssignee([1, 2, 3], 9, actor(4));
+
+    expect(result.succeeded).toEqual([1, 3]);
+    expect(result.failed).toEqual([{ taskId: 2, error: 'Task not found with id: 2' }]);
+  });
+
+  it('bulkSetStatus moves every task to the target status', async () => {
+    const { service, tasksRepository } = makeService({
+      findByIdActive: jest.fn().mockImplementation((id: number) => Promise.resolve(task({ id, status: 'todo' }))),
+      getSiblingsInColumn: jest.fn().mockResolvedValue([]),
+      save: jest.fn().mockImplementation((t: Task) => Promise.resolve(t)),
+    });
+
+    const result = await service.bulkSetStatus([1, 2], 'in_progress', undefined, actor(4));
+
+    expect(result.succeeded).toEqual([1, 2]);
+    expect(tasksRepository.save).toHaveBeenCalledTimes(2);
+  });
+
+  it('bulkDelete soft-deletes every task', async () => {
+    const { service, tasksRepository } = makeService({
+      findByIdActive: jest.fn().mockImplementation((id: number) => Promise.resolve(task({ id }))),
+      softDeleteWithChildren: jest.fn().mockResolvedValue(undefined),
+    });
+
+    const result = await service.bulkDelete([1, 2, 3], actor(4));
+
+    expect(result.succeeded).toEqual([1, 2, 3]);
+    expect(tasksRepository.softDeleteWithChildren).toHaveBeenCalledTimes(3);
   });
 });

@@ -35,6 +35,10 @@ import { UpdateCommentDto } from './dto/update-comment.dto';
 import { AddAttachmentsDto } from './dto/add-attachments.dto';
 import { RemoveAttachmentDto } from './dto/remove-attachment.dto';
 import { ReorderAttachmentsDto } from './dto/reorder-attachments.dto';
+import { BulkSetAssigneeDto } from './dto/bulk-set-assignee.dto';
+import { BulkSetStatusDto } from './dto/bulk-set-status.dto';
+import { BulkAddLabelsDto } from './dto/bulk-add-labels.dto';
+import { BulkDeleteDto } from './dto/bulk-delete.dto';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
@@ -160,6 +164,50 @@ export class TasksController {
   @ApiResponse({ status: 404, description: 'Label not found' })
   async deleteLabel(@Param('labelId', ParseIntPipe) labelId: number) {
     await this.taskLabelsService.deleteLabel(labelId);
+  }
+
+  // --- Bulk actions: the list's multi-select toolbar. Each runs every task
+  // sequentially and reports per-task success/failure — see TasksService.runBulk. ---
+
+  @Post('bulk/assignee')
+  @RequirePermissions('tasks:write')
+  @ApiOperation({ summary: 'Assign or unassign every listed task' })
+  async bulkSetAssignee(
+    @Body() dto: BulkSetAssigneeDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.tasksService.bulkSetAssignee(dto.taskIds, dto.userId, toTaskActor(user));
+  }
+
+  @Post('bulk/status')
+  @RequirePermissions('tasks:write')
+  @ApiOperation({ summary: 'Move every listed task to the same status' })
+  @ApiResponse({ status: 422, description: 'status is "blocked" and blockedReason was omitted for a task with none on file — that task fails individually, the rest still run' })
+  async bulkSetStatus(
+    @Body() dto: BulkSetStatusDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.tasksService.bulkSetStatus(dto.taskIds, dto.status, dto.blockedReason, toTaskActor(user));
+  }
+
+  @Post('bulk/labels')
+  @RequirePermissions('tasks:write')
+  @ApiOperation({ summary: 'Add these labels to every listed task, on top of whatever each already has' })
+  async bulkAddLabels(
+    @Body() dto: BulkAddLabelsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.tasksService.bulkAddLabels(dto.taskIds, dto.labelIds, toTaskActor(user));
+  }
+
+  @Post('bulk/delete')
+  @RequirePermissions('tasks:delete')
+  @ApiOperation({ summary: 'Soft-delete every listed task' })
+  async bulkDelete(
+    @Body() dto: BulkDeleteDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.tasksService.bulkDelete(dto.taskIds, toTaskActor(user));
   }
 
   @Post()

@@ -493,4 +493,79 @@ export class TasksService {
     await this.tasksRepository.softDeleteWithChildren(id);
     this.emitTaskChanged(id, actor.id);
   }
+
+  /**
+   * Adds to the existing label set rather than replacing it (unlike setLabels, which
+   * the single-task label picker already computes the full next set for). A bulk
+   * "tag these 15 tasks urgent" must never wipe whatever labels each one already had.
+   */
+  async addLabelsToTask(id: number, labelIds: number[], actor: TaskActor): Promise<any> {
+    const task = await this.tasksRepository.findByIdActive(id);
+    if (!task) throw new TaskNotFoundException(id);
+
+    const existingIds = new Set(task.labels.map((label) => label.id));
+    const newLabels = await this.taskLabelsRepository.findByIds(labelIds);
+    task.labels = [...task.labels, ...newLabels.filter((label) => !existingIds.has(label.id))];
+
+    await this.tasksRepository.save(task);
+    this.emitTaskChanged(id, actor.id);
+    return this.freshDetail(id);
+  }
+
+  /**
+   * Bulk operations run each task sequentially, not in parallel — a batch of tasks
+   * landing in the *same* target status column would otherwise race on
+   * resolveColumnPosition's read-then-write of the column's sibling positions (see
+   * move()). One task failing (a stale row, an invalid transition) doesn't stop the
+   * rest — every id gets its own outcome instead of the whole batch rejecting.
+   */
+  private async runBulk(
+    taskIds: number[],
+    op: (id: number) => Promise<unknown>,
+  ): Promise<BulkResult> {
+    const succeeded: number[] = [];
+    const failed: BulkFailure[] = [];
+
+    for (const id of taskIds) {
+      try {
+        await op(id);
+        succeeded.push(id);
+      } catch (error) {
+        failed.push({ taskId: id, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    return { succeeded, failed };
+  }
+
+  async bulkSetAssignee(taskIds: number[], userId: number | null, actor: TaskActor): Promise<BulkResult> {
+    return this.runBulk(taskIds, (id) => this.setAssignee(id, { userId }, actor));
+  }
+
+  async bulkSetStatus(
+    taskIds: number[],
+    status: TaskStatus,
+    blockedReason: string | undefined,
+    actor: TaskActor,
+  ): Promise<BulkResult> {
+    return this.runBulk(taskIds, (id) => this.move(id, { status, blockedReason }, actor));
+  }
+
+  async bulkAddLabels(taskIds: number[], labelIds: number[], actor: TaskActor): Promise<BulkResult> {
+    return this.runBulk(taskIds, (id) => this.addLabelsToTask(id, labelIds, actor));
+  }
+
+  async bulkDelete(taskIds: number[], actor: TaskActor): Promise<BulkResult> {
+    return this.runBulk(taskIds, (id) => this.delete(id, actor));
+  }
+}
+
+interface BulkFailure {
+  taskId: number;
+  error: string;
+}
+
+export interface BulkResult {
+  succeeded: number[];
+  failed: BulkFailure[];
 }
