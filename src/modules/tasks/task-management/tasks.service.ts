@@ -11,6 +11,7 @@ import type { TaskEntityKind } from './dto/create-task.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
+import { ReorderSubtaskDto } from './dto/reorder-subtask.dto';
 import { SetAssigneeDto } from './dto/set-assignee.dto';
 import { SetLabelsDto } from './dto/set-labels.dto';
 import { SetEntityDto } from './dto/set-entity.dto';
@@ -23,6 +24,7 @@ import {
   TaskConflictException,
   TaskSubtaskNestingException,
   TaskBlockedReasonRequiredException,
+  TaskNotASubtaskException,
 } from '../../../common/exceptions';
 import { extractPlainTextFromTipTapDoc } from '../../../common/utils/tiptap-text.util';
 
@@ -406,6 +408,56 @@ export class TasksService {
 
     const detail = await this.freshDetail(id);
     return openSubtasks ? { ...detail, openSubtasksWarning: openSubtasks } : detail;
+  }
+
+  /**
+   * Reorders a subtask among its parent's other children. Separate from `move` because
+   * a subtask has no board column: nothing about its status changes here, only where it
+   * sits in its parent's list.
+   */
+  async reorderSubtask(
+    id: number,
+    dto: ReorderSubtaskDto,
+    actor: TaskActor,
+  ): Promise<any> {
+    const task = await this.tasksRepository.findByIdActive(id);
+    if (!task) throw new TaskNotFoundException(id);
+    if (!task.parent) throw new TaskNotASubtaskException(id);
+
+    task.position = await this.resolveSubtaskPosition(
+      task.parent.id,
+      id,
+      dto.beforeId,
+      dto.afterId,
+    );
+    await this.tasksRepository.save(task);
+    this.emitTaskChanged(id, actor.id);
+
+    // The parent's detail is what the caller is looking at — its `subtasks` array is
+    // the thing that just changed order.
+    return this.freshDetail(task.parent.id);
+  }
+
+  private async resolveSubtaskPosition(
+    parentId: number,
+    taskId: number,
+    beforeId?: number | null,
+    afterId?: number | null,
+  ): Promise<number> {
+    let siblings = await this.tasksRepository.getSiblingsUnderParent(parentId, taskId);
+    let position = computeInsertPosition(siblings, POSITION_STEP, beforeId, afterId);
+
+    if (position === null) {
+      // Same gap-exhausted path as a column reorder — see resolveColumnPosition.
+      await this.tasksRepository.rebalanceSiblings(
+        siblings.map((s) => s.id),
+        POSITION_STEP,
+      );
+      siblings = await this.tasksRepository.getSiblingsUnderParent(parentId, taskId);
+      position = computeInsertPosition(siblings, POSITION_STEP, beforeId, afterId);
+    }
+
+    return position ?? POSITION_STEP;
   }
 
   private async resolveColumnPosition(

@@ -24,6 +24,7 @@ import { TaskEventsBridgeService } from './services/task-events-bridge.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
+import { ReorderSubtaskDto } from './dto/reorder-subtask.dto';
 import { SetAssigneeDto } from './dto/set-assignee.dto';
 import { SetLabelsDto } from './dto/set-labels.dto';
 import { SetEntityDto } from './dto/set-entity.dto';
@@ -259,6 +260,21 @@ export class TasksController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.tasksService.move(id, dto, toTaskActor(user));
+  }
+
+  @Patch(':id/reorder')
+  @RequirePermissions('tasks:write')
+  @ApiOperation({ summary: "Reorder a subtask among its parent's other children" })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({ status: 200, description: "The parent task's refreshed detail" })
+  @ApiResponse({ status: 404, description: 'Task not found' })
+  @ApiResponse({ status: 422, description: 'Task is top-level, so it has no parent to reorder within' })
+  async reorderSubtask(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ReorderSubtaskDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.tasksService.reorderSubtask(id, dto, toTaskActor(user));
   }
 
   @Patch(':id/assignee')

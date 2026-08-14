@@ -327,9 +327,30 @@ export class TasksRepository {
   }
 
   /**
+   * The sibling set a subtask is ordered within — its parent's other children, rather
+   * than a status column. Mirrors getSiblingsInColumn so both feed the same
+   * computeInsertPosition/rebalanceSiblings pair.
+   */
+  async getSiblingsUnderParent(
+    parentId: number,
+    excludeId?: number,
+  ): Promise<Array<{ id: number; position: number }>> {
+    const qb = this.repo
+      .createQueryBuilder('task')
+      .select(['task.id AS id', 'task.position AS position'])
+      .where('task.parent_id = :parentId', { parentId })
+      .andWhere('task.deleted_at IS NULL');
+    if (excludeId != null) {
+      qb.andWhere('task.id != :excludeId', { excludeId });
+    }
+    qb.orderBy('task.position', 'ASC');
+    return qb.getRawMany();
+  }
+
+  /**
    * A subtask's position is scoped to its parent, not to a status column — the board
    * never shows it (findForBoard filters parent_id IS NULL), so there is no column to
-   * order it within. No reordering endpoint exists yet, so this only ever appends.
+   * order it within. Used when appending; see getSiblingsUnderParent for reordering.
    */
   async getMaxPositionUnderParent(parentId: number): Promise<number> {
     const result: { max: number | null } | undefined = await this.repo

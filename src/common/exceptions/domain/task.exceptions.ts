@@ -43,6 +43,19 @@ export class TaskSubtaskNestingException extends BusinessException {
   }
 }
 
+/**
+ * Reordering is scoped to a parent's children, so a top-level task has no sibling set
+ * to be reordered within — its place on the board comes from `move` instead.
+ */
+export class TaskNotASubtaskException extends BusinessException {
+  constructor(id: number) {
+    super(
+      `Task ${id} is not a subtask; use the move endpoint to position it on the board`,
+      'TASK_NOT_A_SUBTASK',
+    );
+  }
+}
+
 /** A blocked task with no reason is noise — see db CHECK tasks_blocked_needs_reason. */
 export class TaskBlockedReasonRequiredException extends BusinessException {
   constructor() {
@@ -62,6 +75,7 @@ export const TaskExceptions = {
   TaskLabelNotFoundException,
   TaskLabelNameConflictException,
   TaskSubtaskNestingException,
+  TaskNotASubtaskException,
   TaskBlockedReasonRequiredException,
   TaskCommentNotFoundException,
 };

@@ -7,6 +7,7 @@ import {
   TaskNotFoundException,
   TaskConflictException,
   TaskSubtaskNestingException,
+  TaskNotASubtaskException,
   TaskBlockedReasonRequiredException,
 } from '../../../common/exceptions';
 
@@ -291,7 +292,7 @@ describe('TasksService.move', () => {
     expect(savedTask.position).toBe(1500);
   });
 
-  it('leaves a subtask position untouched — no reordering endpoint exists for it yet', async () => {
+  it('leaves a subtask position untouched — reordering one is reorderSubtask, not move', async () => {
     const parent = task({ id: 2 });
     const existing = task({ id: 1, parent, status: 'todo', position: 1000 });
     const { service, tasksRepository } = makeService({
@@ -359,6 +360,83 @@ describe('TasksService.move', () => {
     expect(eventEmitter.emit).toHaveBeenCalledWith('task.changed', { taskId: 1, actorId: 7 });
     // No status transition — the narrower event must not fire.
     expect(eventEmitter.emit).not.toHaveBeenCalledWith('task.status_changed', expect.anything());
+  });
+});
+
+describe('TasksService.reorderSubtask', () => {
+  it('positions a subtask between two of its siblings', async () => {
+    const parent = task({ id: 10 });
+    const existing = task({ id: 1, parent, position: 5000 });
+    const { service, tasksRepository } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      getSiblingsUnderParent: jest.fn().mockResolvedValue([
+        { id: 2, position: 1000 },
+        { id: 3, position: 2000 },
+      ]),
+      save: jest.fn().mockImplementation((t: Task) => Promise.resolve(t)),
+    });
+
+    await service.reorderSubtask(1, { afterId: 2 }, actor());
+
+    expect(tasksRepository.getSiblingsUnderParent).toHaveBeenCalledWith(10, 1);
+    const savedTask = (tasksRepository.save.mock.calls[0] as [Task])[0];
+    expect(savedTask.position).toBe(1500);
+  });
+
+  it('rebalances the parent when the gap between siblings is exhausted', async () => {
+    const parent = task({ id: 10 });
+    const existing = task({ id: 1, parent });
+    const { service, tasksRepository } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      getSiblingsUnderParent: jest
+        .fn()
+        .mockResolvedValueOnce([
+          { id: 2, position: 1000 },
+          { id: 3, position: 1001 },
+        ])
+        .mockResolvedValueOnce([
+          { id: 2, position: 1000 },
+          { id: 3, position: 2000 },
+        ]),
+      rebalanceSiblings: jest.fn().mockResolvedValue(undefined),
+      save: jest.fn().mockImplementation((t: Task) => Promise.resolve(t)),
+    });
+
+    await service.reorderSubtask(1, { afterId: 2 }, actor());
+
+    expect(tasksRepository.rebalanceSiblings).toHaveBeenCalledWith([2, 3], 1000);
+    const savedTask = (tasksRepository.save.mock.calls[0] as [Task])[0];
+    expect(savedTask.position).toBe(1500);
+  });
+
+  it('refuses to reorder a top-level task, which belongs to a board column instead', async () => {
+    const existing = task({ id: 1, parent: null });
+    const { service, tasksRepository } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      save: jest.fn(),
+    });
+
+    await expect(service.reorderSubtask(1, { afterId: 2 }, actor())).rejects.toThrow(
+      TaskNotASubtaskException,
+    );
+    expect(tasksRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('broadcasts the change so other viewers pick up the new order', async () => {
+    const parent = task({ id: 10 });
+    const existing = task({ id: 1, parent });
+    const { service, eventEmitter } = makeService({
+      findByIdActive: jest.fn().mockResolvedValue(existing),
+      getSiblingsUnderParent: jest.fn().mockResolvedValue([]),
+      save: jest.fn().mockImplementation((t: Task) => Promise.resolve(t)),
+    });
+
+    await service.reorderSubtask(1, {}, actor(7));
+
+    expect(eventEmitter.emit).toHaveBeenCalledWith('task.changed', {
+      taskId: 1,
+      actorId: 7,
+    });
   });
 });
 
