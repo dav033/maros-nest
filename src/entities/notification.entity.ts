@@ -20,6 +20,7 @@ export type NotificationKind =
   | 'task_status_changed'
   | 'task_blocked'
   | 'task_due_digest'
+  | 'task_permit_due'
   | 'task_mentioned';
 
 @Entity('notifications')

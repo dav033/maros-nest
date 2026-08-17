@@ -74,7 +74,7 @@ describe('LeadsController validation', () => {
 
     expect(leadsService.updateLead).toHaveBeenCalledWith(1, {
       status: LeadStatus.WON,
-    });
+    }, undefined);
   });
 
   it('rejects a missing lead type instead of returning every type', async () => {

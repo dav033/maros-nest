@@ -4,6 +4,7 @@ import { TaskActivity } from '../../../../entities/task-activity.entity';
 import { User } from '../../../../entities/user.entity';
 import { resolveKey, type TaskEntityRef } from '../services/task-entity-resolver.service';
 import type { TaskEntityKind } from '../dto/create-task.dto';
+import type { TaskParty } from '../../../../entities/task-party.entity';
 
 const BOARD_STATUSES = TASK_STATUSES.filter((status) => status !== 'cancelled');
 
@@ -15,6 +16,14 @@ export interface TaskCounts {
 
 @Injectable()
 export class TaskMapper {
+  static currentHourInBusinessTimezone(now = new Date()): number {
+    return Number(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      hour: '2-digit',
+      hourCycle: 'h23',
+    }).format(now));
+  }
+
   /**
    * Postgres `date` columns come back as strings in practice — see lead.mapper.ts.
    * Public: TaskDigestCron reuses this to bucket a task against `todayInBusinessTimezone()`
@@ -65,7 +74,13 @@ export class TaskMapper {
       startDate: this.formatDate(entity.startDate),
       dueDate: this.formatDate(entity.dueDate),
       blockedReason: entity.blockedReason ?? null,
+      cancelledReason: entity.cancelledReason ?? null,
       completedAt: entity.completedAt ?? null,
+      recurrenceRule: entity.recurrenceRule ?? null,
+      recurrenceUntil: this.formatDate(entity.recurrenceUntil),
+      estimatedHours: entity.estimatedHours ?? null,
+      actualHours: entity.actualHours ?? 0,
+      startedAt: entity.startedAt ?? null,
       labels: (entity.labels ?? []).map((label) => ({
         id: label.id,
         name: label.name,
@@ -90,6 +105,8 @@ export class TaskMapper {
     activity: TaskActivity[],
     commentsCount = 0,
     entityRefsByKey?: Map<string, TaskEntityRef>,
+    parties: TaskParty[] = [],
+    watcherIds: number[] = [],
   ): any {
     return {
       ...this.toSummaryDto(
@@ -106,6 +123,12 @@ export class TaskMapper {
       attachments: entity.attachments ?? [],
       subtasks: children.map((child) => this.toSummaryDto(child, undefined, entityRefsByKey)),
       activity: activity.map((row) => this.toActivityDto(row)),
+      parties: parties.map((party) => ({
+        partyKind: party.partyKind,
+        partyId: party.partyId,
+        role: party.role,
+      })),
+      watcherIds,
     };
   }
 

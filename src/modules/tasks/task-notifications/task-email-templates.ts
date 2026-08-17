@@ -14,6 +14,7 @@ const COLOR = {
   background: '#f1f5f9',
   overdue: '#dc2626',
   dueToday: '#d97706',
+  blocked: '#7c3aed',
 } as const;
 
 const FONT_STACK =
@@ -95,6 +96,55 @@ export function renderTaskAssignedEmail(opts: {
   return { subject, text, html };
 }
 
+export function renderTaskSignalEmail(opts: {
+  kind: 'status' | 'blocked' | 'comment' | 'mention';
+  taskTitle: string;
+  taskId: number;
+  taskUrl: string;
+  details?: string;
+}): { subject: string; text: string; html: string } {
+  const labels = {
+    status: { subject: 'Task status changed', heading: 'A task status changed' },
+    blocked: { subject: 'Task blocked', heading: 'A task was blocked' },
+    comment: { subject: 'New task comment', heading: 'A task received a comment' },
+    mention: { subject: 'You were mentioned on a task', heading: 'You were mentioned' },
+  } as const;
+  const label = labels[opts.kind];
+  const details = opts.details ? `\n\n${opts.details}` : '';
+  return {
+    subject: `${label.subject}: ${opts.taskTitle}`,
+    text: `${opts.taskTitle} (T-${opts.taskId})${details}\n\n${opts.taskUrl}`,
+    html: layout({
+      preheader: `${label.subject}: ${opts.taskTitle}`,
+      heading: label.heading,
+      bodyHtml: `
+        <p style="margin:0 0 6px;font-size:13px;color:${COLOR.muted};">T-${opts.taskId}</p>
+        <p style="margin:0;font-size:16px;line-height:1.4;color:${COLOR.text};font-weight:500;">${escapeHtml(opts.taskTitle)}</p>
+        ${opts.details ? `<p style="margin:12px 0 0;font-size:14px;line-height:1.5;color:${COLOR.muted};">${escapeHtml(opts.details)}</p>` : ''}
+      `,
+      ctaLabel: 'View task',
+      ctaUrl: opts.taskUrl,
+    }),
+  };
+}
+
+export function renderTaskPermitReminderEmail(opts: {
+  taskTitle: string;
+  taskId: number;
+  taskUrl: string;
+}): { subject: string; text: string; html: string } {
+  const subject = `Permit task due soon: ${opts.taskTitle}`;
+  const text = `Permit task "${opts.taskTitle}" (T-${opts.taskId}) is due in three days.\n\n${opts.taskUrl}`;
+  const html = layout({
+    preheader: `Permit task "${opts.taskTitle}" is due in three days`,
+    heading: 'Permit deadline coming up',
+    bodyHtml: `<p style="margin:0;font-size:16px;line-height:1.4;color:${COLOR.text};font-weight:500;">${escapeHtml(opts.taskTitle)}</p>`,
+    ctaLabel: 'Open task',
+    ctaUrl: opts.taskUrl,
+  });
+  return { subject, text, html };
+}
+
 function taskListHtml(tasks: Array<{ id: number; title: string }>, color: string): string {
   return `<ul style="margin:0;padding:0;list-style:none;">${tasks
     .map(
@@ -111,9 +161,11 @@ function taskListHtml(tasks: Array<{ id: number; title: string }>, color: string
 export function renderTaskDigestEmail(opts: {
   overdue: Array<{ id: number; title: string }>;
   dueToday: Array<{ id: number; title: string }>;
+  blocked?: Array<{ id: number; title: string }>;
   tasksUrl: string;
 }): { subject: string; text: string; html: string } {
-  const total = opts.overdue.length + opts.dueToday.length;
+  const blocked = opts.blocked ?? [];
+  const total = opts.overdue.length + opts.dueToday.length + blocked.length;
   const subject = `${total} task${total === 1 ? '' : 's'} need${total === 1 ? 's' : ''} attention`;
 
   const textLines: string[] = [];
@@ -125,6 +177,11 @@ export function renderTaskDigestEmail(opts: {
   if (opts.dueToday.length > 0) {
     textLines.push(`Due today (${opts.dueToday.length}):`);
     textLines.push(...opts.dueToday.map((t) => `  - ${t.title} (T-${t.id})`));
+    textLines.push('');
+  }
+  if (blocked.length > 0) {
+    textLines.push(`Blocked for 3+ days (${blocked.length}):`);
+    textLines.push(...blocked.map((t) => `  - ${t.title} (T-${t.id})`));
     textLines.push('');
   }
   textLines.push(opts.tasksUrl);
@@ -141,6 +198,12 @@ export function renderTaskDigestEmail(opts: {
     sections.push(`
       <p style="margin:20px 0 6px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:${COLOR.dueToday};">Due today · ${opts.dueToday.length}</p>
       ${taskListHtml(opts.dueToday, COLOR.dueToday)}
+    `);
+  }
+  if (blocked.length > 0) {
+    sections.push(`
+      <p style="margin:20px 0 6px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:${COLOR.blocked};">Blocked for 3+ days · ${blocked.length}</p>
+      ${taskListHtml(blocked, COLOR.blocked)}
     `);
   }
 

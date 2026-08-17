@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { TasksRepository } from './repositories/tasks.repository';
 import { TaskLabelsRepository } from './repositories/task-labels.repository';
@@ -27,6 +27,12 @@ import {
   TaskNotASubtaskException,
 } from '../../../common/exceptions';
 import { extractPlainTextFromTipTapDoc } from '../../../common/utils/tiptap-text.util';
+import { TaskPartiesService } from './services/task-parties.service';
+import type { TaskPartyKind } from '../../../entities/task-party.entity';
+import type { SetTaskPartiesDto } from './dto/set-parties.dto';
+import type { ScheduleQueryDto } from './dto/schedule-query.dto';
+import { TaskDependenciesService } from './services/task-dependencies.service';
+import { ScheduleTaskDto } from './dto/schedule-task.dto';
 
 const POSITION_STEP = 1000;
 
@@ -41,6 +47,8 @@ export class TasksService {
     private readonly taskMapper: TaskMapper,
     private readonly taskEntityResolver: TaskEntityResolverService,
     private readonly eventEmitter: EventEmitter2,
+    @Optional() private readonly taskParties?: TaskPartiesService,
+    @Optional() private readonly taskDependencies?: TaskDependenciesService,
   ) {}
 
   /**
@@ -58,14 +66,16 @@ export class TasksService {
   private async freshDetail(id: number): Promise<any> {
     const task = await this.tasksRepository.findByIdActive(id);
     if (!task) throw new TaskNotFoundException(id);
-    const [children, activity, comments] = await Promise.all([
+    const [children, activity, comments, parties, watcherIds] = await Promise.all([
       this.tasksRepository.findChildren(id),
       this.taskActivity.findByTask(id),
       this.taskComments.list(id),
+      this.taskParties?.list(id) ?? Promise.resolve([]),
+      this.taskWatchersRepository.findUserIdsForTask(id),
     ]);
     const entityRefs = await this.buildEntityRefsMap([task, ...children]);
     return {
-      ...this.taskMapper.toDetailDto(task, children, activity, comments.length, entityRefs),
+      ...this.taskMapper.toDetailDto(task, children, activity, comments.length, entityRefs, parties, watcherIds),
       comments,
     };
   }
@@ -110,10 +120,10 @@ export class TasksService {
    * `columns.done` array (see TasksRepository.findForBoard) — the frontend uses the
    * gap between the two to decide whether to show a "view all completed" link.
    */
-  async getBoard(): Promise<{ columns: Record<string, any[]>; doneTotalCount: number }> {
+  async getBoard(filters: SearchTasksDto = {}): Promise<{ columns: Record<string, any[]>; doneTotalCount: number }> {
     const [tasks, doneTotalCount] = await Promise.all([
-      this.tasksRepository.findForBoard(),
-      this.tasksRepository.countDone(),
+      this.tasksRepository.findForBoard(filters),
+      this.tasksRepository.countDone(filters),
     ]);
     const [counts, entityRefs] = await Promise.all([
       this.buildCountsMap(tasks),
@@ -139,8 +149,8 @@ export class TasksService {
    * TasksRepository.findAll's LIST_LIMIT — for the same "N of M, narrow to see more"
    * treatment the board's done column gets.
    */
-  async findAll(filters: SearchTasksDto): Promise<{ items: any[]; totalCount: number }> {
-    const { items: tasks, totalCount } = await this.tasksRepository.findAll(filters);
+  async findAll(filters: SearchTasksDto): Promise<{ items: any[]; totalCount: number; nextCursor: string | null }> {
+    const { items: tasks, totalCount, nextCursor } = await this.tasksRepository.findAll(filters);
     const [counts, entityRefs] = await Promise.all([
       this.buildCountsMap(tasks),
       this.buildEntityRefsMap(tasks),
@@ -148,16 +158,93 @@ export class TasksService {
     return {
       items: tasks.map((task) => this.taskMapper.toSummaryDto(task, counts.get(task.id), entityRefs)),
       totalCount,
+      nextCursor,
     };
   }
 
-  async getByEntity(entityKind: string, entityId: number): Promise<any[]> {
-    const tasks = await this.tasksRepository.findByEntity(entityKind, entityId);
+  async getByEntity(entityKind: TaskEntityKind, entityId: number): Promise<any[]> {
+    if (entityKind === 'company' || entityKind === 'contact') {
+      return this.getByParty(entityKind, entityId);
+    }
+    const links = await this.taskEntityResolver.resolveJobLinks(entityKind, entityId);
+    const tasks = await this.tasksRepository.findByEntityLinks(links);
     const [counts, entityRefs] = await Promise.all([
       this.buildCountsMap(tasks),
       this.buildEntityRefsMap(tasks),
     ]);
     return tasks.map((task) => this.taskMapper.toSummaryDto(task, counts.get(task.id), entityRefs));
+  }
+
+  async findArchived(): Promise<any[]> {
+    const tasks = await this.tasksRepository.findArchived();
+    const [counts, entityRefs] = await Promise.all([
+      this.buildCountsMap(tasks),
+      this.buildEntityRefsMap(tasks),
+    ]);
+    return tasks.map((task) => this.taskMapper.toSummaryDto(task, counts.get(task.id), entityRefs));
+  }
+
+  async getSchedule(filters: ScheduleQueryDto): Promise<any[]> {
+    const tasks = await this.tasksRepository.findSchedule(filters);
+    const [counts, entityRefs] = await Promise.all([
+      this.buildCountsMap(tasks),
+      this.buildEntityRefsMap(tasks),
+    ]);
+    return tasks.map((task) => this.taskMapper.toSummaryDto(task, counts.get(task.id), entityRefs));
+  }
+
+  async getByParty(partyKind: TaskPartyKind, partyId: number): Promise<any[]> {
+    if (!this.taskParties) return [];
+    const taskIds = await this.taskParties.findTaskIdsByParty(partyKind, partyId);
+    const [partyTasks, directTasks] = await Promise.all([
+      this.tasksRepository.findByIdsActive(taskIds),
+      this.tasksRepository.findByEntity(partyKind, partyId),
+    ]);
+    const byId = new Map<number, Task>();
+    for (const task of [...directTasks, ...partyTasks]) byId.set(task.id, task);
+    const tasks = Array.from(byId.values()).sort((a, b) => a.position - b.position || a.id - b.id);
+    const [counts, entityRefs] = await Promise.all([
+      this.buildCountsMap(tasks),
+      this.buildEntityRefsMap(tasks),
+    ]);
+    return tasks.map((task) => this.taskMapper.toSummaryDto(task, counts.get(task.id), entityRefs));
+  }
+
+  async listParties(id: number) {
+    const task = await this.tasksRepository.findByIdActive(id);
+    if (!task) throw new TaskNotFoundException(id);
+    return this.taskParties?.list(id) ?? [];
+  }
+
+  async setParties(id: number, dto: SetTaskPartiesDto, actor: TaskActor) {
+    const task = await this.tasksRepository.findByIdActive(id);
+    if (!task) throw new TaskNotFoundException(id);
+    if (!this.taskParties) return [];
+    const parties = await this.taskParties.replace(id, dto.parties);
+    this.emitTaskChanged(id, actor.id);
+    return parties;
+  }
+
+  async listWatchers(id: number): Promise<number[]> {
+    const task = await this.tasksRepository.findByIdActive(id);
+    if (!task) throw new TaskNotFoundException(id);
+    return this.taskWatchersRepository.findUserIdsForTask(id);
+  }
+
+  async addWatcher(id: number, userId: number, actor: TaskActor): Promise<number[]> {
+    const task = await this.tasksRepository.findByIdActive(id);
+    if (!task) throw new TaskNotFoundException(id);
+    await this.taskWatchersRepository.addMany(id, [userId]);
+    this.emitTaskChanged(id, actor.id);
+    return this.taskWatchersRepository.findUserIdsForTask(id);
+  }
+
+  async removeWatcher(id: number, userId: number, actor: TaskActor): Promise<number[]> {
+    const task = await this.tasksRepository.findByIdActive(id);
+    if (!task) throw new TaskNotFoundException(id);
+    await this.taskWatchersRepository.remove(id, userId);
+    this.emitTaskChanged(id, actor.id);
+    return this.taskWatchersRepository.findUserIdsForTask(id);
   }
 
   async getById(id: number): Promise<any> {
@@ -176,10 +263,18 @@ export class TasksService {
     task.status = 'todo';
     task.assigneeUserId = dto.assigneeUserId ?? null;
     task.reporterId = dto.reporterId ?? actor.id;
-    task.entityKind = dto.entityKind ?? null;
-    task.entityId = dto.entityId ?? null;
+    const canonicalLink =
+      dto.entityKind && dto.entityId != null
+        ? await this.taskEntityResolver.canonicalizeTaskLink({ entityKind: dto.entityKind, entityId: dto.entityId })
+        : null;
+    task.entityKind = canonicalLink?.entityKind ?? null;
+    task.entityId = canonicalLink?.entityId ?? null;
     task.startDate = dto.startDate ? new Date(dto.startDate) : null;
     task.dueDate = dto.dueDate ? new Date(dto.dueDate) : null;
+    task.recurrenceRule = dto.recurrenceRule ?? null;
+    task.recurrenceUntil = dto.recurrenceUntil ? new Date(dto.recurrenceUntil) : null;
+    task.estimatedHours = dto.estimatedHours ?? null;
+    task.actualHours = 0;
     task.createdById = actor.id;
 
     if (dto.parentId != null) {
@@ -198,6 +293,19 @@ export class TasksService {
       : (await this.tasksRepository.getMaxPositionInColumn(task.status)) + POSITION_STEP;
 
     const saved = await this.tasksRepository.save(task);
+
+    // Company/contact links are represented in task_parties as well as the legacy
+    // entity columns, so API clients that create directly preserve the same invariant
+    // as EntityTasksSection and the global task dialog.
+    if (
+      this.taskParties &&
+      ((dto.parties && dto.parties.length > 0) ||
+        (saved.entityKind === 'company' || saved.entityKind === 'contact') && saved.entityId != null)
+    ) {
+      await this.taskParties.replace(saved.id, dto.parties ?? [
+        { partyKind: saved.entityKind as 'company' | 'contact', partyId: saved.entityId as number },
+      ]);
+    }
 
     await this.taskActivity.logCreated(saved.id, actor.id);
     if (saved.parent) {
@@ -276,6 +384,10 @@ export class TasksService {
       task.blockedReason = dto.blockedReason;
     }
 
+    if (dto.recurrenceRule !== undefined) task.recurrenceRule = dto.recurrenceRule;
+    if (dto.recurrenceUntil !== undefined) task.recurrenceUntil = dto.recurrenceUntil ? new Date(dto.recurrenceUntil) : null;
+    if (dto.estimatedHours !== undefined) task.estimatedHours = dto.estimatedHours;
+
     await this.tasksRepository.save(task);
     this.emitTaskChanged(id, actor.id);
     return this.freshDetail(id);
@@ -347,12 +459,27 @@ export class TasksService {
     const toStatus = dto.status;
     let blockedReason: string | null = null;
 
+    if (toStatus === 'in_progress' && this.taskDependencies && await this.taskDependencies.hasOpenDependencies(id)) {
+      throw new BadRequestException('Complete the blocking tasks before starting this task');
+    }
+
     if (toStatus === 'blocked') {
       blockedReason = dto.blockedReason?.trim() || task.blockedReason || null;
       if (!blockedReason) throw new TaskBlockedReasonRequiredException();
       task.blockedReason = blockedReason;
+      if (fromStatus !== 'blocked') task.blockedAt = new Date();
+      else if (!task.blockedAt) task.blockedAt = task.updatedAt ?? new Date();
     } else if (fromStatus === 'blocked') {
       task.blockedReason = null;
+      task.blockedAt = null;
+    }
+
+    if (toStatus === 'cancelled') {
+      const cancelledReason = dto.cancelledReason?.trim() || task.cancelledReason || null;
+      if (!cancelledReason) throw new BadRequestException('A cancellation reason is required');
+      task.cancelledReason = cancelledReason;
+    } else if (fromStatus === 'cancelled') {
+      task.cancelledReason = null;
     }
 
     if (toStatus === 'done' && fromStatus !== 'done') {
@@ -371,6 +498,9 @@ export class TasksService {
     }
 
     await this.tasksRepository.save(task);
+    if (toStatus === 'done' && fromStatus !== 'done' && task.recurrenceRule) {
+      await this.createNextRecurringTask(task, actor);
+    }
     // Unconditional — unlike task.status_changed below, this also covers a
     // same-column reorder (fromStatus === toStatus), the most common drag on a
     // kanban board and otherwise the one move that broadcast nothing at all.
@@ -528,8 +658,12 @@ export class TasksService {
       await this.tasksRepository.save(task);
       await this.taskActivity.logEntityUnlinked(id, actor.id);
     } else {
-      task.entityKind = dto.entityKind;
-      task.entityId = dto.entityId;
+    const canonicalLink =
+      dto.entityKind && dto.entityId != null
+        ? await this.taskEntityResolver.canonicalizeTaskLink({ entityKind: dto.entityKind, entityId: dto.entityId })
+        : null;
+    task.entityKind = canonicalLink?.entityKind ?? null;
+    task.entityId = canonicalLink?.entityId ?? null;
       await this.tasksRepository.save(task);
       await this.taskActivity.logEntityLinked(id, actor.id, dto.entityKind, dto.entityId as number);
     }
@@ -544,6 +678,109 @@ export class TasksService {
     if (!task) throw new TaskNotFoundException(id);
     await this.tasksRepository.softDeleteWithChildren(id);
     this.emitTaskChanged(id, actor.id);
+  }
+
+  private async createNextRecurringTask(task: Task, actor: TaskActor): Promise<void> {
+    const match = task.recurrenceRule?.match(/FREQ=(DAILY|WEEKLY|MONTHLY)(?:;INTERVAL=(\d+))?/i);
+    if (!match || !task.dueDate) return;
+    const next = new Date(task.dueDate);
+    const interval = Number(match[2] ?? 1);
+    if (match[1].toUpperCase() === 'DAILY') next.setDate(next.getDate() + interval);
+    else if (match[1].toUpperCase() === 'WEEKLY') next.setDate(next.getDate() + 7 * interval);
+    else next.setMonth(next.getMonth() + interval);
+    const recurrenceUntil = task.recurrenceUntil ? new Date(task.recurrenceUntil) : null;
+    if (recurrenceUntil && !Number.isNaN(recurrenceUntil.getTime())) {
+      recurrenceUntil.setHours(23, 59, 59, 999);
+      if (next > recurrenceUntil) return;
+    }
+    const recurring = new Task();
+    recurring.title = task.title;
+    recurring.description = task.description;
+    recurring.descriptionText = task.descriptionText;
+    recurring.kind = task.kind;
+    recurring.priority = task.priority;
+    recurring.status = 'todo';
+    recurring.position = await this.tasksRepository.getMaxPositionInColumn('todo') + POSITION_STEP;
+    recurring.assigneeUserId = task.assigneeUserId ?? null;
+    recurring.reporterId = task.reporterId ?? actor.id;
+    recurring.entityKind = task.entityKind ?? null;
+    recurring.entityId = task.entityId ?? null;
+    recurring.startDate = next;
+    recurring.dueDate = next;
+    recurring.recurrenceRule = task.recurrenceRule;
+    recurring.recurrenceUntil = task.recurrenceUntil ?? null;
+    recurring.estimatedHours = task.estimatedHours ?? null;
+    recurring.actualHours = 0;
+    recurring.attachments = [];
+    recurring.createdById = actor.id;
+    const saved = await this.tasksRepository.save(recurring);
+    await this.taskWatchersRepository.addMany(saved.id, [actor.id, saved.reporterId, saved.assigneeUserId]);
+    this.emitTaskChanged(saved.id, actor.id);
+  }
+
+  async archive(id: number, actor: TaskActor): Promise<void> {
+    return this.delete(id, actor);
+  }
+
+  async restore(id: number, actor: TaskActor): Promise<any> {
+    const task = await this.tasksRepository.findByIdAny(id);
+    if (!task) throw new TaskNotFoundException(id);
+    await this.tasksRepository.restoreWithChildren(id);
+    this.emitTaskChanged(id, actor.id);
+    return this.freshDetail(id);
+  }
+
+  /** Updates the calendar's dates and assignee in one database save. */
+  async schedule(id: number, dto: ScheduleTaskDto, actor: TaskActor): Promise<any> {
+    const task = await this.tasksRepository.findByIdActive(id);
+    if (!task) throw new TaskNotFoundException(id);
+
+    if (dto.startDate !== undefined) task.startDate = dto.startDate ? new Date(dto.startDate) : null;
+    if (dto.dueDate !== undefined) {
+      const from = task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : null;
+      const to = dto.dueDate ?? null;
+      if (from !== to) await this.taskActivity.logDueChanged(id, actor.id, from, to);
+      task.dueDate = dto.dueDate ? new Date(dto.dueDate) : null;
+    }
+
+    const previousAssigneeId = task.assigneeUserId ?? null;
+    const assigneeChanged = dto.assigneeUserId !== undefined && previousAssigneeId !== dto.assigneeUserId;
+    if (assigneeChanged) task.assigneeUserId = dto.assigneeUserId ?? null;
+
+    await this.tasksRepository.save(task);
+    if (assigneeChanged) {
+      if (task.assigneeUserId != null) {
+        await this.taskActivity.logAssigned(id, actor.id, task.assigneeUserId);
+        await this.taskWatchersRepository.addMany(id, [task.assigneeUserId]);
+        this.eventEmitter.emit('task.assigned', { taskId: id, assigneeUserId: task.assigneeUserId, actorId: actor.id });
+      } else {
+        await this.taskActivity.logUnassigned(id, actor.id, previousAssigneeId);
+      }
+    }
+    this.emitTaskChanged(id, actor.id);
+    return this.freshDetail(id);
+  }
+
+  async startTimer(id: number, actor: TaskActor): Promise<any> {
+    const task = await this.tasksRepository.findByIdActive(id);
+    if (!task) throw new TaskNotFoundException(id);
+    task.startedAt = task.startedAt ?? new Date();
+    await this.tasksRepository.save(task);
+    this.emitTaskChanged(id, actor.id);
+    return this.freshDetail(id);
+  }
+
+  async stopTimer(id: number, actor: TaskActor): Promise<any> {
+    const task = await this.tasksRepository.findByIdActive(id);
+    if (!task) throw new TaskNotFoundException(id);
+    if (task.startedAt) {
+      const hours = Math.max(0, (Date.now() - task.startedAt.getTime()) / 3_600_000);
+      task.actualHours = Number(task.actualHours ?? 0) + hours;
+      task.startedAt = null;
+      await this.tasksRepository.save(task);
+    }
+    this.emitTaskChanged(id, actor.id);
+    return this.freshDetail(id);
   }
 
   /**

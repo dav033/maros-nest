@@ -9,6 +9,29 @@ import {
 } from 'typeorm';
 import { Role } from './role.entity';
 
+export type NotificationChannel = 'in_app' | 'email' | 'none';
+export type NotificationPreferences = {
+  assignment: NotificationChannel;
+  status: NotificationChannel;
+  blocked: NotificationChannel;
+  comment: NotificationChannel;
+  mention: NotificationChannel;
+  permit: NotificationChannel;
+  digest: NotificationChannel;
+  digestHour: number;
+};
+
+export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
+  assignment: 'email',
+  status: 'in_app',
+  blocked: 'in_app',
+  comment: 'in_app',
+  mention: 'in_app',
+  permit: 'in_app',
+  digest: 'email',
+  digestHour: 7,
+};
+
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn()
@@ -38,6 +61,9 @@ export class User {
 
   @Column({ name: 'last_login_at', type: 'timestamp', nullable: true })
   lastLoginAt?: Date | null;
+
+  @Column({ name: 'notification_preferences', type: 'jsonb', default: DEFAULT_NOTIFICATION_PREFERENCES })
+  notificationPreferences: NotificationPreferences = { ...DEFAULT_NOTIFICATION_PREFERENCES };
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

@@ -30,4 +30,8 @@ export class TaskWatchersRepository {
     const rows = await this.repo.find({ where: { taskId }, select: { userId: true } });
     return rows.map((row) => row.userId);
   }
+
+  async remove(taskId: number, userId: number): Promise<void> {
+    await this.repo.delete({ taskId, userId });
+  }
 }

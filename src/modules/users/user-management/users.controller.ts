@@ -9,6 +9,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Put,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -25,6 +26,7 @@ import { UserMapper } from './mappers/user.mapper';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
+import { UpdateNotificationPreferencesDto } from './dto/update-notification-preferences.dto';
 
 @ApiTags('users')
 @Controller()
@@ -43,6 +45,23 @@ export class UsersController {
   getMe(@CurrentUser() user: AuthenticatedUser | undefined) {
     if (!user) throw new UnauthorizedException();
     return user;
+  }
+
+  @Get('users/me/notification-preferences')
+  @ApiOperation({ summary: 'Get my notification delivery preferences' })
+  async getNotificationPreferences(@CurrentUser() user: AuthenticatedUser | undefined) {
+    if (!user) throw new UnauthorizedException();
+    return this.usersService.getNotificationPreferences(user.id);
+  }
+
+  @Put('users/me/notification-preferences')
+  @ApiOperation({ summary: 'Update my notification delivery preferences' })
+  async updateNotificationPreferences(
+    @Body() dto: UpdateNotificationPreferencesDto,
+    @CurrentUser() user: AuthenticatedUser | undefined,
+  ) {
+    if (!user) throw new UnauthorizedException();
+    return this.usersService.updateNotificationPreferences(user.id, dto);
   }
 
   /**

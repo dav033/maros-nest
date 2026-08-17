@@ -67,7 +67,11 @@ function makeListener(
 
 describe('TaskNotificationsListener.onAssigned', () => {
   it('notifies the new assignee', async () => {
-    const { listener, notificationsService } = makeListener();
+    const { listener, notificationsService } = makeListener({
+      usersRepository: {
+        findNotificationPreferences: jest.fn().mockResolvedValue({ assignment: 'in_app' }),
+      },
+    });
 
     await listener.onAssigned({ taskId: 1, assigneeUserId: 7, actorId: 3 });
 
@@ -212,7 +216,7 @@ describe('TaskNotificationsListener assignment email', () => {
     expect(mailService.sendMail).not.toHaveBeenCalled();
   });
 
-  it('does not throw, and still leaves the in-app notification in place, when mail fails', async () => {
+  it('does not throw when the configured assignment email fails', async () => {
     const { listener, notificationsService } = makeListener({
       mailService: { sendMail: jest.fn().mockRejectedValue(new Error('smtp down')) },
     });
@@ -220,12 +224,15 @@ describe('TaskNotificationsListener assignment email', () => {
     await expect(
       listener.onAssigned({ taskId: 1, assigneeUserId: 7, actorId: 3 }),
     ).resolves.toBeUndefined();
-    expect(notificationsService.create).toHaveBeenCalled();
+    expect(notificationsService.create).not.toHaveBeenCalled();
   });
 
-  it('does not email for status changes, blocks, comments, or mentions', async () => {
+  it('routes status, blocks, comments, and mentions according to email preferences', async () => {
     const { listener, mailService } = makeListener({
       taskWatchersRepository: { findUserIdsForTask: jest.fn().mockResolvedValue([7]) },
+      usersRepository: {
+        findNotificationPreferences: jest.fn().mockResolvedValue({ status: 'email', blocked: 'email', comment: 'email', mention: 'email' }),
+      },
     });
 
     await listener.onStatusChanged({ taskId: 1, actorId: 3, from: 'todo', to: 'in_progress' });
@@ -233,6 +240,6 @@ describe('TaskNotificationsListener assignment email', () => {
     await listener.onCommented({ taskId: 1, commentId: 42, actorId: 3 });
     await listener.onMentioned({ taskId: 1, commentId: 42, actorId: 3, mentionedUserId: 9 });
 
-    expect(mailService.sendMail).not.toHaveBeenCalled();
+    expect(mailService.sendMail).toHaveBeenCalledTimes(4);
   });
 });

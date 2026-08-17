@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Not, Repository } from 'typeorm';
-import { User } from '../../../../entities/user.entity';
+import { User, NotificationPreferences } from '../../../../entities/user.entity';
 
 @Injectable()
 export class UsersRepository {
@@ -76,5 +76,10 @@ export class UsersRepository {
 
   async touchLastLogin(id: number, at: Date): Promise<void> {
     await this.repo.update(id, { lastLoginAt: at });
+  }
+
+  async findNotificationPreferences(id: number): Promise<NotificationPreferences> {
+    const user = await this.repo.findOne({ where: { id }, select: { id: true, notificationPreferences: true } });
+    return user?.notificationPreferences ?? ({} as NotificationPreferences);
   }
 }

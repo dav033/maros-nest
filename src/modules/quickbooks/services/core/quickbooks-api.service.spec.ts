@@ -169,6 +169,7 @@ describe('QuickbooksApiService', () => {
                     })),
                   );
                 },
+                reject: () => { running -= 1; },
               });
             });
           },

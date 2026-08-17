@@ -17,9 +17,16 @@ export interface TaskEntityRef {
   address?: string;
   addressLink?: string;
   status?: string;
+  /** Canonical workspace job key; projects point back to their lead job. */
+  jobKey?: string;
 }
 
 interface EntityLink {
+  entityKind: TaskEntityKind;
+  entityId: number;
+}
+
+export interface TaskJobLink {
   entityKind: TaskEntityKind;
   entityId: number;
 }
@@ -44,6 +51,38 @@ export class TaskEntityResolverService {
     @InjectRepository(Contact) private readonly contactsRepo: Repository<Contact>,
     @InjectRepository(Company) private readonly companiesRepo: Repository<Company>,
   ) {}
+
+  /**
+   * A project is the execution stage of a lead, not a second job. Returning both
+   * legacy storage links lets the CRM inherit pre-sale tasks after conversion while
+   * keeping old project rows readable.
+   */
+  async resolveJobLinks(entityKind: TaskEntityKind, entityId: number): Promise<TaskJobLink[]> {
+    if (entityKind === 'lead') {
+      const lead = await this.leadsRepo.findOne({ where: { id: entityId }, relations: ['project'] });
+      return [
+        { entityKind: 'lead', entityId },
+        ...(lead?.project?.id ? [{ entityKind: 'project', entityId: lead.project.id } as TaskJobLink] : []),
+      ];
+    }
+    if (entityKind === 'project') {
+      const project = await this.projectsRepo.findOne({ where: { id: entityId }, relations: ['lead'] });
+      return [
+        ...(project?.lead?.id ? [{ entityKind: 'lead', entityId: project.lead.id } as TaskJobLink] : []),
+        { entityKind: 'project', entityId },
+      ];
+    }
+    return [{ entityKind, entityId }];
+  }
+
+  /** New task links use the lead as the canonical job key; project is compatibility-only. */
+  async canonicalizeTaskLink(link: TaskJobLink): Promise<TaskJobLink> {
+    if (link.entityKind !== 'project') return link;
+    const project = await this.projectsRepo.findOne({ where: { id: link.entityId }, relations: ['lead'] });
+    return project?.lead?.id
+      ? { entityKind: 'lead', entityId: project.lead.id }
+      : link;
+  }
 
   /** Keyed by `${kind}:${id}` — callers look up each task's link with `resolveKey`. */
   async resolveMany(links: EntityLink[]): Promise<Map<string, TaskEntityRef>> {
@@ -84,6 +123,7 @@ export class TaskEntityResolverService {
         address: lead.location,
         addressLink: lead.addressLink,
         status: lead.status ?? undefined,
+        jobKey: `lead:${lead.id}`,
       });
     }
 
@@ -97,6 +137,7 @@ export class TaskEntityResolverService {
         address: project.lead?.location,
         addressLink: project.lead?.addressLink,
         status: project.projectProgressStatus ?? undefined,
+        jobKey: project.lead?.id ? `lead:${project.lead.id}` : `project:${project.id}`,
       });
     }
 

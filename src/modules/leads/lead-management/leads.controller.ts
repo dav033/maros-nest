@@ -19,6 +19,8 @@ import { UpdateLeadRequestDto } from './dto/update-lead.dto';
 import { LeadNumberValidationResponseDto } from './dto/lead-number-validation-response.dto';
 import { LeadType } from '../../../common/enums/lead-type.enum';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
+import { CurrentUser } from '../../../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
 
 @ApiTags('leads')
 @Controller('leads')
@@ -167,8 +169,9 @@ export class LeadsController {
   async updateLead(
     @Param('leadId', ParseIntPipe) leadId: number,
     @Body() request: UpdateLeadRequestDto,
+    @CurrentUser() user: AuthenticatedUser | undefined,
   ) {
-    return this.leadsService.updateLead(leadId, request.lead);
+    return this.leadsService.updateLead(leadId, request.lead, user);
   }
 
   @Get(':leadId/rejection-info')

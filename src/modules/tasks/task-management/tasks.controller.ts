@@ -13,6 +13,7 @@ import {
   HttpCode,
   HttpStatus,
   MessageEvent,
+  Optional,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { Observable, interval, merge } from 'rxjs';
@@ -26,6 +27,7 @@ import { UpdateTaskDto } from './dto/update-task.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
 import { ReorderSubtaskDto } from './dto/reorder-subtask.dto';
 import { SetAssigneeDto } from './dto/set-assignee.dto';
+import { ScheduleTaskDto } from './dto/schedule-task.dto';
 import { SetLabelsDto } from './dto/set-labels.dto';
 import { SetEntityDto } from './dto/set-entity.dto';
 import { SearchTasksDto } from './dto/search-tasks.dto';
@@ -44,6 +46,12 @@ import { RequirePermissions } from '../../../common/decorators/require-permissio
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
 import { toTaskActor } from './services/task-actor';
+import type { TaskEntityKind } from './dto/create-task.dto';
+import { SetTaskPartiesDto } from './dto/set-parties.dto';
+import { TASK_PARTY_KINDS } from '../../../entities/task-party.entity';
+import type { TaskPartyKind } from '../../../entities/task-party.entity';
+import { ScheduleQueryDto } from './dto/schedule-query.dto';
+import { TaskDependenciesService } from './services/task-dependencies.service';
 
 @ApiTags('tasks')
 @Controller('tasks')
@@ -55,6 +63,7 @@ export class TasksController {
     private readonly taskLabelsService: TaskLabelsService,
     private readonly taskCommentsService: TaskCommentsService,
     private readonly taskEventsBridge: TaskEventsBridgeService,
+    @Optional() private readonly taskDependencies?: TaskDependenciesService,
   ) {}
 
   // --- Static routes first: they must never be shadowed by ':id'. ---
@@ -64,11 +73,16 @@ export class TasksController {
   @ApiResponse({
     status: 200,
     description:
-      '{ items, totalCount } — top-level tasks only unless includeSubtasks, capped at 500; ' +
-      'totalCount is the true count behind that cap',
+      '{ items, totalCount, nextCursor } — top-level tasks only unless includeSubtasks; ' +
+      'nextCursor is an opaque keyset cursor for the next page',
   })
   async listTasks(@Query() query: SearchTasksDto) {
     return this.tasksService.findAll(query);
+  }
+
+  @Get('archived')
+  async listArchivedTasks() {
+    return this.tasksService.findArchived();
   }
 
   @Get('board')
@@ -79,8 +93,8 @@ export class TasksController {
       "{ columns, doneTotalCount } — one array per status (cancelled excluded), done windowed " +
       'to the last 30 days/50 tasks; doneTotalCount is the true count behind that window',
   })
-  async getBoard() {
-    return this.tasksService.getBoard();
+  async getBoard(@Query() query: SearchTasksDto) {
+    return this.tasksService.getBoard(query);
   }
 
   @Get('mine')
@@ -98,7 +112,7 @@ export class TasksController {
   @ApiQuery({ name: 'entityKind', enum: ['lead', 'project', 'contact', 'company'] })
   @ApiQuery({ name: 'entityId', type: Number })
   async getTasksByEntity(
-    @Query('entityKind') entityKind: string,
+    @Query('entityKind') entityKind: TaskEntityKind,
     @Query('entityId', ParseIntPipe) entityId: number,
   ) {
     return this.tasksService.getByEntity(entityKind, entityId);
@@ -108,6 +122,45 @@ export class TasksController {
   @ApiOperation({ summary: 'Get all task labels' })
   async listLabels() {
     return this.taskLabelsService.listLabels();
+  }
+
+  @Get('schedule')
+  @ApiOperation({ summary: 'Tasks scheduled across a date range' })
+  async getSchedule(@Query() query: ScheduleQueryDto) {
+    return this.tasksService.getSchedule(query);
+  }
+
+  @Get(':id/dependencies')
+  async listDependencies(@Param('id', ParseIntPipe) id: number) {
+    return this.taskDependencies ? this.taskDependencies.list(id) : [];
+  }
+
+  @Put(':id/dependencies')
+  @RequirePermissions('tasks:write')
+  async setDependencies(@Param('id', ParseIntPipe) id: number, @Body() body: { dependsOnTaskIds: number[] }) {
+    return this.taskDependencies ? this.taskDependencies.replace(id, body.dependsOnTaskIds ?? []) : [];
+  }
+
+  @Post(':id/timer/start')
+  @RequirePermissions('tasks:write')
+  async startTimer(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthenticatedUser) {
+    return this.tasksService.startTimer(id, toTaskActor(user));
+  }
+
+  @Post(':id/timer/stop')
+  @RequirePermissions('tasks:write')
+  async stopTimer(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthenticatedUser) {
+    return this.tasksService.stopTimer(id, toTaskActor(user));
+  }
+
+  @Get('by-party')
+  @ApiOperation({ summary: 'Tasks associated with a company or contact party' })
+  async getTasksByParty(
+    @Query('partyKind') partyKind: TaskPartyKind,
+    @Query('partyId', ParseIntPipe) partyId: number,
+  ) {
+    if (!TASK_PARTY_KINDS.includes(partyKind)) return [];
+    return this.tasksService.getByParty(partyKind, partyId);
   }
 
   /**
@@ -247,6 +300,17 @@ export class TasksController {
     return this.tasksService.update(id, dto, toTaskActor(user));
   }
 
+  @Patch(':id/schedule')
+  @RequirePermissions('tasks:write')
+  @ApiOperation({ summary: 'Atomically reschedule and optionally reassign a task' })
+  async scheduleTask(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ScheduleTaskDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.tasksService.schedule(id, dto, toTaskActor(user));
+  }
+
   @Patch(':id/move')
   @RequirePermissions('tasks:write')
   @ApiOperation({ summary: 'Change status and/or reorder within a board column' })
@@ -314,6 +378,60 @@ export class TasksController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.tasksService.setEntityLink(id, dto, toTaskActor(user));
+  }
+
+  @Get(':id/parties')
+  @ApiOperation({ summary: 'List the companies and contacts involved in a task' })
+  async listParties(@Param('id', ParseIntPipe) id: number) {
+    return this.tasksService.listParties(id);
+  }
+
+  @Put(':id/parties')
+  @RequirePermissions('tasks:write')
+  @ApiOperation({ summary: 'Replace the companies and contacts involved in a task' })
+  async setParties(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SetTaskPartiesDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.tasksService.setParties(id, dto, toTaskActor(user));
+  }
+
+  @Get(':id/watchers')
+  async listWatchers(@Param('id', ParseIntPipe) id: number) {
+    return this.tasksService.listWatchers(id);
+  }
+
+  @Post(':id/watchers/:userId')
+  @RequirePermissions('tasks:write')
+  async addWatcher(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('userId', ParseIntPipe) userId: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.tasksService.addWatcher(id, userId, toTaskActor(user));
+  }
+
+  @Delete(':id/watchers/:userId')
+  @RequirePermissions('tasks:write')
+  async removeWatcher(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('userId', ParseIntPipe) userId: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.tasksService.removeWatcher(id, userId, toTaskActor(user));
+  }
+
+  @Post(':id/archive')
+  @RequirePermissions('tasks:write')
+  async archiveTask(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthenticatedUser) {
+    await this.tasksService.archive(id, toTaskActor(user));
+  }
+
+  @Post(':id/restore')
+  @RequirePermissions('tasks:write')
+  async restoreTask(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthenticatedUser) {
+    return this.tasksService.restore(id, toTaskActor(user));
   }
 
   // --- Attachments: additive, never a full-list replace — see TasksService docblock. ---

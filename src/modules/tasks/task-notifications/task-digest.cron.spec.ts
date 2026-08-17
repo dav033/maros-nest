@@ -16,6 +16,8 @@ function makeCron(
     tasksRepository?: Record<string, jest.Mock>;
     mailService?: Record<string, jest.Mock>;
     configService?: Record<string, jest.Mock>;
+    notificationsService?: Record<string, jest.Mock>;
+    usersRepository?: Record<string, jest.Mock>;
   } = {},
 ) {
   const tasksRepository = {
@@ -30,15 +32,23 @@ function makeCron(
     get: jest.fn().mockReturnValue(undefined),
     ...overrides.configService,
   };
+  const notificationsService = overrides.notificationsService
+    ? { create: jest.fn().mockResolvedValue(undefined), ...overrides.notificationsService }
+    : undefined;
+  const usersRepository = overrides.usersRepository
+    ? { findNotificationPreferences: jest.fn().mockResolvedValue({ digest: 'email', digestHour: 7 }), ...overrides.usersRepository }
+    : undefined;
 
   const cron = new TaskDigestCron(
     tasksRepository as never,
     new TaskMapper(),
     mailService as never,
     configService as never,
+    notificationsService as never,
+    usersRepository as never,
   );
 
-  return { cron, tasksRepository, mailService, configService };
+  return { cron, tasksRepository, mailService, configService, notificationsService, usersRepository };
 }
 
 describe('TaskDigestCron.sendDailyDigest', () => {
@@ -126,5 +136,28 @@ describe('TaskDigestCron.sendDailyDigest', () => {
     });
 
     await expect(cron.sendDailyDigest()).resolves.toBeUndefined();
+  });
+
+  it('delivers the digest in-app at the user-selected hour', async () => {
+    const today = TaskMapper.todayInBusinessTimezone();
+    const { cron, mailService, notificationsService } = makeCron({
+      tasksRepository: {
+        findSignalsForDigest: jest.fn().mockResolvedValue([task({ dueDate: today })]),
+      },
+      usersRepository: {
+        findNotificationPreferences: jest.fn().mockResolvedValue({
+          digest: 'in_app',
+          digestHour: TaskMapper.currentHourInBusinessTimezone(),
+        }),
+      },
+      notificationsService: { create: jest.fn().mockResolvedValue(undefined) },
+    });
+
+    await cron.sendDailyDigest();
+
+    expect(mailService.sendMail).not.toHaveBeenCalled();
+    expect(notificationsService!.create).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'task_due_digest', entityId: 1 }),
+    );
   });
 });

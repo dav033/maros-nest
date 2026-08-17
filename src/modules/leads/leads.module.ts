@@ -13,6 +13,7 @@ import { LeadMutationService } from './lead-management/services/lead-mutation.se
 import { ContactsModule } from '../contacts/contacts.module';
 import { QuickbooksModule } from '../quickbooks/quickbooks.module';
 import { MailModule } from '../mail/mail.module';
+import { TasksModule } from '../tasks/tasks.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { MailModule } from '../mail/mail.module';
     ContactsModule,
     QuickbooksModule,
     MailModule,
+    TasksModule,
   ],
   controllers: [LeadsController],
   providers: [

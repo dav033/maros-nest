@@ -5,10 +5,15 @@ import { TaskLabel } from '../../entities/task-label.entity';
 import { TaskActivity } from '../../entities/task-activity.entity';
 import { TaskWatcher } from '../../entities/task-watcher.entity';
 import { TaskComment } from '../../entities/task-comment.entity';
+import { TaskParty } from '../../entities/task-party.entity';
 import { Lead } from '../../entities/lead.entity';
 import { Project } from '../../entities/project.entity';
 import { Contact } from '../../entities/contact.entity';
 import { Company } from '../../entities/company.entity';
+import { TaskTemplate } from '../../entities/task-template.entity';
+import { TaskTemplateItem } from '../../entities/task-template-item.entity';
+import { TaskDependency } from '../../entities/task-dependency.entity';
+import { TaskSavedView } from '../../entities/task-saved-view.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { MailModule } from '../mail/mail.module';
 import { TasksRepository } from './task-management/repositories/tasks.repository';
@@ -21,11 +26,18 @@ import { TaskLabelsService } from './task-management/services/task-labels.servic
 import { TaskActivityService } from './task-management/services/task-activity.service';
 import { TaskCommentsService } from './task-management/services/task-comments.service';
 import { TaskEntityResolverService } from './task-management/services/task-entity-resolver.service';
+import { TaskPartiesService } from './task-management/services/task-parties.service';
 import { TaskEventsBridgeService } from './task-management/services/task-events-bridge.service';
 import { TaskMapper } from './task-management/mappers/task.mapper';
 import { TasksController } from './task-management/tasks.controller';
+import { TaskTemplatesController } from './task-management/task-templates.controller';
 import { TaskNotificationsListener } from './task-notifications/task-notifications.listener';
 import { TaskDigestCron } from './task-notifications/task-digest.cron';
+import { TaskRulesCron } from './task-notifications/task-rules.cron';
+import { TaskTemplatesService } from './task-management/services/task-templates.service';
+import { TaskDependenciesService } from './task-management/services/task-dependencies.service';
+import { TaskSavedViewsService } from './task-management/services/task-saved-views.service';
+import { TaskSavedViewsController } from './task-management/task-saved-views.controller';
 
 @Module({
   imports: [
@@ -35,15 +47,20 @@ import { TaskDigestCron } from './task-notifications/task-digest.cron';
       TaskActivity,
       TaskWatcher,
       TaskComment,
+      TaskParty,
       Lead,
       Project,
       Contact,
       Company,
+      TaskTemplate,
+      TaskTemplateItem,
+      TaskDependency,
+      TaskSavedView,
     ]),
     NotificationsModule,
     MailModule,
   ],
-  controllers: [TasksController],
+  controllers: [TasksController, TaskTemplatesController, TaskSavedViewsController],
   providers: [
     TasksRepository,
     TaskLabelsRepository,
@@ -54,12 +71,17 @@ import { TaskDigestCron } from './task-notifications/task-digest.cron';
     TaskLabelsService,
     TaskActivityService,
     TaskCommentsService,
+    TaskPartiesService,
     TaskEntityResolverService,
     TaskEventsBridgeService,
     TaskMapper,
     TaskNotificationsListener,
     TaskDigestCron,
+    TaskRulesCron,
+    TaskTemplatesService,
+    TaskDependenciesService,
+    TaskSavedViewsService,
   ],
-  exports: [TasksRepository, TasksService],
+  exports: [TasksRepository, TasksService, TaskTemplatesService],
 })
 export class TasksModule {}

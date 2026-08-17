@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS users (
   role_id       INTEGER REFERENCES roles(id) ON DELETE RESTRICT,
   is_active     BOOLEAN NOT NULL DEFAULT true,
   last_login_at TIMESTAMP,
+  notification_preferences JSONB NOT NULL DEFAULT '{"assignment":"email","status":"in_app","blocked":"in_app","comment":"in_app","mention":"in_app","digest":"email","digestHour":7}'::jsonb,
   created_at    TIMESTAMP NOT NULL DEFAULT now(),
   updated_at    TIMESTAMP NOT NULL DEFAULT now()
 );

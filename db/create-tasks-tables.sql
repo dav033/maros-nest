@@ -28,6 +28,10 @@ CREATE TABLE IF NOT EXISTS tasks (
   due_date            DATE,
   -- Required whenever status = 'blocked'. A blocked task with no reason is noise.
   blocked_reason      TEXT,
+  -- First transition to blocked; edits while blocked must not reset escalation.
+  blocked_at          TIMESTAMP,
+  -- Required when status = 'cancelled'. A closed task should retain its rationale.
+  cancelled_reason    TEXT,
   completed_at        TIMESTAMP,
   attachments         JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_by_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { User } from '../../../entities/user.entity';
+import { DEFAULT_NOTIFICATION_PREFERENCES, NotificationPreferences, User } from '../../../entities/user.entity';
 import { Role } from '../../../entities/role.entity';
 import {
   LastAdminException,
@@ -86,6 +86,25 @@ export class UsersService {
     const user = await this.usersRepo.findById(id);
     if (!user) throw new UserNotFoundException(id);
     return user;
+  }
+
+  async getNotificationPreferences(id: number): Promise<NotificationPreferences> {
+    const user = await this.findById(id);
+    return { ...DEFAULT_NOTIFICATION_PREFERENCES, ...(user.notificationPreferences ?? {}) };
+  }
+
+  async updateNotificationPreferences(
+    id: number,
+    patch: Partial<NotificationPreferences>,
+  ): Promise<NotificationPreferences> {
+    const user = await this.findById(id);
+    user.notificationPreferences = {
+      ...DEFAULT_NOTIFICATION_PREFERENCES,
+      ...(user.notificationPreferences ?? {}),
+      ...patch,
+    };
+    await this.usersRepo.save(user);
+    return user.notificationPreferences;
   }
 
   /**

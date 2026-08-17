@@ -7,7 +7,8 @@ import { UsersRepository } from '../../users/user-management/repositories/users.
 import { TaskWatchersRepository } from '../task-management/repositories/task-watchers.repository';
 import { TasksRepository } from '../task-management/repositories/tasks.repository';
 import type { NotificationKind } from '../../../entities/notification.entity';
-import { renderTaskAssignedEmail } from './task-email-templates';
+import type { NotificationChannel } from '../../../entities/user.entity';
+import { renderTaskAssignedEmail, renderTaskSignalEmail } from './task-email-templates';
 
 interface TaskAssignedEvent {
   taskId: number;
@@ -80,7 +81,8 @@ export class TaskNotificationsListener {
 
       // The bell still skips self-assignment — not news if you're the one who just
       // did it. The email does not skip it; see the class doc comment for why.
-      if (event.assigneeUserId !== event.actorId) {
+      const channel = await this.channelFor(event.assigneeUserId, 'assignment');
+      if (event.assigneeUserId !== event.actorId && channel === 'in_app') {
         await this.notificationsService.create({
           userId: event.assigneeUserId,
           kind: 'task_assigned',
@@ -90,7 +92,7 @@ export class TaskNotificationsListener {
           payload: { taskId: event.taskId, taskTitle: task.title },
         });
       }
-      await this.sendAssignmentEmail(event.assigneeUserId, task.id, task.title);
+      if (channel === 'email') await this.sendAssignmentEmail(event.assigneeUserId, task.id, task.title);
     });
   }
 
@@ -144,14 +146,25 @@ export class TaskNotificationsListener {
     await this.safely('task.mentioned', async () => {
       const task = await this.tasksRepository.findByIdActive(event.taskId);
       if (!task) return;
-      await this.notificationsService.create({
-        userId: event.mentionedUserId,
-        kind: 'task_mentioned',
-        actorId: event.actorId,
-        entityKind: 'task',
-        entityId: event.taskId,
-        payload: { taskId: event.taskId, taskTitle: task.title, commentId: event.commentId },
-      });
+      const channel = await this.channelFor(event.mentionedUserId, 'mention');
+      if (channel === 'in_app') {
+        await this.notificationsService.create({
+          userId: event.mentionedUserId,
+          kind: 'task_mentioned',
+          actorId: event.actorId,
+          entityKind: 'task',
+          entityId: event.taskId,
+          payload: { taskId: event.taskId, taskTitle: task.title, commentId: event.commentId },
+        });
+      } else if (channel === 'email') {
+        await this.sendTaskSignalEmail(
+          event.mentionedUserId,
+          'mention',
+          task.id,
+          task.title,
+          `You were mentioned in comment ${event.commentId}.`,
+        );
+      }
     });
   }
 
@@ -199,18 +212,64 @@ export class TaskNotificationsListener {
   ): Promise<void> {
     const watcherIds = await this.taskWatchersRepository.findUserIdsForTask(taskId);
     const recipients = watcherIds.filter((id) => id !== actorId);
-    await Promise.all(
-      recipients.map((userId) =>
-        this.notificationsService.create({
-          userId,
-          kind,
-          actorId,
-          entityKind: 'task',
-          entityId: taskId,
-          payload,
-        }),
-      ),
-    );
+    const preferenceKey = kind === 'task_blocked' ? 'blocked' : kind === 'task_commented' ? 'comment' : 'status';
+    await Promise.all(recipients.map(async (userId) => {
+      const channel = await this.channelFor(userId, preferenceKey);
+      if (channel === 'in_app') {
+        await this.notificationsService.create({ userId, kind, actorId, entityKind: 'task', entityId: taskId, payload });
+      } else if (channel === 'email') {
+        const signalKind = preferenceKey === 'blocked' ? 'blocked' : preferenceKey === 'comment' ? 'comment' : 'status';
+        const details = preferenceKey === 'blocked'
+          ? String(payload.reason ?? 'The task is blocked.')
+          : preferenceKey === 'status'
+            ? `Status: ${String(payload.from ?? 'unknown')} → ${String(payload.to ?? 'unknown')}.`
+            : 'A new comment was added to the task.';
+        await this.sendTaskSignalEmail(userId, signalKind, taskId, String(payload.taskTitle ?? 'Task'), details);
+      }
+    }));
+  }
+
+  private async sendTaskSignalEmail(
+    userId: number,
+    kind: 'status' | 'blocked' | 'comment' | 'mention',
+    taskId: number,
+    taskTitle: string,
+    details?: string,
+  ): Promise<void> {
+    try {
+      const recipient = await this.usersRepository.findById(userId);
+      if (!recipient?.email) return;
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL') ?? 'https://marosconstruction.com';
+      const email = renderTaskSignalEmail({
+        kind,
+        taskTitle,
+        taskId,
+        taskUrl: `${frontendUrl}/tasks?task=${taskId}`,
+        details,
+      });
+      await this.mailService.sendMail({ to: [recipient.email], ...email });
+    } catch (error) {
+      this.logger.warn(`Task signal email failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async channelFor(
+    userId: number,
+    key: 'assignment' | 'status' | 'blocked' | 'comment' | 'mention',
+  ): Promise<NotificationChannel> {
+    const fallback: NotificationChannel = key === 'assignment' ? 'email' : 'in_app';
+    const reader = (
+      this.usersRepository as unknown as {
+        findNotificationPreferences?: (id: number) => Promise<Partial<Record<typeof key, NotificationChannel>>>;
+      }
+    ).findNotificationPreferences;
+    if (!reader) return fallback;
+    try {
+      const preferences = await reader.call(this.usersRepository, userId);
+      return preferences[key] ?? fallback;
+    } catch {
+      return fallback;
+    }
   }
 
   private async safely(event: string, fn: () => Promise<void>): Promise<void> {

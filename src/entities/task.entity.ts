@@ -132,18 +132,41 @@ export class Task {
   entityId?: number | null;
 
   @Column({ name: 'start_date', type: 'date', nullable: true })
-  startDate?: Date | null;
+  startDate?: Date | string | null;
 
   @Column({ name: 'due_date', type: 'date', nullable: true })
-  dueDate?: Date | null;
+  dueDate?: Date | string | null;
 
   /** Required whenever status = 'blocked' — enforced in TasksService; see db CHECK. */
   @Column({ name: 'blocked_reason', type: 'text', nullable: true })
   blockedReason?: string | null;
 
+  /** The first moment the task entered blocked; edits while blocked must not reset escalation. */
+  @Column({ name: 'blocked_at', type: 'timestamp', nullable: true })
+  blockedAt?: Date | null;
+
+  /** Required when a task is moved to cancelled, so closure remains explainable. */
+  @Column({ name: 'cancelled_reason', type: 'text', nullable: true })
+  cancelledReason?: string | null;
+
   /** Stamped on entering 'done', cleared on leaving it. Feeds the digest and reporting. */
   @Column({ name: 'completed_at', type: 'timestamp', nullable: true })
   completedAt?: Date | null;
+
+  @Column({ name: 'recurrence_rule', type: 'varchar', length: 120, nullable: true })
+  recurrenceRule?: string | null;
+
+  @Column({ name: 'recurrence_until', type: 'date', nullable: true })
+  recurrenceUntil?: Date | string | null;
+
+  @Column({ name: 'estimated_hours', type: 'numeric', precision: 8, scale: 2, nullable: true })
+  estimatedHours?: number | null;
+
+  @Column({ name: 'actual_hours', type: 'numeric', precision: 8, scale: 2, default: 0 })
+  actualHours: number;
+
+  @Column({ name: 'started_at', type: 'timestamp', nullable: true })
+  startedAt?: Date | null;
 
   @Column({ type: 'jsonb', default: [] })
   attachments: string[];

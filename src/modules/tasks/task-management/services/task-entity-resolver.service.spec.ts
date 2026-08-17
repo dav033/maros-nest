@@ -89,6 +89,7 @@ describe('TaskEntityResolverService.resolveMany', () => {
       address: '12 Oak St',
       addressLink: 'https://maps/oak',
       status: undefined,
+      jobKey: 'lead:42',
     });
   });
 

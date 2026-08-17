@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsInt, IsIn, IsBoolean, IsDateString, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsInt, IsIn, IsBoolean, IsDateString, IsArray, Min, Max } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { TASK_KINDS, TASK_PRIORITIES, TASK_STATUSES } from '../../../../entities/task.entity';
@@ -6,6 +6,10 @@ import type { TaskKind, TaskPriority, TaskStatus } from '../../../../entities/ta
 import { TASK_ENTITY_KINDS } from './create-task.dto';
 import type { TaskEntityKind } from './create-task.dto';
 import { toArray } from './toArray.util';
+import { LeadType } from '../../../../common/enums/lead-type.enum';
+
+export const TASK_SORT_FIELDS = ['updatedAt', 'createdAt', 'dueDate', 'priority', 'title'] as const;
+export type TaskSortField = (typeof TASK_SORT_FIELDS)[number];
 
 /**
  * Query filters for GET /tasks. Every field is an AND with the rest.
@@ -68,6 +72,11 @@ export class SearchTasksDto {
   @IsOptional()
   dueBefore?: string;
 
+  @ApiPropertyOptional({ description: 'Only tasks due on this exact ISO date' })
+  @IsDateString()
+  @IsOptional()
+  dueOn?: string;
+
   @ApiPropertyOptional({
     description: 'Include subtasks in the results. Off by default — the board and list read top-level only.',
     default: false,
@@ -80,4 +89,32 @@ export class SearchTasksDto {
   @IsString()
   @IsOptional()
   q?: string;
+
+  @ApiPropertyOptional({ description: 'Opaque keyset cursor returned by the previous page' })
+  @IsString()
+  @IsOptional()
+  cursor?: string;
+
+  @ApiPropertyOptional({ default: 50, minimum: 1, maximum: 100 })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  @IsOptional()
+  limit?: number;
+
+  @ApiPropertyOptional({ enum: TASK_SORT_FIELDS, default: 'updatedAt' })
+  @IsIn(TASK_SORT_FIELDS)
+  @IsOptional()
+  sort?: TaskSortField;
+
+  @ApiPropertyOptional({ enum: ['asc', 'desc'], default: 'desc' })
+  @IsIn(['asc', 'desc'])
+  @IsOptional()
+  direction?: 'asc' | 'desc';
+
+  @ApiPropertyOptional({ enum: LeadType, description: 'Filter by the job line of business' })
+  @IsIn(Object.values(LeadType))
+  @IsOptional()
+  leadType?: LeadType;
 }

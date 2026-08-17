@@ -32,4 +32,10 @@ export class MoveTaskDto {
   @IsOptional()
   @MaxLength(500)
   blockedReason?: string;
+
+  @ApiPropertyOptional({ description: 'Required when a task is moved to cancelled' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  cancelledReason?: string;
 }

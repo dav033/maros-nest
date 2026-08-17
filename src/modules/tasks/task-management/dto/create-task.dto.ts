@@ -6,10 +6,16 @@ import {
   IsIn,
   IsObject,
   IsDateString,
+  IsArray,
+  ValidateNested,
+  IsNumber,
+  Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { TASK_KINDS, TASK_PRIORITIES } from '../../../../entities/task.entity';
 import type { TaskKind, TaskPriority } from '../../../../entities/task.entity';
+import { TaskPartyInputDto } from './set-parties.dto';
 
 export const TASK_ENTITY_KINDS = ['lead', 'project', 'contact', 'company'] as const;
 export type TaskEntityKind = (typeof TASK_ENTITY_KINDS)[number];
@@ -74,4 +80,28 @@ export class CreateTaskDto {
   @IsDateString()
   @IsOptional()
   dueDate?: string;
+
+  @ApiPropertyOptional({ description: 'Simple RRULE such as FREQ=WEEKLY;INTERVAL=1' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(120)
+  recurrenceRule?: string;
+
+  @ApiPropertyOptional({ description: 'Last date on which recurring instances may be created' })
+  @IsDateString()
+  @IsOptional()
+  recurrenceUntil?: string;
+
+  @ApiPropertyOptional({ description: 'Expected labor hours' })
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @IsOptional()
+  estimatedHours?: number;
+
+  @ApiPropertyOptional({ type: [TaskPartyInputDto], description: 'Related company/contact parties' })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => TaskPartyInputDto)
+  @IsOptional()
+  parties?: TaskPartyInputDto[];
 }

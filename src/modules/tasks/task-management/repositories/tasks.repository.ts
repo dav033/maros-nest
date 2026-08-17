@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository, SelectQueryBuilder } from 'typeorm';
+import { Brackets, IsNull, Repository, SelectQueryBuilder } from 'typeorm';
 import { Task, TaskStatus } from '../../../../entities/task.entity';
-import type { SearchTasksDto } from '../dto/search-tasks.dto';
+import type { SearchTasksDto, TaskSortField } from '../dto/search-tasks.dto';
+import type { ScheduleQueryDto } from '../dto/schedule-query.dto';
+import { leadNumberSqlFilter } from '../../../../common/utils/lead-type.utils';
 
 /** Relations every read needs: who's involved, the label set, and the parent (if a subtask). */
 const TASK_RELATIONS = ['assignee', 'reporter', 'createdBy', 'labels', 'parent'];
@@ -24,7 +26,27 @@ const DONE_LIMIT = 50;
  * status/kind/priority/assigneeUserId/labelId, which already cut this down in the
  * common case).
  */
-const LIST_LIMIT = 500;
+const DEFAULT_LIST_LIMIT = 50;
+const MAX_LIST_LIMIT = 100;
+
+type TaskCursor = { id: number; value: string | number | null };
+
+function encodeCursor(cursor: TaskCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+}
+
+function decodeCursor(value?: string): TaskCursor | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Partial<TaskCursor>;
+    if (typeof parsed.id !== 'number' || (!['string', 'number'].includes(typeof parsed.value) && parsed.value !== null)) {
+      return null;
+    }
+    return { id: parsed.id, value: parsed.value ?? null };
+  } catch {
+    return null;
+  }
+}
 
 @Injectable()
 export class TasksRepository {
@@ -79,14 +101,31 @@ export class TasksRepository {
     if (filters.priority?.length) {
       qb.andWhere('task.priority IN (:...priority)', { priority: filters.priority });
     }
-    if (filters.entityKind) {
-      qb.andWhere('task.entity_kind = :entityKind', { entityKind: filters.entityKind });
-    }
-    if (filters.entityId !== undefined) {
-      qb.andWhere('task.entity_id = :entityId', { entityId: filters.entityId });
+    if (filters.entityKind === 'lead' && filters.entityId !== undefined) {
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1
+          FROM leads job_lead
+          LEFT JOIN projects job_project ON job_project.lead_id = job_lead.id
+          WHERE job_lead.id = :jobId
+            AND ((task.entity_kind = 'lead' AND task.entity_id = job_lead.id)
+              OR (task.entity_kind = 'project' AND task.entity_id = job_project.id))
+        )`,
+        { jobId: filters.entityId },
+      );
+    } else {
+      if (filters.entityKind) {
+        qb.andWhere('task.entity_kind = :entityKind', { entityKind: filters.entityKind });
+      }
+      if (filters.entityId !== undefined) {
+        qb.andWhere('task.entity_id = :entityId', { entityId: filters.entityId });
+      }
     }
     if (filters.dueBefore) {
       qb.andWhere('task.due_date <= :dueBefore', { dueBefore: filters.dueBefore });
+    }
+    if (filters.dueOn) {
+      qb.andWhere('task.due_date = :dueOn', { dueOn: filters.dueOn });
     }
     if (filters.labelId?.length) {
       qb.andWhere(
@@ -96,6 +135,24 @@ export class TasksRepository {
     }
     if (filters.q) {
       qb.andWhere(`task.content_tsv @@ plainto_tsquery('simple', :q)`, { q: filters.q });
+    }
+    if (filters.leadType) {
+      const leadTypeFilter = leadNumberSqlFilter(
+        filters.leadType,
+        'job_lead.lead_number',
+        'taskLeadNumberPattern',
+      );
+      qb.andWhere(
+        `EXISTS (
+           SELECT 1
+           FROM leads job_lead
+           LEFT JOIN projects job_project ON job_project.lead_id = job_lead.id
+           WHERE ${leadTypeFilter?.clause ?? 'TRUE'}
+             AND ((task.entity_kind = 'lead' AND task.entity_id = job_lead.id)
+               OR (task.entity_kind = 'project' AND task.entity_id = job_project.id))
+         )`,
+        leadTypeFilter?.parameters,
+      );
     }
   }
 
@@ -108,14 +165,19 @@ export class TasksRepository {
    * LIMIT applied directly to `baseQuery()`'s left-joined (`labels`) query caps raw SQL
    * rows, not distinct tasks.
    */
-  async findAll(filters: SearchTasksDto): Promise<{ items: Task[]; totalCount: number }> {
+  async findAll(filters: SearchTasksDto): Promise<{ items: Task[]; totalCount: number; nextCursor: string | null }> {
+    const sort = filters.sort ?? 'updatedAt';
+    const direction = filters.direction ?? 'desc';
+    const limit = Math.min(filters.limit ?? DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT);
+    const cursor = decodeCursor(filters.cursor);
+    const expression = this.sortExpression(sort);
     const idsQb = this.repo.createQueryBuilder('task').select('task.id', 'id');
     this.applySearchFilters(idsQb, filters);
+    this.applyCursor(idsQb, filters, cursor);
     idsQb
-      .orderBy('task.status', 'ASC')
-      .addOrderBy('task.position', 'ASC')
-      .addOrderBy('task.id', 'ASC')
-      .limit(LIST_LIMIT);
+      .orderBy(expression, direction.toUpperCase() as 'ASC' | 'DESC', sort === 'dueDate' ? 'NULLS LAST' : undefined)
+      .addOrderBy('task.id', direction.toUpperCase() as 'ASC' | 'DESC')
+      .limit(limit + 1);
 
     const countQb = this.repo.createQueryBuilder('task');
     this.applySearchFilters(countQb, filters);
@@ -125,16 +187,34 @@ export class TasksRepository {
       countQb.getCount(),
     ]);
 
-    if (idRows.length === 0) return { items: [], totalCount };
+    const hasNextPage = idRows.length > limit;
+    const pageRows = idRows.slice(0, limit);
+    if (pageRows.length === 0) return { items: [], totalCount, nextCursor: null };
 
     const items = await this.baseQuery()
-      .where('task.id IN (:...ids)', { ids: idRows.map((row) => row.id) })
-      .orderBy('task.status', 'ASC')
-      .addOrderBy('task.position', 'ASC')
-      .addOrderBy('task.id', 'ASC')
+      .where('task.id IN (:...ids)', { ids: pageRows.map((row) => row.id) })
+      .orderBy(expression, direction.toUpperCase() as 'ASC' | 'DESC', sort === 'dueDate' ? 'NULLS LAST' : undefined)
+      .addOrderBy('task.id', direction.toUpperCase() as 'ASC' | 'DESC')
       .getMany();
 
-    return { items, totalCount };
+    const last = items[items.length - 1];
+    return {
+      items,
+      totalCount,
+      nextCursor: hasNextPage && last ? encodeCursor({ id: last.id, value: this.cursorValue(last, sort) }) : null,
+    };
+  }
+
+  async findByIdAny(id: number): Promise<Task | null> {
+    return this.repo.findOne({ where: { id }, relations: TASK_RELATIONS });
+  }
+
+  async findArchived(): Promise<Task[]> {
+    return this.baseQuery()
+      .where('task.deleted_at IS NOT NULL')
+      .orderBy('task.deleted_at', 'DESC')
+      .addOrderBy('task.id', 'DESC')
+      .getMany();
   }
 
   /**
@@ -148,46 +228,56 @@ export class TasksRepository {
    * tasks than intended (or one with a truncated label set). Fetching ids first and
    * then the full rows `WHERE id IN (...)` sidesteps that entirely.
    */
-  async findForBoard(): Promise<Task[]> {
-    const [open, doneIds] = await Promise.all([
-      this.baseQuery()
-        .where('task.deleted_at IS NULL')
-        .andWhere('task.parent_id IS NULL')
-        .andWhere('task.status != :done', { done: 'done' })
-        .orderBy('task.status', 'ASC')
-        .addOrderBy('task.position', 'ASC')
-        .addOrderBy('task.id', 'ASC')
-        .getMany(),
-      this.repo
-        .createQueryBuilder('task')
-        .select('task.id', 'id')
-        .where('task.deleted_at IS NULL')
-        .andWhere('task.parent_id IS NULL')
-        .andWhere('task.status = :done', { done: 'done' })
-        .andWhere(`task.completed_at >= now() - interval '${DONE_WINDOW_DAYS} days'`)
-        .orderBy('task.position', 'ASC')
-        .limit(DONE_LIMIT)
-        .getRawMany<{ id: number }>(),
-    ]);
+  async findForBoard(filters: SearchTasksDto = {}): Promise<Task[]> {
+    const openIdsQb = this.repo.createQueryBuilder('task').select('task.id', 'id');
+    this.applySearchFilters(openIdsQb, filters);
+    openIdsQb
+      .andWhere('task.status != :done', { done: 'done' })
+      .andWhere('task.status != :cancelled', { cancelled: 'cancelled' })
+      .orderBy('task.status', 'ASC')
+      .addOrderBy('task.position', 'ASC')
+      .addOrderBy('task.id', 'ASC');
 
-    if (doneIds.length === 0) return open;
-
-    const done = await this.baseQuery()
-      .where('task.id IN (:...ids)', { ids: doneIds.map((row) => row.id) })
+    const doneIdsQb = this.repo.createQueryBuilder('task').select('task.id', 'id');
+    this.applySearchFilters(doneIdsQb, filters);
+    doneIdsQb
+      .andWhere('task.status = :done', { done: 'done' })
+      .andWhere(`task.completed_at >= now() - interval '${DONE_WINDOW_DAYS} days'`)
       .orderBy('task.position', 'ASC')
-      .getMany();
+      .addOrderBy('task.id', 'ASC')
+      .limit(DONE_LIMIT);
 
-    return [...open, ...done];
+    const [openIds, doneIds] = await Promise.all([
+      openIdsQb.getRawMany<{ id: number }>(),
+      doneIdsQb.getRawMany<{ id: number }>(),
+    ]);
+    const ids = [...openIds, ...doneIds].map((row) => row.id);
+    if (ids.length === 0) return [];
+
+    return this.baseQuery()
+      .where('task.id IN (:...ids)', { ids })
+      .orderBy('task.status', 'ASC')
+      .addOrderBy('task.position', 'ASC')
+      .addOrderBy('task.id', 'ASC')
+      .getMany();
   }
 
   /** The true count behind `findForBoard`'s windowed `done` column. */
-  async countDone(): Promise<number> {
-    return this.repo
-      .createQueryBuilder('task')
-      .where('task.deleted_at IS NULL')
-      .andWhere('task.parent_id IS NULL')
+  async countDone(filters: SearchTasksDto = {}): Promise<number> {
+    const qb = this.repo.createQueryBuilder('task');
+    this.applySearchFilters(qb, filters);
+    return qb
       .andWhere('task.status = :done', { done: 'done' })
       .getCount();
+  }
+
+  async restoreWithChildren(id: number): Promise<void> {
+    await this.repo
+      .createQueryBuilder()
+      .update(Task)
+      .set({ deletedAt: null })
+      .where('id = :id OR parent_id = :id', { id })
+      .execute();
   }
 
   /**
@@ -210,21 +300,156 @@ export class TasksRepository {
    * split; this only filters.
    */
   async findDueForDigest(today: string): Promise<Task[]> {
-    return this.baseQuery()
+    return this.findSignalsForDigest(today, null);
+  }
+
+  /** Due work plus blocked work that has remained untouched long enough to escalate. */
+  async findSignalsForDigest(today: string, blockedSince: string | null): Promise<Task[]> {
+    const qb = this.baseQuery()
       .where('task.deleted_at IS NULL')
       .andWhere('task.assignee_user_id IS NOT NULL')
       .andWhere('task.status NOT IN (:...closed)', { closed: ['done', 'cancelled'] })
-      .andWhere('task.due_date <= :today', { today })
+      .andWhere(
+        blockedSince
+          ? '(task.due_date <= :today OR (task.status = \'blocked\' AND task.blocked_at <= :blockedSince))'
+          : 'task.due_date <= :today',
+        blockedSince ? { today, blockedSince } : { today },
+      )
       .orderBy('task.assignee_user_id', 'ASC')
       .addOrderBy('task.due_date', 'ASC')
+      .getMany();
+    return qb;
+  }
+
+  /** Permit tasks get one reminder on the day three business-calendar days out. */
+  async findPermitTasksDueOn(dueDate: string): Promise<Task[]> {
+    return this.baseQuery()
+      .where('task.deleted_at IS NULL')
+      .andWhere('task.kind = :kind', { kind: 'permit' })
+      .andWhere('task.reporter_id IS NOT NULL')
+      .andWhere('task.status NOT IN (:...closed)', { closed: ['done', 'cancelled'] })
+      .andWhere('task.due_date = :dueDate', { dueDate })
       .getMany();
   }
 
   async findByEntity(entityKind: string, entityId: number): Promise<Task[]> {
+    return this.findByEntityLinks([{ entityKind, entityId }]);
+  }
+
+  async findSchedule(filters: ScheduleQueryDto): Promise<Task[]> {
+    const qb = this.baseQuery()
+      .where('task.deleted_at IS NULL')
+      .andWhere('task.parent_id IS NULL')
+      .andWhere('task.status NOT IN (:...closed)', { closed: ['cancelled'] });
+    if (filters.from) {
+      qb.andWhere('COALESCE(task.due_date, task.start_date) >= :from', { from: filters.from });
+    }
+    if (filters.to) {
+      qb.andWhere('COALESCE(task.start_date, task.due_date) <= :to', { to: filters.to });
+    }
+    if (filters.assigneeUserId?.length) {
+      qb.andWhere('task.assignee_user_id IN (:...assigneeUserId)', { assigneeUserId: filters.assigneeUserId });
+    }
+    if (filters.jobId != null) {
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1 FROM leads schedule_job
+          LEFT JOIN projects schedule_project ON schedule_project.lead_id = schedule_job.id
+          WHERE schedule_job.id = :scheduleJobId
+            AND ((task.entity_kind = 'lead' AND task.entity_id = schedule_job.id)
+              OR (task.entity_kind = 'project' AND task.entity_id = schedule_project.id))
+        )`,
+        { scheduleJobId: filters.jobId },
+      );
+    }
+    if (filters.leadType) {
+      const leadTypeFilter = leadNumberSqlFilter(
+        filters.leadType,
+        'schedule_job.lead_number',
+        'scheduleLeadNumberPattern',
+      );
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1 FROM leads schedule_job
+          LEFT JOIN projects schedule_project ON schedule_project.lead_id = schedule_job.id
+          WHERE ${leadTypeFilter?.clause ?? 'TRUE'}
+            AND ((task.entity_kind = 'lead' AND task.entity_id = schedule_job.id)
+              OR (task.entity_kind = 'project' AND task.entity_id = schedule_project.id))
+        )`,
+        leadTypeFilter?.parameters,
+      );
+    }
+    return qb.orderBy('task.start_date', 'ASC', 'NULLS LAST').addOrderBy('task.due_date', 'ASC', 'NULLS LAST').getMany();
+  }
+
+  private sortExpression(sort: TaskSortField): string {
+    return {
+      updatedAt: 'task.updated_at',
+      createdAt: 'task.created_at',
+      dueDate: 'task.due_date',
+      priority: 'task.priority',
+      title: 'task.title',
+    }[sort];
+  }
+
+  private cursorValue(task: Task, sort: TaskSortField): string | number | null {
+    if (sort === 'updatedAt') return task.updatedAt?.toISOString() ?? null;
+    if (sort === 'createdAt') return task.createdAt?.toISOString() ?? null;
+    if (sort === 'dueDate') return task.dueDate instanceof Date ? task.dueDate.toISOString() : task.dueDate ?? null;
+    if (sort === 'priority') return task.priority;
+    return task.title;
+  }
+
+  private applyCursor(
+    qb: SelectQueryBuilder<Task>,
+    filters: SearchTasksDto,
+    cursor: TaskCursor | null,
+  ): void {
+    if (!cursor) return;
+    const sort = filters.sort ?? 'updatedAt';
+    const direction = filters.direction ?? 'desc';
+    const expression = this.sortExpression(sort);
+    const operator = direction === 'asc' ? '>' : '<';
+    const tieOperator = direction === 'asc' ? '>' : '<';
+
+    if (cursor.value === null) {
+      qb.andWhere(`(${expression} IS NULL AND task.id ${tieOperator} :cursorId)`, {
+        cursorId: cursor.id,
+      });
+      return;
+    }
+
+    const nullsLast = sort === 'dueDate' ? ` OR ${expression} IS NULL` : '';
+    qb.andWhere(
+      `((${expression} ${operator} :cursorValue${nullsLast}) OR (${expression} = :cursorValue AND task.id ${tieOperator} :cursorId))`,
+      { cursorValue: cursor.value, cursorId: cursor.id },
+    );
+  }
+
+  async findByIdsActive(ids: number[]): Promise<Task[]> {
+    if (ids.length === 0) return [];
     return this.baseQuery()
       .where('task.deleted_at IS NULL')
-      .andWhere('task.entity_kind = :entityKind', { entityKind })
-      .andWhere('task.entity_id = :entityId', { entityId })
+      .andWhere('task.id IN (:...ids)', { ids })
+      .orderBy('task.position', 'ASC')
+      .addOrderBy('task.id', 'ASC')
+      .getMany();
+  }
+
+  async findByEntityLinks(links: Array<{ entityKind: string; entityId: number }>): Promise<Task[]> {
+    if (links.length === 0) return [];
+    return this.baseQuery()
+      .where('task.deleted_at IS NULL')
+      .andWhere(
+        new Brackets((where) => {
+          links.forEach((link, index) => {
+            const clause = `(task.entity_kind = :entityKind${index} AND task.entity_id = :entityId${index})`;
+            const params = { [`entityKind${index}`]: link.entityKind, [`entityId${index}`]: link.entityId };
+            if (index === 0) where.where(clause, params);
+            else where.orWhere(clause, params);
+          });
+        }),
+      )
       .orderBy('task.position', 'ASC')
       .addOrderBy('task.id', 'ASC')
       .getMany();

@@ -24,6 +24,10 @@ import {
 } from '../../../common/exceptions';
 import { ProjectQboEnrichmentService } from '../../quickbooks/services/crm-bridge/project-qbo-enrichment.service';
 import { MailService } from '../../mail/services/mail.service';
+import { TaskTemplatesService } from '../../tasks/task-management/services/task-templates.service';
+import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
+import { toTaskActor } from '../../tasks/task-management/services/task-actor';
+import { Optional } from '@nestjs/common';
 
 @Injectable()
 export class LeadsService {
@@ -44,6 +48,7 @@ export class LeadsService {
     private readonly dataSource: DataSource,
     private readonly qboEnrichment: ProjectQboEnrichmentService,
     private readonly mailService: MailService,
+    @Optional() private readonly taskTemplatesService?: TaskTemplatesService,
   ) {}
 
   async getAllLeads(options: { includeQbo?: boolean } = {}): Promise<any[]> {
@@ -320,7 +325,7 @@ export class LeadsService {
     }
   }
 
-  async updateLead(id: number, patchDto: UpdateLeadDto): Promise<any> {
+  async updateLead(id: number, patchDto: UpdateLeadDto, actor?: AuthenticatedUser): Promise<any> {
     // Optimización: Si solo se están actualizando las notas, usar método optimizado
     const isNotesOnlyUpdate = this.leadMutationService.isNotesOnlyUpdate(
       patchDto,
@@ -410,6 +415,17 @@ export class LeadsService {
     });
 
     if (result.conversion.converted && result.conversion.projectId) {
+      if (actor && this.taskTemplatesService) {
+        const projectTypeName = (result.entity.projectType as { name?: string } | null)?.name;
+        const template = (await this.taskTemplatesService.list()).find((candidate) =>
+          projectTypeName && candidate.projectType
+            ? candidate.projectType.toLowerCase() === projectTypeName.toLowerCase()
+            : false,
+        );
+        if (template) {
+          await this.taskTemplatesService.apply(template.id, id, undefined, toTaskActor(actor));
+        }
+      }
       await this.sendWonNotificationEmail(
         result.entity,
         result.conversion.projectId,

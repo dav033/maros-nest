@@ -6,6 +6,8 @@ import {
   IsIn,
   IsObject,
   IsDateString,
+  IsNumber,
+  Min,
 } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { TASK_KINDS, TASK_PRIORITIES } from '../../../../entities/task.entity';
@@ -78,4 +80,21 @@ export class UpdateTaskDto {
   @IsDateString()
   @IsOptional()
   expectedUpdatedAt?: string;
+
+  @ApiPropertyOptional({ description: 'Simple RRULE for the next recurring instance' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(120)
+  recurrenceRule?: string | null;
+
+  @ApiPropertyOptional()
+  @IsDateString()
+  @IsOptional()
+  recurrenceUntil?: string | null;
+
+  @ApiPropertyOptional({ description: 'Expected labor hours' })
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @IsOptional()
+  estimatedHours?: number | null;
 }

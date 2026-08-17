@@ -44,7 +44,7 @@ function makeService(
   tasksRepositoryOverrides: Record<string, jest.Mock> = {},
   taskLabelsRepositoryOverrides: Record<string, jest.Mock> = {},
 ) {
-  const tasksRepository = {
+  const tasksRepository: Record<string, jest.Mock> = {
     findChildren: jest.fn().mockResolvedValue([]),
     getMaxPositionInColumn: jest.fn().mockResolvedValue(0),
     getMaxPositionUnderParent: jest.fn().mockResolvedValue(0),
@@ -58,7 +58,10 @@ function makeService(
   };
 
   const taskLabelsRepository = { findByIds: jest.fn().mockResolvedValue([]), ...taskLabelsRepositoryOverrides };
-  const taskWatchersRepository = { addMany: jest.fn().mockResolvedValue(undefined) };
+  const taskWatchersRepository = {
+    addMany: jest.fn().mockResolvedValue(undefined),
+    findUserIdsForTask: jest.fn().mockResolvedValue([]),
+  };
   const taskActivityRepository = {
     log: jest.fn().mockResolvedValue(undefined),
     findByTask: jest.fn().mockResolvedValue([]),
@@ -68,7 +71,10 @@ function makeService(
   const eventEmitter = { emit: jest.fn() };
   // No task here links to a CRM entity by default — tests that care about the
   // resolved link cover TaskEntityResolverService directly.
-  const taskEntityResolver = { resolveMany: jest.fn().mockResolvedValue(new Map()) };
+  const taskEntityResolver = {
+    resolveMany: jest.fn().mockResolvedValue(new Map()),
+    canonicalizeTaskLink: jest.fn().mockImplementation(async (link: unknown) => link),
+  };
 
   const service = new TasksService(
     tasksRepository as never,
@@ -664,7 +670,7 @@ describe('TasksService.addAttachments', () => {
 
     await service.addAttachments(1, ['c.png'], actor(4));
 
-    expect(saved?.attachments).toEqual(['a.png', 'b.png', 'c.png']);
+    expect((saved as Task | null)?.attachments).toEqual(['a.png', 'b.png', 'c.png']);
     expect(taskActivityRepository.log).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: 1, actorId: 4, kind: 'attachment_added', toValue: '1' }),
     );
@@ -700,7 +706,7 @@ describe('TasksService.removeAttachment', () => {
 
     await service.removeAttachment(1, 'b.png', actor());
 
-    expect(saved?.attachments).toEqual(['a.png', 'c.png']);
+    expect((saved as Task | null)?.attachments).toEqual(['a.png', 'c.png']);
   });
 });
 
@@ -718,7 +724,7 @@ describe('TasksService.reorderAttachments', () => {
 
     await service.reorderAttachments(1, ['c.png', 'a.png', 'b.png'], actor());
 
-    expect(saved?.attachments).toEqual(['c.png', 'a.png', 'b.png']);
+    expect((saved as Task | null)?.attachments).toEqual(['c.png', 'a.png', 'b.png']);
   });
 
   it('drops keys the server no longer has and appends keys the caller did not know about', async () => {
@@ -736,7 +742,7 @@ describe('TasksService.reorderAttachments', () => {
 
     await service.reorderAttachments(1, ['c.png', 'b.png', 'a.png'], actor());
 
-    expect(saved?.attachments).toEqual(['c.png', 'a.png', 'd.png']);
+    expect((saved as Task | null)?.attachments).toEqual(['c.png', 'a.png', 'd.png']);
   });
 });
 
@@ -760,7 +766,7 @@ describe('TasksService.addLabelsToTask', () => {
     await service.addLabelsToTask(1, [1, 2], actor(4));
 
     // 'permit' (id 2) was already there — the union doesn't duplicate it.
-    expect(saved?.labels).toEqual([existingLabel, urgent]);
+    expect((saved as Task | null)?.labels).toEqual([existingLabel, urgent]);
   });
 });
 
