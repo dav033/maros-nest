@@ -27,6 +27,7 @@ import { NotesModule } from './modules/notes/notes.module';
 import { UsersModule } from './modules/users/users.module';
 import { TasksModule } from './modules/tasks/tasks.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { ManagedFilesModule } from './modules/managed-files/managed-files.module';
 
 @Module({
   imports: [
@@ -75,6 +76,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     UsersModule,
     NotificationsModule,
     TasksModule,
+    ManagedFilesModule,
   ],
   controllers: [AppController],
   providers: [

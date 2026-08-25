@@ -33,6 +33,7 @@ import type { SetTaskPartiesDto } from './dto/set-parties.dto';
 import type { ScheduleQueryDto } from './dto/schedule-query.dto';
 import { TaskDependenciesService } from './services/task-dependencies.service';
 import { ScheduleTaskDto } from './dto/schedule-task.dto';
+import { TaskWorkspaceAssignmentService } from '../../task-workspaces/services/task-workspace-assignment.service';
 
 const POSITION_STEP = 1000;
 
@@ -49,6 +50,7 @@ export class TasksService {
     private readonly eventEmitter: EventEmitter2,
     @Optional() private readonly taskParties?: TaskPartiesService,
     @Optional() private readonly taskDependencies?: TaskDependenciesService,
+    @Optional() private readonly taskWorkspaceAssignment?: TaskWorkspaceAssignmentService,
   ) {}
 
   /**
@@ -269,6 +271,17 @@ export class TasksService {
         : null;
     task.entityKind = canonicalLink?.entityKind ?? null;
     task.entityId = canonicalLink?.entityId ?? null;
+    if (this.taskWorkspaceAssignment) {
+      const assignment = await this.taskWorkspaceAssignment.resolveForTask({
+        workspaceId: dto.workspaceId,
+        folderId: dto.folderId ?? null,
+        entityKind: task.entityKind as any,
+        entityId: task.entityId,
+        actorId: actor.id,
+      });
+      task.workspaceId = assignment.workspaceId;
+      task.folderId = assignment.folderId;
+    }
     task.startDate = dto.startDate ? new Date(dto.startDate) : null;
     task.dueDate = dto.dueDate ? new Date(dto.dueDate) : null;
     task.recurrenceRule = dto.recurrenceRule ?? null;
@@ -291,6 +304,16 @@ export class TasksService {
     task.position = task.parent
       ? (await this.tasksRepository.getMaxPositionUnderParent(task.parent.id)) + POSITION_STEP
       : (await this.tasksRepository.getMaxPositionInColumn(task.status)) + POSITION_STEP;
+
+    if (dto.labelIds?.length) {
+      const labels = await this.taskLabelsRepository.findByIds(dto.labelIds);
+      if (labels.length !== new Set(dto.labelIds).size) {
+        throw new BadRequestException('One or more task labels do not exist');
+      }
+      task.labels = labels;
+    } else {
+      task.labels = [];
+    }
 
     const saved = await this.tasksRepository.save(task);
 

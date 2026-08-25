@@ -104,4 +104,20 @@ export class CreateTaskDto {
   @Type(() => TaskPartyInputDto)
   @IsOptional()
   parties?: TaskPartyInputDto[];
+
+  @ApiPropertyOptional({ type: [Number], description: 'Labels assigned atomically with task creation' })
+  @IsArray()
+  @IsInt({ each: true })
+  @IsOptional()
+  labelIds?: number[];
+
+  @ApiPropertyOptional({ description: 'Destination workspace; omitted uses the canonical/default workspace' })
+  @IsInt()
+  @IsOptional()
+  workspaceId?: number;
+
+  @ApiPropertyOptional({ description: 'Optional folder inside workspace' })
+  @IsInt()
+  @IsOptional()
+  folderId?: number;
 }

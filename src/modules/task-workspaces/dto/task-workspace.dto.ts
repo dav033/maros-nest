@@ -1,7 +1,9 @@
 import { Type } from 'class-transformer';
 import { IsArray, IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
-import { TASK_WORKSPACE_ENTITY_KINDS, TASK_WORKSPACE_RELATIONSHIPS, TASK_WORKSPACE_TYPES } from '../../../entities/task-workspace.entity';
-import type { TaskWorkspaceEntityKind, TaskWorkspaceRelationship, TaskWorkspaceType } from '../../../entities/task-workspace.entity';
+import { TASK_WORKSPACE_TYPES } from '../../../entities/task-workspace.entity';
+import { TASK_WORKSPACE_ENTITY_KINDS, TASK_WORKSPACE_RELATIONSHIPS } from '../../../entities/task-workspace-link.entity';
+import type { TaskWorkspaceEntityKind, TaskWorkspaceRelationship } from '../../../entities/task-workspace-link.entity';
+import type { TaskWorkspaceType } from '../../../entities/task-workspace.entity';
 
 export class TaskWorkspaceLinkInputDto {
   @IsIn(TASK_WORKSPACE_ENTITY_KINDS)
