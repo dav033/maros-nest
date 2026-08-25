@@ -48,6 +48,50 @@ export class UpdateTaskWorkspaceDto {
   description?: Record<string, unknown> | null;
 }
 
+export class AddTaskWorkspaceLinksDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => TaskWorkspaceLinkInputDto)
+  links: TaskWorkspaceLinkInputDto[];
+}
+
+export class CreateTaskWorkspaceFolderDto {
+  @IsString()
+  @MaxLength(160)
+  title: string;
+
+  @IsInt()
+  @IsOptional()
+  parentFolderId?: number;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  position?: number;
+}
+
+export class UpdateTaskWorkspaceFolderDto {
+  @IsString()
+  @MaxLength(160)
+  @IsOptional()
+  title?: string;
+
+  @IsInt()
+  @IsOptional()
+  parentFolderId?: number | null;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  position?: number;
+}
+
+export class MoveWorkspaceTaskDto {
+  @IsInt()
+  @IsOptional()
+  folderId?: number | null;
+}
+
 export class SearchTaskWorkspacesDto {
   @IsString()
   @MaxLength(160)

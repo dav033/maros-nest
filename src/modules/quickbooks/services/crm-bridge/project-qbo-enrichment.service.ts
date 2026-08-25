@@ -71,6 +71,10 @@ export class ProjectQboEnrichmentService {
         leadNumbers,
         options.realmId,
       );
+      const paymentsByProject = await this.quickbooksFinancialsService.getPaymentsByProjects(
+        leadNumbers,
+        options.realmId,
+      );
       const financialMap = new Map(
         financials.map((financial) => [financial.projectNumber, financial]),
       );
@@ -85,6 +89,14 @@ export class ProjectQboEnrichmentService {
           dto,
           leadNumber,
           financialMap.get(leadNumber) ?? null,
+          paymentsByProject.get(leadNumber)?.map((payment) => ({
+            id: payment.entityId || undefined,
+            date: payment.txnDate || undefined,
+            amount: payment.totalAmount,
+            method: payment.account?.name || undefined,
+            reference: payment.docNumber || undefined,
+            linkedInvoice: payment.linkedTxn.find((linked) => linked.txnType.toLowerCase() === 'invoice')?.txnId,
+          })),
         );
       });
     } catch (error) {
@@ -213,6 +225,7 @@ export class ProjectQboEnrichmentService {
       ...(financial as QboProjectSummary),
       projectNumber: financial.projectNumber ?? projectNumber,
       payments: payments ?? financial.payments,
+      paymentSummary: this.paymentSummary(payments ?? financial.payments),
     };
     const invoiceStatus = this.deriveInvoiceStatus(merged);
     if (invoiceStatus !== undefined) merged.invoiceStatus = invoiceStatus;
@@ -220,6 +233,17 @@ export class ProjectQboEnrichmentService {
     dto.financial = merged;
     dto.invoiceStatus = invoiceStatus;
     dto.qbo = merged;
+    dto.paymentSummary = merged.paymentSummary;
+  }
+
+  private paymentSummary(payments?: QboPaymentSummary[]): { count: number; totalAmount: number; lastPaymentDate: string | null; hasDetails: boolean } {
+    const rows = payments ?? [];
+    return {
+      count: rows.length,
+      totalAmount: rows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0),
+      lastPaymentDate: rows.map((row) => row.date).filter((date): date is string => !!date).sort().at(-1) ?? null,
+      hasDetails: true,
+    };
   }
 
   private attachFullProfile(

@@ -152,7 +152,7 @@ export class AnalyticsController {
   getTopClients(@Query() query: TopClientsQueryDto) {
     const limit = query.limit ?? 5;
     const by = query.by ?? 'revenue';
-    return this.financialService.getTopClients(limit, by, query.leadType);
+    return this.financialService.getTopClients(limit, by, query.leadType, { from: query.from, to: query.to });
   }
 
   @Get('outstanding-balances')

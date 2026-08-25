@@ -66,6 +66,15 @@ export class TaskMapper {
       status: entity.status,
       priority: entity.priority,
       position: entity.position,
+      workspaceId: entity.workspaceId ?? null,
+      folderId: entity.folderId ?? null,
+      workspacePosition: entity.workspacePosition ?? 0,
+      workspace: entity.workspace
+        ? { id: entity.workspace.id, title: entity.workspace.title, archivedAt: entity.workspace.archivedAt?.toISOString() ?? null }
+        : null,
+      folder: entity.folder
+        ? { id: entity.folder.id, title: entity.folder.title, parentFolderId: entity.folder.parentFolderId ?? null }
+        : null,
       assignee: entity.assignee ? this.userRef(entity.assignee) : null,
       reporter: entity.reporter ? this.userRef(entity.reporter) : null,
       entityKind: entity.entityKind ?? null,
@@ -121,6 +130,16 @@ export class TaskMapper {
       description: entity.description ?? {},
       createdBy: entity.createdBy ? this.userRef(entity.createdBy) : null,
       attachments: entity.attachments ?? [],
+      managedFiles: (entity.managedFiles ?? [])
+        .filter((file) => !file.deletedAt)
+        .map((file) => ({
+          id: file.id,
+          fileName: file.fileName,
+          mimeType: file.mimeType,
+          sizeBytes: Number(file.sizeBytes),
+          position: Number(file.position),
+          status: file.status,
+        })),
       subtasks: children.map((child) => this.toSummaryDto(child, undefined, entityRefsByKey)),
       activity: activity.map((row) => this.toActivityDto(row)),
       parties: parties.map((party) => ({

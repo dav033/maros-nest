@@ -7,7 +7,7 @@ import type { ScheduleQueryDto } from '../dto/schedule-query.dto';
 import { leadNumberSqlFilter } from '../../../../common/utils/lead-type.utils';
 
 /** Relations every read needs: who's involved, the label set, and the parent (if a subtask). */
-const TASK_RELATIONS = ['assignee', 'reporter', 'createdBy', 'labels', 'parent'];
+const TASK_RELATIONS = ['assignee', 'reporter', 'createdBy', 'labels', 'parent', 'workspace', 'folder', 'managedFiles'];
 
 /**
  * The board's `done` column window — see findForBoard. Open work (backlog/todo/
@@ -62,7 +62,9 @@ export class TasksRepository {
       .leftJoinAndSelect('task.reporter', 'reporter')
       .leftJoinAndSelect('task.createdBy', 'createdBy')
       .leftJoinAndSelect('task.labels', 'labels')
-      .leftJoinAndSelect('task.parent', 'parent');
+      .leftJoinAndSelect('task.parent', 'parent')
+      .leftJoinAndSelect('task.workspace', 'workspace')
+      .leftJoinAndSelect('task.folder', 'folder');
   }
 
   async findByIdActive(id: number): Promise<Task | null> {
@@ -86,6 +88,25 @@ export class TasksRepository {
 
     if (!filters.includeSubtasks) {
       qb.andWhere('task.parent_id IS NULL');
+    }
+    if (filters.workspaceId !== undefined) {
+      qb.andWhere('task.workspace_id = :workspaceId', { workspaceId: filters.workspaceId });
+    }
+    if (filters.folderId !== undefined) {
+      if (filters.includeDescendants) {
+        qb.andWhere(`(
+          task.folder_id = :folderId OR task.folder_id IN (
+            WITH RECURSIVE descendants AS (
+              SELECT id FROM task_workspace_folders WHERE id = :folderId
+              UNION ALL
+              SELECT child.id FROM task_workspace_folders child
+              JOIN descendants parent ON child.parent_folder_id = parent.id
+            ) SELECT id FROM descendants
+          )
+        )`, { folderId: filters.folderId });
+      } else {
+        qb.andWhere('task.folder_id = :folderId', { folderId: filters.folderId });
+      }
     }
     if (filters.status?.length) {
       qb.andWhere('task.status IN (:...status)', { status: filters.status });

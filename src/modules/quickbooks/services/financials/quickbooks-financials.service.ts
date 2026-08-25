@@ -105,6 +105,13 @@ export class QuickbooksFinancialsService {
     return this.projectsService.getPaymentsByProject(projectNumber, realmId);
   }
 
+  async getPaymentsByProjects(
+    projectNumbers: string[],
+    realmId?: string,
+  ): Promise<Map<string, QboCashInTransaction[]>> {
+    return this.projectsService.getPaymentsByProjects(projectNumbers, realmId);
+  }
+
   async getUnbilledWork(
     projectNumber: string,
     realmId?: string,

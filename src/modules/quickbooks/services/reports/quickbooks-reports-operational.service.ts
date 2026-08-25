@@ -17,6 +17,7 @@ import {
   RevenueByMonthPoint,
   RevenueByPeriodResult,
 } from './quickbooks-reports.types';
+import type { DateRange } from '../../../analytics/utils/analytics-date-range.util';
 
 @Injectable()
 export class QuickbooksReportsOperationalService {
@@ -334,19 +335,18 @@ export class QuickbooksReportsOperationalService {
   async getTopClientsByRevenue(
     limit: number = 10,
     realmId?: string,
+    range?: DateRange,
   ): Promise<ClientRevenueItem[]> {
     const rid = await this.contextService.resolveRealmId(realmId);
-    const [jobIndex, invoicesResp] = await Promise.all([
+    const escapedRange = range ? ` WHERE TxnDate >= '${this.apiService.escapeQboString(range.from)}' AND TxnDate <= '${this.apiService.escapeQboString(range.to)}'` : '';
+    const [jobIndex, invoices] = await Promise.all([
       this.contextService.buildJobIndex(rid),
-      this.apiService.query(
-        rid,
-        `SELECT * FROM Invoice STARTPOSITION 1 MAXRESULTS 1000`,
-      ) as Promise<QboInvoiceResponse>,
+      this.apiService.queryAll(rid, 'Invoice', { where: escapedRange.replace(/^ WHERE /, '') || undefined, orderBy: 'TxnDate ASC' }) as Promise<Record<string, unknown>[]>,
     ]);
 
     const byJob: Record<string, { totalInvoiced: number; outstanding: number; count: number }> = {};
-    for (const invoice of invoicesResp?.QueryResponse?.Invoice ?? []) {
-      const jobId = this.contextService.refId(invoice.CustomerRef);
+    for (const invoice of invoices) {
+      const jobId = this.contextService.refId(invoice.CustomerRef as any);
       if (!jobId) continue;
       if (!byJob[jobId]) byJob[jobId] = { totalInvoiced: 0, outstanding: 0, count: 0 };
       byJob[jobId].totalInvoiced += Number(invoice.TotalAmt) || 0;
@@ -432,4 +432,3 @@ export class QuickbooksReportsOperationalService {
     return true;
   }
 }
-

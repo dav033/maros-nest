@@ -16,6 +16,7 @@ import {
   RevenueByPeriodResult,
   OutstandingBalanceItem,
 } from './quickbooks-reports.types';
+import type { DateRange } from '../../../analytics/utils/analytics-date-range.util';
 
 export {
   splitDateRange,
@@ -110,8 +111,9 @@ export class QuickbooksReportsService {
   async getTopClientsByRevenue(
     limit: number = 10,
     realmId?: string,
+    range?: DateRange,
   ): Promise<ClientRevenueItem[]> {
-    return this.operationalService.getTopClientsByRevenue(limit, realmId);
+    return this.operationalService.getTopClientsByRevenue(limit, realmId, range);
   }
 
   async getProfitAndLoss(params: ReportParams): Promise<ParsedReport> {
@@ -158,4 +160,3 @@ export class QuickbooksReportsService {
     return this.bundleService.getProjectReportBundle(params);
   }
 }
-

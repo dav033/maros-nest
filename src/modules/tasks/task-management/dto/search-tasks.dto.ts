@@ -117,4 +117,21 @@ export class SearchTasksDto {
   @IsIn(Object.values(LeadType))
   @IsOptional()
   leadType?: LeadType;
+
+  @ApiPropertyOptional({ description: 'Filter tasks in one workspace' })
+  @Type(() => Number)
+  @IsInt()
+  @IsOptional()
+  workspaceId?: number;
+
+  @ApiPropertyOptional({ description: 'Filter tasks in one folder' })
+  @Type(() => Number)
+  @IsInt()
+  @IsOptional()
+  folderId?: number;
+
+  @ApiPropertyOptional({ description: 'Include descendants when folderId is provided' })
+  @IsBoolean()
+  @IsOptional()
+  includeDescendants?: boolean;
 }

@@ -34,3 +34,17 @@ SELECT 'legacy_attachment_rows' AS check_name, count(*) AS value
 FROM tasks
 WHERE jsonb_typeof(attachments) = 'array' AND jsonb_array_length(attachments) > 0;
 
+SELECT 'legacy_attachment_file_count_mismatch' AS check_name, count(*) AS value
+FROM (
+  SELECT t.id
+  FROM tasks t
+  LEFT JOIN task_files f ON f.task_id = t.id AND f.deleted_at IS NULL
+  WHERE t.deleted_at IS NULL
+    AND jsonb_typeof(t.attachments) = 'array'
+  GROUP BY t.id, t.attachments
+  HAVING jsonb_array_length(t.attachments) <> count(f.id)
+) mismatches;
+
+SELECT 'tasks_with_missing_workspace' AS check_name, count(*) AS value
+FROM tasks
+WHERE deleted_at IS NULL AND workspace_id IS NULL;

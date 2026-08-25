@@ -13,6 +13,13 @@ export interface QboPaymentSummary {
   linkedInvoice?: string;
 }
 
+export interface QboProjectPaymentSummary {
+  count: number;
+  totalAmount: number;
+  lastPaymentDate: string | null;
+  hasDetails: boolean;
+}
+
 export interface QboEnrichmentError {
   code: 'qbo_connection_required' | 'qbo_query_failed';
   message: string;
@@ -22,6 +29,7 @@ export interface QboProjectSummary
   extends Omit<ProjectFinancials, 'projectNumber'> {
   projectNumber: string;
   payments?: QboPaymentSummary[];
+  paymentSummary?: QboProjectPaymentSummary;
   invoiceStatus?: InvoiceStatus;
 }
 

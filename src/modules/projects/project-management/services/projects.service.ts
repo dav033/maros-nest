@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { AuthenticatedUser } from '../../../../common/auth/authenticated-user';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Not, Repository } from 'typeorm';
 import { Project } from '../../../../entities/project.entity';
@@ -20,6 +21,8 @@ import { ProjectQboEnrichmentService } from '../../../quickbooks/services/crm-br
 import { QuickbooksFinancialsService } from '../../../quickbooks/services/financials/quickbooks-financials.service';
 import { S3Service } from '../../../s3/services/s3.service';
 import { MailService } from '../../../mail/services/mail.service';
+import { TaskWorkspaceAssignmentService } from '../../../task-workspaces/services/task-workspace-assignment.service';
+import { Optional } from '@nestjs/common';
 
 @Injectable()
 export class ProjectsService extends BaseService<any, number, Project> {
@@ -37,6 +40,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
     private readonly s3Service: S3Service,
     private readonly mailService: MailService,
     private readonly dataSource: DataSource,
+    @Optional() private readonly taskWorkspaceAssignment?: TaskWorkspaceAssignmentService,
   ) {
     super(projectRepo, projectMapper);
   }
@@ -98,6 +102,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
     });
 
     await this.sendWonNotificationEmail(result.lead, result.savedProject.id);
+    await this.taskWorkspaceAssignment?.ensureCanonicalLead(result.lead.id);
 
     return this.projectMapper.toDto(result.savedProject);
   }
@@ -198,20 +203,49 @@ export class ProjectsService extends BaseService<any, number, Project> {
     return value.trim();
   }
 
-  async findAll(): Promise<any[]> {
+  async findAll(user?: AuthenticatedUser): Promise<any[]> {
     const startTime = Date.now();
 
     const entities = await this.projectRepo.find({
-      relations: ['lead', 'lead.contact', 'lead.projectType'],
+      relations: ['lead', 'lead.contact', 'lead.contact.company', 'lead.projectType'],
     });
 
     const dtos = entities.map((entity) => this.projectMapper.toDto(entity));
-    await this.qboEnrichment.enrichProjectsSummary(dtos);
+    const canReadFinance = !user || user.permissions.includes('finance:read');
+    if (canReadFinance) await this.qboEnrichment.enrichProjectsSummary(dtos);
 
     const duration = Date.now() - startTime;
     this.logger.log(`Projects findAll completed in ${duration}ms`);
 
     return dtos;
+  }
+
+  async getProjectPayments(id: number): Promise<any> {
+    const entity = await this.projectRepo.findOne({ where: { id }, relations: ['lead'] });
+    if (!entity) throw new ResourceNotFoundException(`Project not found with id: ${id}`);
+    const projectNumber = entity.lead?.leadNumber ?? null;
+    if (!projectNumber) return { projectId: id, projectNumber: null, totalAmount: 0, count: 0, source: 'quickbooks', fetchedAt: new Date().toISOString(), items: [] };
+    const payments = await this.qboFinancials.getPaymentsByProject(projectNumber);
+    return {
+      projectId: id,
+      projectNumber,
+      totalAmount: payments.reduce((sum, payment) => sum + (Number(payment.totalAmount) || 0), 0),
+      count: payments.length,
+      source: 'quickbooks',
+      fetchedAt: new Date().toISOString(),
+      items: payments.map((payment) => ({
+        id: payment.entityId,
+        date: payment.txnDate || null,
+        amount: payment.totalAmount,
+        method: payment.account?.name ?? null,
+        reference: payment.docNumber || null,
+        linkedInvoices: payment.linkedTxn.filter((linked) => linked.txnType.toLowerCase() === 'invoice').map((linked) => ({ id: linked.txnId, documentNumber: null, amount: null })),
+        unappliedAmount: payment.openBalance ?? 0,
+        memo: payment.memo || null,
+        attachmentCount: payment.attachments.length,
+        warnings: payment.warnings.map((warning) => warning.message),
+      })),
+    };
   }
 
   /** A small, local-only list used by selectors that must not wait on QuickBooks. */
@@ -381,6 +415,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
     }
     const leadId = project.lead?.id;
     await this.projectRepo.delete(id);
+    await this.taskWorkspaceAssignment?.removeEntityLinks('project', id);
     this.logger.log(`Project ${id} deleted`);
 
     if (leadId) {
@@ -410,6 +445,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
     }
 
     await this.projectRepo.delete(id);
+    await this.taskWorkspaceAssignment?.removeEntityLinks('project', id);
     this.logger.log(`Project ${id} deleted as part of revert-to-lead`);
 
     lead.status = LeadStatus.FOLLOW_UP;

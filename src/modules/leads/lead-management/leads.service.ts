@@ -28,6 +28,7 @@ import { TaskTemplatesService } from '../../tasks/task-management/services/task-
 import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
 import { toTaskActor } from '../../tasks/task-management/services/task-actor';
 import { Optional } from '@nestjs/common';
+import { TaskWorkspaceAssignmentService } from '../../task-workspaces/services/task-workspace-assignment.service';
 
 @Injectable()
 export class LeadsService {
@@ -49,6 +50,7 @@ export class LeadsService {
     private readonly qboEnrichment: ProjectQboEnrichmentService,
     private readonly mailService: MailService,
     @Optional() private readonly taskTemplatesService?: TaskTemplatesService,
+    @Optional() private readonly taskWorkspaceAssignment?: TaskWorkspaceAssignmentService,
   ) {}
 
   async getAllLeads(options: { includeQbo?: boolean } = {}): Promise<any[]> {
@@ -230,7 +232,7 @@ export class LeadsService {
     // Transacción: el contacto y el lead se guardan atómicamente. Si la
     // creación del lead falla, el contacto se revierte automáticamente, sin
     // dejar registros huérfanos en la BD.
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const savedContact = await this.contactsService.create(
         contactDto,
         manager,
@@ -252,6 +254,8 @@ export class LeadsService {
         manager,
       );
     });
+    await this.provisionLeadWorkspace(result.id);
+    return result;
   }
 
   async createLeadWithExistingContact(
@@ -265,7 +269,9 @@ export class LeadsService {
     if (!contactEntity) {
       throw new ContactExceptions.ContactNotFoundException(contactId);
     }
-    return this.persistLead(leadDto, contactEntity, leadTypeForGeneration);
+    const result = await this.persistLead(leadDto, contactEntity, leadTypeForGeneration);
+    await this.provisionLeadWorkspace(result.id);
+    return result;
   }
 
   private async persistLead(
@@ -432,6 +438,10 @@ export class LeadsService {
       );
     }
 
+    if (result.entity.id && (result.conversion.converted || result.entity.status === LeadStatus.WON)) {
+      await this.provisionLeadWorkspace(result.entity.id);
+    }
+
     const dto = this.leadMapper.toDto(result.entity);
     return { ...dto, conversion: result.conversion };
   }
@@ -556,6 +566,8 @@ export class LeadsService {
     const contactId = entity.contact?.id;
     const companyId = entity.contact?.company?.id;
 
+    await this.taskWorkspaceAssignment?.archiveCanonicalLead(id);
+
     try {
       await this.dataSource.query(
         'UPDATE projects SET lead_id = NULL WHERE lead_id = $1',
@@ -643,5 +655,10 @@ export class LeadsService {
     if (error instanceof Error) return error;
     if (error === undefined || error === null) return undefined;
     return new Error(String(error));
+  }
+
+  private async provisionLeadWorkspace(leadId: number): Promise<void> {
+    if (!this.taskWorkspaceAssignment) return;
+    await this.taskWorkspaceAssignment.ensureCanonicalLead(leadId);
   }
 }

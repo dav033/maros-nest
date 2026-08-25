@@ -168,18 +168,43 @@ export class QuickbooksFinancialsProjectsService {
     projectNumber: string,
     realmId?: string,
   ): Promise<QboCashInTransaction[]> {
+    const grouped = await this.getPaymentsByProjects([projectNumber], realmId);
+    return grouped.get(projectNumber) ?? [];
+  }
+
+  async getPaymentsByProjects(
+    projectNumbers: string[],
+    realmId?: string,
+  ): Promise<Map<string, QboCashInTransaction[]>> {
     const effectiveRealmId = realmId ?? (await this.contextService.resolveDefaultRealmId());
-    const { jobId } = await this.contextService.resolveSingleJob(projectNumber, effectiveRealmId);
-    if (!jobId) return [];
+    const cleaned = deduplicateProjectNumbers(projectNumbers);
+    const result = new Map<string, QboCashInTransaction[]>(cleaned.map((number) => [number, []]));
+    if (!cleaned.length) return result;
+    const ctx = await this.contextService.resolveJobs(effectiveRealmId, cleaned);
+    if (!ctx.jobIds.length) return result;
 
-    const resp = (await this.apiService.query(
-      effectiveRealmId,
-      `SELECT * FROM Payment WHERE CustomerRef IN ('${jobId}') STARTPOSITION 1 MAXRESULTS 1000`,
-    )) as { QueryResponse?: { Payment?: unknown[] } };
+    const customerRefs = ctx.jobIds.map((id) => `'${String(id).replace(/'/g, "\\'")}'`).join(',');
+    const byJobId = new Map(Object.entries(ctx.jobMap).map(([projectNumber, jobId]) => [jobId, projectNumber]));
+    const rows: Record<string, unknown>[] = [];
+    let start = 1;
+    while (true) {
+      const resp = (await this.apiService.query(
+        effectiveRealmId,
+        `SELECT * FROM Payment WHERE CustomerRef IN (${customerRefs}) STARTPOSITION ${start} MAXRESULTS 1000`,
+      )) as { QueryResponse?: { Payment?: unknown[] } };
+      const page = resp?.QueryResponse?.Payment ?? [];
+      rows.push(...page.filter((row): row is Record<string, unknown> => !!row && typeof row === 'object'));
+      if (page.length < 1000) break;
+      start += page.length;
+    }
 
-    return (resp?.QueryResponse?.Payment ?? []).map((payment) =>
-      this.normalizer.normalizePayment(payment as Record<string, unknown>),
-    );
+    for (const row of rows) {
+      const payment = this.normalizer.normalizePayment(row);
+      const customerId = payment.customer?.value;
+      const projectNumber = customerId ? byJobId.get(customerId) : payment.projectRefs.map((ref) => byJobId.get(ref.value)).find(Boolean);
+      if (projectNumber) result.get(projectNumber)!.push(payment);
+    }
+    return result;
   }
 
   async getUnbilledWork(projectNumber: string, realmId?: string): Promise<UnbilledWorkResult> {

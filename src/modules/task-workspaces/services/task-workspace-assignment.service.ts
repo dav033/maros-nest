@@ -6,7 +6,6 @@ import { Company } from '../../../entities/company.entity';
 import { Lead } from '../../../entities/lead.entity';
 import { Project } from '../../../entities/project.entity';
 import { TaskWorkspace } from '../../../entities/task-workspace.entity';
-import { TaskWorkspaceFolder } from '../../../entities/task-workspace-folder.entity';
 import { TaskWorkspaceLink } from '../../../entities/task-workspace-link.entity';
 import { TaskWorkspaceEntityKind } from '../../../entities/task-workspace-link.entity';
 import { TaskWorkspacesRepository } from '../repositories/task-workspaces.repository';
@@ -27,6 +26,7 @@ export class TaskWorkspaceAssignmentService {
     @InjectRepository(Project) private readonly projects: Repository<Project>,
     @InjectRepository(Contact) private readonly contacts: Repository<Contact>,
     @InjectRepository(Company) private readonly companies: Repository<Company>,
+    @InjectRepository(TaskWorkspaceLink) private readonly links: Repository<TaskWorkspaceLink>,
   ) {}
 
   async ensureGeneral(actorId?: number | null): Promise<TaskWorkspace> {
@@ -61,6 +61,17 @@ export class TaskWorkspaceAssignmentService {
     link.createdById = actorId ?? null;
     if (!(await this.repository.findLink(saved.id, 'lead', leadId))) await this.repository.addLink(link);
     return saved;
+  }
+
+  async archiveCanonicalLead(leadId: number): Promise<void> {
+    const workspace = await this.repository.findByCanonicalLead(leadId);
+    if (!workspace || workspace.systemKey === 'general' || workspace.archivedAt) return;
+    workspace.archivedAt = new Date();
+    await this.repository.create(workspace);
+  }
+
+  async removeEntityLinks(entityKind: TaskWorkspaceEntityKind, entityId: number): Promise<void> {
+    await this.links.delete({ entityKind, entityId });
   }
 
   async resolveForTask(input: TaskWorkspaceAssignmentInput): Promise<{ workspaceId: number; folderId: number | null }> {

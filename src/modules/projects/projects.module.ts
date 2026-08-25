@@ -17,6 +17,7 @@ import { ProjectTypeMapper } from './project-types/mappers/project-type.mapper';
 import { QuickbooksModule } from '../quickbooks/quickbooks.module';
 import { S3Module } from '../s3/s3.module';
 import { MailModule } from '../mail/mail.module';
+import { TaskWorkspacesModule } from '../task-workspaces/task-workspaces.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { MailModule } from '../mail/mail.module';
     QuickbooksModule,
     S3Module,
     MailModule,
+    TaskWorkspacesModule,
   ],
   controllers: [ProjectsController, ProjectTypeController, ProjectTypesController],
   providers: [

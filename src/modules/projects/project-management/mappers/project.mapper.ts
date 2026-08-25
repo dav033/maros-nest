@@ -23,6 +23,17 @@ export class ProjectMapper {
   }
 
   toDto(entity: Project): any {
+    const contact = entity.lead?.contact;
+    const company = contact?.company;
+    const client = contact?.client
+      ? { id: contact.id, type: 'contact', name: contact.name || `Contact #${contact.id}`, isClient: !!contact.client, isCustomer: !!contact.customer }
+      : company?.client
+        ? { id: company.id, type: 'company', name: company.name, isClient: !!company.client, isCustomer: !!company.customer }
+        : contact?.customer
+          ? { id: contact.id, type: 'contact', name: contact.name || `Contact #${contact.id}`, isClient: !!contact.client, isCustomer: !!contact.customer }
+          : company?.customer
+            ? { id: company.id, type: 'company', name: company.name, isClient: !!company.client, isCustomer: !!company.customer }
+            : null;
     const dto: any = {
       id: entity.id,
       projectProgressStatus: entity.projectProgressStatus,
@@ -30,6 +41,8 @@ export class ProjectMapper {
       notes: entity.notes || [],
       attachments: entity.attachments ?? [],
       leadId: entity.lead ? entity.lead.id : undefined,
+      client,
+      paymentSummary: null,
     };
 
     // Include lead information if loaded
@@ -47,6 +60,8 @@ export class ProjectMapper {
           name: entity.lead.contact.name,
           phone: entity.lead.contact.phone,
           email: entity.lead.contact.email,
+          isCustomer: entity.lead.contact.customer,
+          isClient: entity.lead.contact.client,
         } : null,
         projectType: entity.lead.projectType ? {
           id: entity.lead.projectType.id,

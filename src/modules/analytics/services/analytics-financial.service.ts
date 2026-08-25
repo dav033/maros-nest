@@ -165,6 +165,7 @@ export class AnalyticsFinancialService {
     limit: number,
     by: 'revenue' | 'volume',
     leadType?: LeadType,
+    range?: OptionalDateRange,
   ): Promise<TopClientDto[]> {
     const safeLimit = Math.max(1, Math.min(20, Math.trunc(limit || 5)));
     const fetchSize = leadType
@@ -172,7 +173,8 @@ export class AnalyticsFinancialService {
       : by === 'volume'
         ? Math.max(10, safeLimit * 4)
         : safeLimit;
-    const base = await this.quickbooksReportsService.getTopClientsByRevenue(fetchSize);
+    const normalizedRange = normalizeOptionalDateRange(range);
+    const base = await this.quickbooksReportsService.getTopClientsByRevenue(fetchSize, undefined, normalizedRange);
 
     const filtered = leadType
       ? base.filter((item) => matchesLeadType(item.projectNumber, leadType))
