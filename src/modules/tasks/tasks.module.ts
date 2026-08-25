@@ -14,6 +14,11 @@ import { TaskTemplate } from '../../entities/task-template.entity';
 import { TaskTemplateItem } from '../../entities/task-template-item.entity';
 import { TaskDependency } from '../../entities/task-dependency.entity';
 import { TaskSavedView } from '../../entities/task-saved-view.entity';
+import { TaskWorkspace } from '../../entities/task-workspace.entity';
+import { TaskWorkspaceLink } from '../../entities/task-workspace-link.entity';
+import { TaskWorkspaceFolder } from '../../entities/task-workspace-folder.entity';
+import { TaskFile } from '../../entities/task-file.entity';
+import { TaskWorkspacesModule } from '../task-workspaces/task-workspaces.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { MailModule } from '../mail/mail.module';
 import { TasksRepository } from './task-management/repositories/tasks.repository';
@@ -41,6 +46,7 @@ import { TaskSavedViewsController } from './task-management/task-saved-views.con
 
 @Module({
   imports: [
+    TaskWorkspacesModule,
     TypeOrmModule.forFeature([
       Task,
       TaskLabel,
@@ -56,6 +62,10 @@ import { TaskSavedViewsController } from './task-management/task-saved-views.con
       TaskTemplateItem,
       TaskDependency,
       TaskSavedView,
+      TaskWorkspace,
+      TaskWorkspaceLink,
+      TaskWorkspaceFolder,
+      TaskFile,
     ]),
     NotificationsModule,
     MailModule,

@@ -13,6 +13,9 @@ import {
 } from 'typeorm';
 import { User } from './user.entity';
 import { TaskLabel } from './task-label.entity';
+import { TaskWorkspace } from './task-workspace.entity';
+import { TaskWorkspaceFolder } from './task-workspace-folder.entity';
+import { TaskFile } from './task-file.entity';
 
 /**
  * Closed catalog reflecting how work actually breaks down on a construction job —
@@ -56,6 +59,7 @@ export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 @Index('idx_tasks_entity', ['entityKind', 'entityId'])
 @Index('idx_tasks_due', ['dueDate'])
 @Index('idx_tasks_parent', ['parent'])
+@Index('idx_tasks_workspace_scope', ['workspaceId', 'folderId', 'workspacePosition', 'id'])
 export class Task {
   @PrimaryGeneratedColumn()
   id: number;
@@ -95,6 +99,24 @@ export class Task {
   /** Order within its status column. Sparse; see task-position.util.ts. */
   @Column({ type: 'int', default: 0 })
   position: number;
+
+  /** Workspace ordering is independent from the status-board ordering above. */
+  @Column({ name: 'workspace_id', type: 'int', nullable: true })
+  workspaceId?: number | null;
+
+  @ManyToOne(() => TaskWorkspace, { nullable: true, onDelete: 'RESTRICT', persistence: false })
+  @JoinColumn({ name: 'workspace_id' })
+  workspace?: TaskWorkspace | null;
+
+  @Column({ name: 'folder_id', type: 'int', nullable: true })
+  folderId?: number | null;
+
+  @ManyToOne(() => TaskWorkspaceFolder, { nullable: true, onDelete: 'SET NULL', persistence: false })
+  @JoinColumn({ name: 'folder_id' })
+  folder?: TaskWorkspaceFolder | null;
+
+  @Column({ name: 'workspace_position', type: 'numeric', precision: 20, scale: 6, default: 1000 })
+  workspacePosition: number;
 
   // Nullable rather than optional: unassigning has to write a real NULL, and TypeORM
   // reads `undefined` on save as "leave this column alone". `type` has to be explicit —
@@ -170,6 +192,9 @@ export class Task {
 
   @Column({ type: 'jsonb', default: [] })
   attachments: string[];
+
+  @OneToMany(() => TaskFile, (file) => file.task)
+  managedFiles: TaskFile[];
 
   @Column({ name: 'created_by_id', type: 'int', nullable: true })
   createdById?: number | null;
