@@ -83,6 +83,35 @@ export class S3Service {
     };
   }
 
+  /** Used only by managed-file records after the server has generated the key. */
+  async getPresignedPutUrlForManagedKey(input: {
+    key: string;
+    contentType: string;
+    sizeBytes: number;
+    expiresInSeconds?: number;
+  }): Promise<PresignedPutUrlResult> {
+    this.ensureConfigured();
+    this.ensureContentType(input.contentType);
+    if (!Number.isFinite(input.sizeBytes) || input.sizeBytes < 0 || input.sizeBytes > this.config.maxUploadBytes) {
+      throw new ValidationException(`sizeBytes exceeds max allowed (${this.config.maxUploadBytes} bytes)`, 'sizeBytes');
+    }
+    const key = this.normalizeExistingKey(input.key);
+    const expiresInSeconds = this.resolveExpiration(input.expiresInSeconds);
+    const command = new PutObjectCommand({ Bucket: this.config.bucketName, Key: key, ContentType: input.contentType });
+    const url = await this.exec<string>(
+      () => getSignedUrl(this.s3Client, command, { expiresIn: expiresInSeconds }),
+      `PRESIGN MANAGED PUT ${key}`,
+    );
+    return {
+      bucket: this.config.bucketName,
+      key,
+      url,
+      expiresInSeconds,
+      maxUploadBytes: this.config.maxUploadBytes,
+      contentType: input.contentType,
+    };
+  }
+
   async uploadFileFromServer(
     input: UploadFileFromServerInput,
   ): Promise<UploadFileFromServerResult> {
