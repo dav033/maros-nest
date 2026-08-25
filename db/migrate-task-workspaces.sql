@@ -45,21 +45,35 @@ WHERE c.company_id IS NOT NULL
 ON CONFLICT (workspace_id, entity_kind, entity_id) DO NOTHING;
 
 UPDATE tasks t
-SET workspace_id = COALESCE(lead_workspace.id, project_workspace.id, linked_workspace.id, general_workspace.id),
+SET workspace_id = COALESCE(
+      (
+        SELECT w.id
+        FROM task_workspaces w
+        WHERE t.entity_kind = 'lead'
+          AND w.canonical_job_lead_id = t.entity_id
+        LIMIT 1
+      ),
+      (
+        SELECT w.id
+        FROM projects p
+        JOIN task_workspaces w ON w.canonical_job_lead_id = p.lead_id
+        WHERE t.entity_kind = 'project'
+          AND p.id = t.entity_id
+        LIMIT 1
+      ),
+      (
+        SELECT l.workspace_id
+        FROM task_workspace_links l
+        WHERE l.entity_kind = t.entity_kind
+          AND l.entity_id = t.entity_id
+        ORDER BY l.workspace_id
+        LIMIT 1
+      ),
+      general_workspace.id
+    ),
     folder_id = NULL,
     workspace_position = COALESCE(t.workspace_position, 1000)
 FROM task_workspaces general_workspace
-LEFT JOIN task_workspaces lead_workspace
-  ON t.entity_kind = 'lead'
- AND lead_workspace.canonical_job_lead_id = t.entity_id
-LEFT JOIN projects task_project
-  ON t.entity_kind = 'project' AND task_project.id = t.entity_id
-LEFT JOIN task_workspaces project_workspace
-  ON project_workspace.canonical_job_lead_id = task_project.lead_id
-LEFT JOIN task_workspace_links linked_link
-  ON linked_link.entity_kind = t.entity_kind AND linked_link.entity_id = t.entity_id
-LEFT JOIN task_workspaces linked_workspace
-  ON linked_workspace.id = linked_link.workspace_id
 WHERE general_workspace.system_key = 'general'
   AND t.workspace_id IS NULL;
 

@@ -5,6 +5,7 @@ import { Contact } from '../../entities/contact.entity';
 import { Lead } from '../../entities/lead.entity';
 import { Project } from '../../entities/project.entity';
 import { Task } from '../../entities/task.entity';
+import { TaskFile } from '../../entities/task-file.entity';
 import { TaskWorkspace } from '../../entities/task-workspace.entity';
 import { TaskWorkspaceFolder } from '../../entities/task-workspace-folder.entity';
 import { TaskWorkspaceLink } from '../../entities/task-workspace-link.entity';
@@ -20,7 +21,7 @@ import { TaskWorkspaceLinkResolverService } from './services/task-workspace-link
 import { TaskWorkspaceFoldersRepository } from './repositories/task-workspace-folders.repository';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([TaskWorkspace, TaskWorkspaceFolder, TaskWorkspaceLink, Task, Lead, Project, Contact, Company])],
+  imports: [TypeOrmModule.forFeature([TaskWorkspace, TaskWorkspaceFolder, TaskWorkspaceLink, TaskFile, Task, Lead, Project, Contact, Company])],
   controllers: [TaskWorkspaceOptionsController, TaskWorkspacesController, TaskWorkspaceFoldersController],
   providers: [TaskWorkspacesRepository, TaskWorkspaceFoldersRepository, TaskWorkspaceAssignmentService, TaskWorkspaceMapper, TaskWorkspacesService, TaskWorkspaceFoldersService, TaskWorkspaceLinkResolverService],
   exports: [TaskWorkspacesRepository, TaskWorkspaceAssignmentService, TaskWorkspaceMapper, TypeOrmModule],
