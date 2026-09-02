@@ -430,6 +430,7 @@ export class QuickbooksApiService {
     const token = await this.authService.getValidAccessToken(realmId);
     return axios.create({
       baseURL: this.getBaseUrl(realmId),
+      timeout: 15_000,
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json',

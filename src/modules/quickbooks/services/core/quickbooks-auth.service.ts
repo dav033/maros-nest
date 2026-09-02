@@ -83,7 +83,7 @@ export class QuickbooksAuthService {
     const { data } = await axios.post<QboTokenResponse>(
       TOKEN_ENDPOINT,
       body.toString(),
-      { headers: this.tokenRequestHeaders() },
+      { headers: this.tokenRequestHeaders(), timeout: 15_000 },
     );
 
     await this.persistTokens(realmId, data);
@@ -136,7 +136,7 @@ export class QuickbooksAuthService {
       const { data } = await axios.post<QboTokenResponse>(
         TOKEN_ENDPOINT,
         body.toString(),
-        { headers: this.tokenRequestHeaders() },
+        { headers: this.tokenRequestHeaders(), timeout: 15_000 },
       );
 
       await this.persistTokens(realmId, data);

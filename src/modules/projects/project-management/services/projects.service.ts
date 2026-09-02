@@ -212,12 +212,37 @@ export class ProjectsService extends BaseService<any, number, Project> {
 
     const dtos = entities.map((entity) => this.projectMapper.toDto(entity));
     const canReadFinance = !user || user.permissions.includes('finance:read');
-    if (canReadFinance) await this.qboEnrichment.enrichProjectsSummary(dtos);
+    if (canReadFinance) {
+      await this.withTimeout(
+        this.qboEnrichment.enrichProjectsSummary(dtos),
+        20_000,
+        'QBO enrichment for projects findAll',
+      );
+    }
 
     const duration = Date.now() - startTime;
     this.logger.log(`Projects findAll completed in ${duration}ms`);
 
     return dtos;
+  }
+
+  /**
+   * Bounds a slow/unresponsive QuickBooks call so the HTTP response never
+   * hangs on it. QBO enrichment already degrades gracefully per-project
+   * (dto.qbo = { data: null, error }) when it fails, so on timeout we just
+   * stop waiting and let those DTOs go out without financial data instead of
+   * blocking the whole request for minutes.
+   */
+  private withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T | void> {
+    return Promise.race([
+      promise,
+      new Promise<void>((resolve) => {
+        setTimeout(() => {
+          this.logger.warn(`${label} exceeded ${ms}ms — returning without waiting further`);
+          resolve();
+        }, ms);
+      }),
+    ]);
   }
 
   async getProjectPayments(id: number): Promise<any> {
