@@ -50,6 +50,20 @@ export class ProjectsController {
     return this.projectsService.findProjectsForPicker();
   }
 
+  @Get('financials')
+  @RequirePermissions('finance:read')
+  @ApiOperation({
+    summary: 'Get QuickBooks financial summary for all projects, keyed by project id',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Companion to GET /projects/all — fetch this separately and merge client-side so a slow/degraded QuickBooks never blocks the project list',
+  })
+  async getProjectsFinancials(@CurrentUser() user: AuthenticatedUser) {
+    return this.projectsService.findAllFinancials(user);
+  }
+
   @Get('by-lead-number')
   @ApiOperation({ summary: 'Get project by lead number' })
   @ApiQuery({ name: 'leadNumber', type: String, required: true })

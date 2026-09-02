@@ -203,7 +203,13 @@ export class ProjectsService extends BaseService<any, number, Project> {
     return value.trim();
   }
 
-  async findAll(user?: AuthenticatedUser): Promise<any[]> {
+  /**
+   * Returns projects with lead/contact data only — no QuickBooks call, so
+   * this always answers in DB-query time. Financial data is fetched
+   * separately via `findAllFinancials` and merged in by the client once it
+   * arrives, so a slow/degraded QuickBooks never blocks the project list.
+   */
+  async findAll(_user?: AuthenticatedUser): Promise<any[]> {
     const startTime = Date.now();
 
     const entities = await this.projectRepo.find({
@@ -211,19 +217,49 @@ export class ProjectsService extends BaseService<any, number, Project> {
     });
 
     const dtos = entities.map((entity) => this.projectMapper.toDto(entity));
-    const canReadFinance = !user || user.permissions.includes('finance:read');
-    if (canReadFinance) {
-      await this.withTimeout(
-        this.qboEnrichment.enrichProjectsSummary(dtos),
-        20_000,
-        'QBO enrichment for projects findAll',
-      );
-    }
 
     const duration = Date.now() - startTime;
     this.logger.log(`Projects findAll completed in ${duration}ms`);
 
     return dtos;
+  }
+
+  /**
+   * Companion to `findAll`: fetches the QuickBooks financial summary for
+   * every project, keyed by project id, so the client can merge it into an
+   * already-rendered project list. Bounded to 25s — if QBO is degraded, the
+   * caller gets back whatever resolved plus `qbo: { data: null, error }` for
+   * the rest (same graceful-degradation shape enrichProjectsSummary already
+   * produces), instead of hanging.
+   */
+  async findAllFinancials(
+    user?: AuthenticatedUser,
+  ): Promise<Array<{ id: number; financial: unknown; qbo: unknown }>> {
+    const canReadFinance = !user || user.permissions.includes('finance:read');
+    if (!canReadFinance) return [];
+
+    const startTime = Date.now();
+
+    const entities = await this.projectRepo.find({ relations: ['lead'] });
+    const shims = entities.map((entity) => ({
+      id: entity.id,
+      lead: { leadNumber: entity.lead?.leadNumber ?? undefined },
+    }));
+
+    await this.withTimeout(
+      this.qboEnrichment.enrichProjectsSummary(shims),
+      25_000,
+      'QBO enrichment for projects findAllFinancials',
+    );
+
+    const duration = Date.now() - startTime;
+    this.logger.log(`Projects findAllFinancials completed in ${duration}ms`);
+
+    return shims.map((shim) => ({
+      id: shim.id,
+      financial: (shim as any).financial ?? null,
+      qbo: (shim as any).qbo ?? null,
+    }));
   }
 
   /**
