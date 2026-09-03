@@ -253,13 +253,19 @@ export class ProjectsService extends BaseService<any, number, Project> {
     );
 
     const duration = Date.now() - startTime;
-    this.logger.log(`Projects findAllFinancials completed in ${duration}ms`);
-
-    return shims.map((shim) => ({
+    const entries = shims.map((shim) => ({
       id: shim.id,
       financial: (shim as any).financial ?? null,
       qbo: (shim as any).qbo ?? null,
     }));
+    const enrichedCount = entries.filter((entry) => entry.financial !== null).length;
+    const errorCount = entries.filter((entry) => Boolean((entry.qbo as any)?.error)).length;
+    const scheduleCount = entries.filter((entry) => Boolean((entry.financial as any)?.paymentSchedule)).length;
+    this.logger.log(
+      `Projects findAllFinancials completed in ${duration}ms (${enrichedCount}/${entries.length} enriched, ${scheduleCount} schedules, ${errorCount} errors)`,
+    );
+
+    return entries;
   }
 
   /**
