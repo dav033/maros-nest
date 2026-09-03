@@ -9,7 +9,7 @@ import { QuickbooksApiService } from '../core/quickbooks-api.service';
 import { mapQboCustomersToProjects } from './quickbooks-financials.helpers';
 import { JobContext, QboCustomer } from './quickbooks-financials.types';
 
-const JOBS_CACHE_TTL_MS = 5 * 60 * 1000;
+const JOBS_CACHE_TTL_MS = 60 * 1000;
 
 @Injectable()
 export class QuickbooksFinancialsContextService {

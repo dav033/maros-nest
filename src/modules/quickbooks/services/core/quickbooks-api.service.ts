@@ -34,7 +34,9 @@ export interface QueryAllOptions {
 export class QuickbooksApiService {
   private readonly logger = new Logger(QuickbooksApiService.name);
   private readonly environment: string;
-  private readonly readCacheTtlMs = 90_000;
+  // Keep external QuickBooks edits visible quickly while still coalescing
+  // duplicate reads from the projects table and the payment dialog.
+  private readonly readCacheTtlMs = 30_000;
   private readonly readCacheMaxEntries = 1_500;
   private readonly queryAllCacheTtlMs = 60_000;
   private readonly readCache = new Map<
