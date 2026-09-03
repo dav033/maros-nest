@@ -236,6 +236,13 @@ describe('UsersService.effectivePermissions', () => {
     expect(permissions.length).toBeGreaterThan(5);
   });
 
+  it('resolves the member system role with finance read access', () => {
+    const service = makeService({}, {});
+    const memberRole = makeRole({ name: SYSTEM_ROLE_MEMBER, isSystem: true, permissions: [] });
+
+    expect(service.effectivePermissions(memberRole)).toContain('finance:read');
+  });
+
   it('resolves a custom role from its stored rows only', () => {
     const service = makeService({}, {});
     const role = makeRole({

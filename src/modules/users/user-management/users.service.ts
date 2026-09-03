@@ -13,6 +13,7 @@ import {
   isPermission,
   Permission,
   PERMISSIONS,
+  MEMBER_PERMISSIONS,
   SYSTEM_ROLE_ADMIN,
   SYSTEM_ROLE_MEMBER,
 } from '../../../common/auth/permissions';
@@ -249,6 +250,9 @@ export class UsersService {
     if (!role) return [];
     if (role.isSystem && role.name === SYSTEM_ROLE_ADMIN) {
       return [...PERMISSIONS];
+    }
+    if (role.isSystem && role.name === SYSTEM_ROLE_MEMBER) {
+      return [...MEMBER_PERMISSIONS];
     }
     return (role.permissions ?? [])
       .map((entry) => entry.permission)

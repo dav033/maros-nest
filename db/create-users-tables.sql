@@ -52,7 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_users_role ON users (role_id);
 INSERT INTO roles (name, description, is_system)
 VALUES
   ('admin',  'Full access, including finances and user administration', true),
-  ('member', 'Day-to-day CRM access. No financial data, no user administration', true)
+  ('member', 'Day-to-day CRM access, including financial data. No user administration', true)
 ON CONFLICT (name) DO NOTHING;
 
 INSERT INTO role_permissions (role_id, permission)
@@ -60,6 +60,7 @@ SELECT r.id, p.permission
 FROM roles r
 CROSS JOIN (VALUES
   ('dashboard:read'),
+  ('finance:read'),
   ('leads:read'), ('leads:write'), ('leads:delete'),
   ('projects:read'), ('projects:write'), ('projects:delete'),
   ('contacts:read'), ('contacts:write'), ('contacts:delete'),

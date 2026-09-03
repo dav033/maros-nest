@@ -105,8 +105,7 @@ export const PERMISSION_GROUPS: ReadonlyArray<{
 export const SYSTEM_ROLE_ADMIN = 'admin';
 export const SYSTEM_ROLE_MEMBER = 'member';
 
-/** Everything except finance and user administration. */
+/** Everything except user administration. */
 export const MEMBER_PERMISSIONS: readonly Permission[] = PERMISSIONS.filter(
-  (permission) =>
-    !permission.startsWith('finance:') && !permission.startsWith('users:'),
+  (permission) => !permission.startsWith('users:'),
 );
