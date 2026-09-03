@@ -261,8 +261,12 @@ export class ProjectsService extends BaseService<any, number, Project> {
     const enrichedCount = entries.filter((entry) => entry.financial !== null).length;
     const errorCount = entries.filter((entry) => Boolean((entry.qbo as any)?.error)).length;
     const scheduleCount = entries.filter((entry) => Boolean((entry.financial as any)?.paymentSchedule)).length;
+    const enrichedProjectNumbers = entries
+      .filter((entry) => entry.financial !== null)
+      .map((entry) => (entry.financial as any)?.projectNumber)
+      .filter((value): value is string => typeof value === 'string');
     this.logger.log(
-      `Projects findAllFinancials completed in ${duration}ms (${enrichedCount}/${entries.length} enriched, ${scheduleCount} schedules, ${errorCount} errors)`,
+      `Projects findAllFinancials completed in ${duration}ms (${enrichedCount}/${entries.length} enriched, ${scheduleCount} schedules, ${errorCount} errors; sample ${enrichedProjectNumbers.slice(0, 8).join(', ')})`,
     );
 
     return entries;
