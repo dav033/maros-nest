@@ -11,6 +11,7 @@ import {
   ProjectFinancials,
   ProjectFullProfile,
   ProjectProfitAndLoss,
+  PaymentSchedule,
   UnbilledWorkResult,
 } from './quickbooks-financials.types';
 import { QuickbooksFinancialsContextService } from './quickbooks-financials-context.service';
@@ -18,6 +19,7 @@ import { QuickbooksFinancialsProfileService } from './quickbooks-financials-prof
 import { QuickbooksFinancialsProfitLossService } from './quickbooks-financials-profit-loss.service';
 import { QuickbooksFinancialsProjectsService } from './quickbooks-financials-projects.service';
 import { QuickbooksEstimateWriteService } from './quickbooks-estimate-write.service';
+import { QuickbooksPaymentScheduleService } from './quickbooks-payment-schedule.service';
 
 export type {
   AttachmentItem,
@@ -27,6 +29,7 @@ export type {
   ProjectFinancials,
   ProjectFullProfile,
   ProjectProfitAndLoss,
+  PaymentSchedule,
   UnbilledWorkResult,
 } from './quickbooks-financials.types';
 
@@ -38,6 +41,7 @@ export class QuickbooksFinancialsService {
     private readonly profitLossService: QuickbooksFinancialsProfitLossService,
     private readonly profileService: QuickbooksFinancialsProfileService,
     private readonly estimateWriteService: QuickbooksEstimateWriteService,
+    private readonly paymentScheduleService: QuickbooksPaymentScheduleService,
   ) {}
 
   async getProjectFinancials(
@@ -45,6 +49,13 @@ export class QuickbooksFinancialsService {
     realmId?: string,
   ): Promise<ProjectFinancials[]> {
     return this.projectsService.getProjectFinancials(projectNumbers, realmId);
+  }
+
+  async getPaymentSchedulesByProjects(
+    projectNumbers: string[],
+    realmId?: string,
+  ): Promise<Map<string, PaymentSchedule | null>> {
+    return this.paymentScheduleService.getByProjects(projectNumbers, realmId);
   }
 
   async getProjectDetail(

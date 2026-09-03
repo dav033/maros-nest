@@ -38,14 +38,22 @@ export class ProjectQboEnrichmentService {
     }
 
     try {
-      const [financials, payments] = await Promise.all([
+      const [financials, payments, schedules] = await Promise.all([
         this.quickbooksFinancialsService.getProjectFinancials(
           [leadNumber],
           options.realmId,
         ),
         this.fetchPayments(leadNumber, options.realmId),
+        this.quickbooksFinancialsService.getPaymentSchedulesByProjects(
+          [leadNumber],
+          options.realmId,
+        ),
       ]);
-      this.attachSummary(dto, leadNumber, financials[0] ?? null, payments);
+      const financial = financials[0] ?? null;
+      if (financial && schedules.get(leadNumber)) {
+        financial.paymentSchedule = schedules.get(leadNumber) ?? undefined;
+      }
+      this.attachSummary(dto, leadNumber, financial, payments);
     } catch (error) {
       this.attachError(dto, error, `project summary for ${leadNumber}`);
     }
@@ -67,16 +75,16 @@ export class ProjectQboEnrichmentService {
     }
 
     try {
-      const financials = await this.quickbooksFinancialsService.getProjectFinancials(
-        leadNumbers,
-        options.realmId,
-      );
-      const paymentsByProject = await this.quickbooksFinancialsService.getPaymentsByProjects(
-        leadNumbers,
-        options.realmId,
-      );
+      const [financials, paymentsByProject, schedulesByProject] = await Promise.all([
+        this.quickbooksFinancialsService.getProjectFinancials(leadNumbers, options.realmId),
+        this.quickbooksFinancialsService.getPaymentsByProjects(leadNumbers, options.realmId),
+        this.quickbooksFinancialsService.getPaymentSchedulesByProjects(leadNumbers, options.realmId),
+      ]);
       const financialMap = new Map(
-        financials.map((financial) => [financial.projectNumber, financial]),
+        financials.map((financial) => {
+          const schedule = schedulesByProject.get(financial.projectNumber);
+          return [financial.projectNumber, schedule ? { ...financial, paymentSchedule: schedule } : financial];
+        }),
       );
 
       dtos.forEach((dto) => {

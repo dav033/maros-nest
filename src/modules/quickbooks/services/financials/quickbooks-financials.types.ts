@@ -16,6 +16,25 @@ export interface ProjectFinancials {
   outstandingAmount: number;
   paidPercentage: number;
   estimateVsInvoicedDelta: number;
+  paymentSchedule?: PaymentSchedule;
+}
+
+export interface PaymentScheduleItem {
+  label: string;
+  percentage: number;
+  amount: number | null;
+}
+
+export interface PaymentSchedule {
+  items: PaymentScheduleItem[];
+  totalPercentage: number | null;
+  totalAmount: number | null;
+  source: {
+    attachmentId: string;
+    fileName: string;
+    entityType: 'Estimate' | 'Invoice';
+    entityId: string;
+  };
 }
 
 export type InvoiceSummary = QboCashInTransaction;
