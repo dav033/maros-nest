@@ -36,9 +36,9 @@ export class QuickbooksApiService {
   private readonly environment: string;
   // Keep external QuickBooks edits visible quickly while still coalescing
   // duplicate reads from the projects table and the payment dialog.
-  private readonly readCacheTtlMs = 30_000;
+  private readonly readCacheTtlMs = 5_000;
   private readonly readCacheMaxEntries = 1_500;
-  private readonly queryAllCacheTtlMs = 60_000;
+  private readonly queryAllCacheTtlMs = 10_000;
   private readonly readCache = new Map<
     string,
     {
