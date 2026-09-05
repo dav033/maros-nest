@@ -19,21 +19,37 @@ export interface ProjectFinancials {
   paymentSchedule?: PaymentSchedule;
 }
 
+/**
+ * Sobre qué monto se calcula un porcentaje del cronograma. Los proposals de
+ * Maros mezclan ambos: hitos como "35% of Remaining Balance" se calculan sobre
+ * el saldo tras descontar los pagos fijos, no sobre el total del estimate.
+ */
+export type PaymentScheduleBasis = 'total' | 'remaining-balance';
+
 export interface PaymentScheduleItem {
   label: string;
-  percentage: number;
+  /** null en hitos de monto fijo ("Fixed Amount $5,000.00"). */
+  percentage: number | null;
   amount: number | null;
+  basis?: PaymentScheduleBasis;
 }
 
 export interface PaymentSchedule {
   items: PaymentScheduleItem[];
   totalPercentage: number | null;
   totalAmount: number | null;
+  /** Base predominante de los porcentajes; 'remaining-balance' si algún hito lo es. */
+  basis: PaymentScheduleBasis;
   source: {
     attachmentId: string;
     fileName: string;
-    entityType: 'Estimate' | 'Invoice';
-    entityId: string;
+    entityType: 'Estimate' | 'Invoice' | 'Customer' | null;
+    entityId: string | null;
+    /**
+     * Cómo se ligó el PDF al proyecto. 'file-name' es una heurística: hay
+     * proposals mal nombrados en QBO, así que la UI debe advertirlo.
+     */
+    matchedBy: 'estimate' | 'invoice' | 'customer' | 'file-name';
   };
 }
 
