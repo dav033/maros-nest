@@ -51,6 +51,21 @@ const PROJECT_NUMBER_IN_NAME = /\b(\d{3}[A-Za-z]?-\d{4,6})\b/g;
 const MAX_CANDIDATES_PER_PROJECT = 3;
 const SCHEDULES_CACHE_TTL_MS = 30 * 60 * 1000;
 
+/**
+ * Encabezados bajo los que aparece la tabla. Maros emite proposals en inglés y
+ * en español — "7. Cronograma de Pagos" y "6. FORMA DE PAGO" traen la misma
+ * tabla que sus equivalentes en inglés, y sin estos anclajes se descartaban
+ * documentos perfectamente parseables.
+ */
+const SCHEDULE_ANCHORS = [
+  /payment\s+schedule/i,
+  /payment\s+milestone/i,
+  /cronograma\s+de\s+pagos?/i,
+  /forma\s+de\s+pago/i,
+  /plan\s+de\s+pagos?/i,
+  /programa\s+de\s+pagos?/i,
+];
+
 @Injectable()
 export class QuickbooksPaymentScheduleService {
   private readonly logger = new Logger(QuickbooksPaymentScheduleService.name);
@@ -174,9 +189,7 @@ export class QuickbooksPaymentScheduleService {
   private scheduleBodies(lines: string[]): string[][] {
     const anchors: number[] = [];
     lines.forEach((line, index) => {
-      if (/payment\s+schedule/i.test(line) || /payment\s+milestone/i.test(line)) {
-        anchors.push(index);
-      }
+      if (SCHEDULE_ANCHORS.some((anchor) => anchor.test(line))) anchors.push(index);
     });
     return anchors.map((anchor) => lines.slice(anchor + 1, anchor + 45));
   }

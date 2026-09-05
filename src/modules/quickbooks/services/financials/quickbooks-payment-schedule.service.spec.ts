@@ -73,6 +73,48 @@ describe('QuickbooksPaymentScheduleService', () => {
     expect(parsed!.basis).toBe('remaining-balance');
   });
 
+  // Maros emite la mitad de sus proposals en español; la tabla es idéntica.
+  it('extracts a schedule under a Spanish heading', () => {
+    const parsed = service.parseText(
+      [
+        '7. Cronograma de Pagos',
+        'Descripcion % Monto',
+        'Firma de Contrato / Movilización (Pagado) 25.51% $20,150',
+        'Demolición Completada / Compra Ceramica 25.86% $22,150',
+        'Rough Plomería y Electricidad Completado 18.09% $15,500',
+        'Instalación de Cerámica, Baños y Acabados 19.26% $16,500',
+        'Finalización y Punch List 13.25% $11,350',
+        'Total Contrato 100% $85,660',
+      ].join('\n'),
+    );
+
+    expect(parsed).not.toBeNull();
+    expect(parsed!.items).toHaveLength(5);
+    expect(parsed!.items[0]).toEqual({
+      label: 'Firma de Contrato / Movilización (Pagado)',
+      percentage: 25.51,
+      amount: 20150,
+    });
+    expect(parsed!.totalPercentage).toBe(100);
+    expect(parsed!.totalAmount).toBe(85660);
+  });
+
+  it('extracts an English table sitting under a Spanish heading', () => {
+    const parsed = service.parseText(
+      [
+        '6. FORMA DE PAGO',
+        'Payment Stage Percentage Amount',
+        'Contract Signing 15% $22,470.00',
+        'Permit Approval 20% $29,960.00',
+        'Final Delivery 5% $7,490.00',
+        'Total 100% $149,800.00',
+      ].join('\n'),
+    );
+
+    expect(parsed!.items).toHaveLength(3);
+    expect(parsed!.totalAmount).toBe(149800);
+  });
+
   it('ignores a lone milestone that is not a schedule', () => {
     expect(
       service.parseText('Payment Schedule\nPayment No. 1 – Deposit\nFixed Amount $1,000.00'),
