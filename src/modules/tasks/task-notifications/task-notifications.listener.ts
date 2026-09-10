@@ -8,7 +8,12 @@ import { TaskWatchersRepository } from '../task-management/repositories/task-wat
 import { TasksRepository } from '../task-management/repositories/tasks.repository';
 import type { NotificationKind } from '../../../entities/notification.entity';
 import type { NotificationChannel } from '../../../entities/user.entity';
-import { renderTaskAssignedEmail, renderTaskSignalEmail } from './task-email-templates';
+import type { Task } from '../../../entities/task.entity';
+import {
+  renderTaskAssignedEmail,
+  renderTaskSignalEmail,
+  taskEmailDetails,
+} from './task-email-templates';
 
 interface TaskAssignedEvent {
   taskId: number;
@@ -92,7 +97,7 @@ export class TaskNotificationsListener {
           payload: { taskId: event.taskId, taskTitle: task.title },
         });
       }
-      if (channel === 'email') await this.sendAssignmentEmail(event.assigneeUserId, task.id, task.title);
+      if (channel === 'email') await this.sendAssignmentEmail(event.assigneeUserId, task);
     });
   }
 
@@ -101,7 +106,7 @@ export class TaskNotificationsListener {
     await this.safely('task.status_changed', async () => {
       const task = await this.tasksRepository.findByIdActive(event.taskId);
       if (!task) return;
-      await this.notifyWatchers(event.taskId, event.actorId, 'task_status_changed', {
+      await this.notifyWatchers(task, event.actorId, 'task_status_changed', {
         taskId: event.taskId,
         taskTitle: task.title,
         from: event.from,
@@ -115,7 +120,7 @@ export class TaskNotificationsListener {
     await this.safely('task.blocked', async () => {
       const task = await this.tasksRepository.findByIdActive(event.taskId);
       if (!task) return;
-      await this.notifyWatchers(event.taskId, event.actorId, 'task_blocked', {
+      await this.notifyWatchers(task, event.actorId, 'task_blocked', {
         taskId: event.taskId,
         taskTitle: task.title,
         reason: event.reason,
@@ -128,7 +133,7 @@ export class TaskNotificationsListener {
     await this.safely('task.commented', async () => {
       const task = await this.tasksRepository.findByIdActive(event.taskId);
       if (!task) return;
-      await this.notifyWatchers(event.taskId, event.actorId, 'task_commented', {
+      await this.notifyWatchers(task, event.actorId, 'task_commented', {
         taskId: event.taskId,
         taskTitle: task.title,
         commentId: event.commentId,
@@ -160,8 +165,7 @@ export class TaskNotificationsListener {
         await this.sendTaskSignalEmail(
           event.mentionedUserId,
           'mention',
-          task.id,
-          task.title,
+          task,
           `You were mentioned in comment ${event.commentId}.`,
         );
       }
@@ -175,17 +179,19 @@ export class TaskNotificationsListener {
    */
   private async sendAssignmentEmail(
     assigneeUserId: number,
-    taskId: number,
-    taskTitle: string,
+    task: Task,
   ): Promise<void> {
     try {
       const assignee = await this.usersRepository.findById(assigneeUserId);
       if (!assignee?.email) return;
 
-      const frontendUrl =
-        this.configService.get<string>('FRONTEND_URL') ?? 'https://marosconstruction.com';
-      const taskUrl = `${frontendUrl}/tasks?task=${taskId}`;
-      const { subject, text, html } = renderTaskAssignedEmail({ taskTitle, taskId, taskUrl });
+      const taskUrl = this.taskUrl(task.id);
+      const { subject, text, html } = renderTaskAssignedEmail({
+        taskTitle: task.title,
+        taskId: task.id,
+        taskUrl,
+        taskDetails: taskEmailDetails(task),
+      });
 
       const result = await this.mailService.sendMail({
         to: [assignee.email],
@@ -205,18 +211,18 @@ export class TaskNotificationsListener {
 
   /** Every watcher except whoever caused the event — nobody needs telling about their own action. */
   private async notifyWatchers(
-    taskId: number,
+    task: Task,
     actorId: number,
     kind: NotificationKind,
     payload: Record<string, unknown>,
   ): Promise<void> {
-    const watcherIds = await this.taskWatchersRepository.findUserIdsForTask(taskId);
+    const watcherIds = await this.taskWatchersRepository.findUserIdsForTask(task.id);
     const recipients = watcherIds.filter((id) => id !== actorId);
     const preferenceKey = kind === 'task_blocked' ? 'blocked' : kind === 'task_commented' ? 'comment' : 'status';
     await Promise.all(recipients.map(async (userId) => {
       const channel = await this.channelFor(userId, preferenceKey);
       if (channel === 'in_app') {
-        await this.notificationsService.create({ userId, kind, actorId, entityKind: 'task', entityId: taskId, payload });
+        await this.notificationsService.create({ userId, kind, actorId, entityKind: 'task', entityId: task.id, payload });
       } else if (channel === 'email') {
         const signalKind = preferenceKey === 'blocked' ? 'blocked' : preferenceKey === 'comment' ? 'comment' : 'status';
         const details = preferenceKey === 'blocked'
@@ -224,7 +230,7 @@ export class TaskNotificationsListener {
           : preferenceKey === 'status'
             ? `Status: ${String(payload.from ?? 'unknown')} → ${String(payload.to ?? 'unknown')}.`
             : 'A new comment was added to the task.';
-        await this.sendTaskSignalEmail(userId, signalKind, taskId, String(payload.taskTitle ?? 'Task'), details);
+        await this.sendTaskSignalEmail(userId, signalKind, task, details);
       }
     }));
   }
@@ -232,25 +238,30 @@ export class TaskNotificationsListener {
   private async sendTaskSignalEmail(
     userId: number,
     kind: 'status' | 'blocked' | 'comment' | 'mention',
-    taskId: number,
-    taskTitle: string,
+    task: Task,
     details?: string,
   ): Promise<void> {
     try {
       const recipient = await this.usersRepository.findById(userId);
       if (!recipient?.email) return;
-      const frontendUrl = this.configService.get<string>('FRONTEND_URL') ?? 'https://marosconstruction.com';
       const email = renderTaskSignalEmail({
         kind,
-        taskTitle,
-        taskId,
-        taskUrl: `${frontendUrl}/tasks?task=${taskId}`,
+        taskTitle: task.title,
+        taskId: task.id,
+        taskUrl: this.taskUrl(task.id),
         details,
+        taskDetails: taskEmailDetails(task),
       });
       await this.mailService.sendMail({ to: [recipient.email], ...email });
     } catch (error) {
       this.logger.warn(`Task signal email failed: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  private taskUrl(taskId: number): string {
+    const appUrl =
+      this.configService.get<string>('TASK_APP_URL')?.trim() || 'https://app.marosconstruction.com';
+    return `${appUrl.replace(/\/+$/, '')}/tasks?task=${taskId}`;
   }
 
   private async channelFor(

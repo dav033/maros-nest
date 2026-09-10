@@ -108,14 +108,14 @@ export class TaskDigestCron {
     }
     if (!entry.user.email) return false;
     try {
-      const frontendUrl =
-        this.configService.get<string>('FRONTEND_URL') ?? 'https://marosconstruction.com';
+      const appUrl =
+        this.configService.get<string>('TASK_APP_URL')?.trim() || 'https://app.marosconstruction.com';
       const total = entry.overdue.length + entry.dueToday.length + entry.blocked.length;
       const { subject, text, html } = renderTaskDigestEmail({
         overdue: entry.overdue.map((t) => ({ id: t.id, title: t.title })),
         dueToday: entry.dueToday.map((t) => ({ id: t.id, title: t.title })),
         blocked: entry.blocked.map((t) => ({ id: t.id, title: t.title })),
-        tasksUrl: `${frontendUrl}/tasks/mine`,
+        tasksUrl: `${appUrl.replace(/\/+$/, '')}/tasks/mine`,
       });
 
       const result = await this.mailService.sendMail({

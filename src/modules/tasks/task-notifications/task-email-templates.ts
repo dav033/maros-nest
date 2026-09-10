@@ -30,6 +30,71 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
+export type TaskEmailDetails = {
+  description?: string | null;
+  attachments?: Array<{ fileName: string }>;
+};
+
+type TaskEmailSource = {
+  descriptionText?: string | null;
+  attachments?: string[] | null;
+  managedFiles?: Array<{ fileName: string; status: string }> | null;
+};
+
+export function taskEmailDetails(task: TaskEmailSource): TaskEmailDetails {
+  const managedAttachments = (task.managedFiles ?? [])
+    .filter((file) => file.status === 'ready' && file.fileName.trim())
+    .map((file) => ({ fileName: file.fileName.trim() }));
+  const legacyAttachments = (task.attachments ?? [])
+    .map((key) => key.replace(/\\/g, '/').split('/').pop()?.trim() ?? '')
+    .filter(Boolean)
+    .map((fileName) => ({ fileName }));
+
+  const attachments = [...managedAttachments, ...legacyAttachments].filter(
+    (file, index, all) => all.findIndex((candidate) => candidate.fileName === file.fileName) === index,
+  );
+
+  return {
+    description: task.descriptionText?.trim() || null,
+    attachments,
+  };
+}
+
+function taskDetailsText(details: TaskEmailDetails | undefined, taskUrl: string): string {
+  if (!details) return '';
+  const description = details.description?.trim();
+  const attachments = details.attachments ?? [];
+  const sections: string[] = [];
+  if (description) sections.push(`Description:\n${description}`);
+  if (attachments.length > 0) {
+    sections.push(`Attachments:\n${attachments.map((file) => `- ${file.fileName}`).join('\n')}\nOpen the task to view or download them: ${taskUrl}`);
+  }
+  return sections.join('\n\n');
+}
+
+function taskDetailsHtml(details: TaskEmailDetails | undefined, taskUrl: string): string {
+  if (!details) return '';
+  const description = details.description?.trim();
+  const attachments = details.attachments ?? [];
+  const sections: string[] = [];
+  if (description) {
+    sections.push(`
+      <p style="margin:18px 0 6px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:${COLOR.muted};">Description</p>
+      <p style="margin:0;font-size:14px;line-height:1.55;color:${COLOR.text};white-space:pre-wrap;">${escapeHtml(description)}</p>
+    `);
+  }
+  if (attachments.length > 0) {
+    sections.push(`
+      <p style="margin:18px 0 6px;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:${COLOR.muted};">Attachments Â· ${attachments.length}</p>
+      <ul style="margin:0;padding-left:18px;color:${COLOR.text};font-size:14px;line-height:1.55;">
+        ${attachments.map((file) => `<li><a href="${escapeHtml(taskUrl)}" style="color:${COLOR.accent};">${escapeHtml(file.fileName)}</a></li>`).join('')}
+      </ul>
+      <p style="margin:6px 0 0;font-size:12px;color:${COLOR.muted};">Open the task to view or download the files.</p>
+    `);
+  }
+  return sections.join('');
+}
+
 function layout(opts: {
   preheader: string;
   heading: string;
@@ -57,7 +122,7 @@ function layout(opts: {
                 <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:24px;">
                   <tr>
                     <td style="border-radius:8px;background-color:${COLOR.accent};">
-                      <a href="${opts.ctaUrl}" style="display:inline-block;padding:11px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;">${escapeHtml(opts.ctaLabel)}</a>
+                <a href="${escapeHtml(opts.ctaUrl)}" style="display:inline-block;padding:11px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;">${escapeHtml(opts.ctaLabel)}</a>
                     </td>
                   </tr>
                 </table>
@@ -80,15 +145,20 @@ export function renderTaskAssignedEmail(opts: {
   taskTitle: string;
   taskId: number;
   taskUrl: string;
+  taskDetails?: TaskEmailDetails;
 }): { subject: string; text: string; html: string } {
   const subject = `Task assigned: ${opts.taskTitle}`;
-  const text = `You were assigned "${opts.taskTitle}" (T-${opts.taskId}).\n\n${opts.taskUrl}`;
+  const detailsText = taskDetailsText(opts.taskDetails, opts.taskUrl);
+  const text = [`You were assigned "${opts.taskTitle}" (T-${opts.taskId}).`, detailsText, opts.taskUrl]
+    .filter(Boolean)
+    .join('\n\n');
   const html = layout({
     preheader: `You were assigned "${opts.taskTitle}"`,
     heading: 'You have a new task',
     bodyHtml: `
       <p style="margin:0 0 6px;font-size:13px;color:${COLOR.muted};">T-${opts.taskId}</p>
       <p style="margin:0;font-size:16px;line-height:1.4;color:${COLOR.text};font-weight:500;">${escapeHtml(opts.taskTitle)}</p>
+      ${taskDetailsHtml(opts.taskDetails, opts.taskUrl)}
     `,
     ctaLabel: 'View task',
     ctaUrl: opts.taskUrl,
@@ -102,6 +172,7 @@ export function renderTaskSignalEmail(opts: {
   taskId: number;
   taskUrl: string;
   details?: string;
+  taskDetails?: TaskEmailDetails;
 }): { subject: string; text: string; html: string } {
   const labels = {
     status: { subject: 'Task status changed', heading: 'A task status changed' },
@@ -111,9 +182,12 @@ export function renderTaskSignalEmail(opts: {
   } as const;
   const label = labels[opts.kind];
   const details = opts.details ? `\n\n${opts.details}` : '';
+  const taskDetailsTextValue = taskDetailsText(opts.taskDetails, opts.taskUrl);
   return {
     subject: `${label.subject}: ${opts.taskTitle}`,
-    text: `${opts.taskTitle} (T-${opts.taskId})${details}\n\n${opts.taskUrl}`,
+    text: [`${opts.taskTitle} (T-${opts.taskId})${details}`, taskDetailsTextValue, opts.taskUrl]
+      .filter(Boolean)
+      .join('\n\n'),
     html: layout({
       preheader: `${label.subject}: ${opts.taskTitle}`,
       heading: label.heading,
@@ -121,6 +195,7 @@ export function renderTaskSignalEmail(opts: {
         <p style="margin:0 0 6px;font-size:13px;color:${COLOR.muted};">T-${opts.taskId}</p>
         <p style="margin:0;font-size:16px;line-height:1.4;color:${COLOR.text};font-weight:500;">${escapeHtml(opts.taskTitle)}</p>
         ${opts.details ? `<p style="margin:12px 0 0;font-size:14px;line-height:1.5;color:${COLOR.muted};">${escapeHtml(opts.details)}</p>` : ''}
+        ${taskDetailsHtml(opts.taskDetails, opts.taskUrl)}
       `,
       ctaLabel: 'View task',
       ctaUrl: opts.taskUrl,
@@ -132,13 +207,17 @@ export function renderTaskPermitReminderEmail(opts: {
   taskTitle: string;
   taskId: number;
   taskUrl: string;
+  taskDetails?: TaskEmailDetails;
 }): { subject: string; text: string; html: string } {
   const subject = `Permit task due soon: ${opts.taskTitle}`;
-  const text = `Permit task "${opts.taskTitle}" (T-${opts.taskId}) is due in three days.\n\n${opts.taskUrl}`;
+  const detailsText = taskDetailsText(opts.taskDetails, opts.taskUrl);
+  const text = [`Permit task "${opts.taskTitle}" (T-${opts.taskId}) is due in three days.`, detailsText, opts.taskUrl]
+    .filter(Boolean)
+    .join('\n\n');
   const html = layout({
     preheader: `Permit task "${opts.taskTitle}" is due in three days`,
     heading: 'Permit deadline coming up',
-    bodyHtml: `<p style="margin:0;font-size:16px;line-height:1.4;color:${COLOR.text};font-weight:500;">${escapeHtml(opts.taskTitle)}</p>`,
+    bodyHtml: `<p style="margin:0;font-size:16px;line-height:1.4;color:${COLOR.text};font-weight:500;">${escapeHtml(opts.taskTitle)}</p>${taskDetailsHtml(opts.taskDetails, opts.taskUrl)}`,
     ctaLabel: 'Open task',
     ctaUrl: opts.taskUrl,
   });

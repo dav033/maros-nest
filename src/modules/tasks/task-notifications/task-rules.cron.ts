@@ -6,7 +6,8 @@ import { TaskMapper } from '../task-management/mappers/task.mapper';
 import { UsersRepository } from '../../users/user-management/repositories/users.repository';
 import { MailService } from '../../mail/services/mail.service';
 import { ConfigService } from '@nestjs/config';
-import { renderTaskPermitReminderEmail } from './task-email-templates';
+import { renderTaskPermitReminderEmail, taskEmailDetails } from './task-email-templates';
+import type { Task } from '../../../entities/task.entity';
 
 @Injectable()
 export class TaskRulesCron {
@@ -42,22 +43,28 @@ export class TaskRulesCron {
           payload,
         });
       } else {
-        await this.sendPermitEmail(task.id, task.title, task.reporter.email);
+        await this.sendPermitEmail(task, task.reporter.email);
       }
       sent += 1;
     }
     if (sent) this.logger.log(`Task rules emitted ${sent} signal(s)`);
   }
 
-  private async sendPermitEmail(taskId: number, taskTitle: string, address?: string): Promise<void> {
+  private async sendPermitEmail(task: Task, address?: string): Promise<void> {
     if (!address) return;
-    const frontendUrl = this.configService.get<string>('FRONTEND_URL') ?? 'https://marosconstruction.com';
     const email = renderTaskPermitReminderEmail({
-      taskTitle,
-      taskId,
-      taskUrl: `${frontendUrl}/tasks?task=${taskId}`,
+      taskTitle: task.title,
+      taskId: task.id,
+      taskUrl: this.taskUrl(task.id),
+      taskDetails: taskEmailDetails(task),
     });
     await this.mailService.sendMail({ to: [address], ...email });
+  }
+
+  private taskUrl(taskId: number): string {
+    const appUrl =
+      this.configService.get<string>('TASK_APP_URL')?.trim() || 'https://app.marosconstruction.com';
+    return `${appUrl.replace(/\/+$/, '')}/tasks?task=${taskId}`;
   }
 
   private shiftDate(date: string, days: number): string {

@@ -184,7 +184,16 @@ describe('TaskNotificationsListener.onMentioned', () => {
 
 describe('TaskNotificationsListener assignment email', () => {
   it('emails the new assignee, with both a text and an HTML body', async () => {
-    const { listener, mailService, usersRepository } = makeListener();
+    const { listener, mailService, usersRepository } = makeListener({
+      tasksRepository: {
+        findByIdActive: jest.fn().mockResolvedValue(
+          task({
+            descriptionText: 'Review the permit scope.',
+            attachments: ['documents/permit-plan.pdf'],
+          }),
+        ),
+      },
+    });
 
     await listener.onAssigned({ taskId: 1, assigneeUserId: 7, actorId: 3 });
 
@@ -192,10 +201,15 @@ describe('TaskNotificationsListener assignment email', () => {
     expect(mailService.sendMail).toHaveBeenCalledWith(
       expect.objectContaining({
         to: ['crew@marosconstruction.com'],
-        text: expect.stringContaining('Task'),
+        text: expect.stringContaining('https://app.marosconstruction.com/tasks?task=1'),
         html: expect.stringContaining('<html'),
       }),
     );
+    const email = mailService.sendMail.mock.calls[0][0];
+    expect(email.text).toContain('Review the permit scope.');
+    expect(email.text).toContain('permit-plan.pdf');
+    expect(email.html).toContain('Review the permit scope.');
+    expect(email.html).toContain('permit-plan.pdf');
   });
 
   it('still emails on a self-assignment, even though the bell skips it', async () => {

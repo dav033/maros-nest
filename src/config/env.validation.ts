@@ -49,6 +49,11 @@ export class EnvironmentVariables {
   @IsOptional()
   API_PREFIX: string = 'api';
 
+  /** Frontend origin used by task notification links. */
+  @IsString()
+  @IsOptional()
+  TASK_APP_URL: string = 'https://app.marosconstruction.com';
+
   // Supabase
   @IsString()
   SUPABASE_DB_WEBHOOK_SECRET: string;
