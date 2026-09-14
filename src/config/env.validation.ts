@@ -63,6 +63,10 @@ export class EnvironmentVariables {
   @IsOptional()
   OPENAI_KEY: string;
 
+  @IsString()
+  @IsOptional()
+  OPENAI_API_KEY: string;
+
   // Trello
   @IsString()
   @IsOptional()

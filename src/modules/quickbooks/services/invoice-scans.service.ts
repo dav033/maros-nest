@@ -253,7 +253,9 @@ export class InvoiceScansService {
     contentType: string,
     fileName: string,
   ): Promise<ExtractedInvoiceData> {
-    const apiKey = this.config.get<string>('OPENAI_KEY');
+    const apiKey =
+      this.config.get<string>('OPENAI_KEY') ||
+      this.config.get<string>('OPENAI_API_KEY');
     if (!apiKey) {
       throw new ServiceUnavailableException(
         'Invoice scanning is not configured on the server.',

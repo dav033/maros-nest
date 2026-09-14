@@ -71,7 +71,12 @@ describe('InvoiceScansService', () => {
       getDefaultRealmId: jest.fn().mockResolvedValue('realm-1'),
     };
     const config = {
-      get: jest.fn().mockReturnValue('test-key'),
+      get: jest.fn((name: string) => {
+        if (name === 'OPENAI_KEY' && contentType === 'application/pdf') {
+          return undefined;
+        }
+        return 'test-key';
+      }),
     };
     jest.spyOn(axios, 'post').mockResolvedValue({
       data: {
@@ -124,6 +129,9 @@ describe('InvoiceScansService', () => {
     };
 
     expect(result.status).toBe('needs_review');
+    if (contentType === 'application/pdf') {
+      expect(config.get).toHaveBeenCalledWith('OPENAI_API_KEY');
+    }
     expect(result.extractedData).toMatchObject({
       invoiceNumber: 'INV-42',
       counterpartyName: 'Maros Customer',
