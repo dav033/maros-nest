@@ -128,6 +128,28 @@ describe('UsersService.resolveForRequest', () => {
   });
 });
 
+describe('UsersService.findExistingDevActor', () => {
+  it('returns an existing actor ID without provisioning or touching last_login', async () => {
+    const usersRepo = {
+      findById: jest.fn().mockResolvedValue(makeUser({ id: 12 })),
+      save: jest.fn(),
+      touchLastLogin: jest.fn(),
+    };
+    const service = makeService(usersRepo);
+
+    await expect(service.findExistingDevActor(12)).resolves.toBe(12);
+    expect(usersRepo.save).not.toHaveBeenCalled();
+    expect(usersRepo.touchLastLogin).not.toHaveBeenCalled();
+  });
+
+  it('returns null when the configured actor does not exist', async () => {
+    const usersRepo = { findById: jest.fn().mockResolvedValue(null) };
+    const service = makeService(usersRepo);
+
+    await expect(service.findExistingDevActor(999)).resolves.toBeNull();
+  });
+});
+
 describe('UsersService.update — safety rules', () => {
   it('throws UserNotFoundException for an unknown id', async () => {
     const usersRepo = { findById: jest.fn().mockResolvedValue(null) };

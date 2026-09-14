@@ -6,6 +6,8 @@ import { QboRef, QuickbooksNormalizerService } from '../core/quickbooks-normaliz
 import { QuickbooksVendorMatchingService } from '../vendor/quickbooks-vendor-matching.service';
 import { QuickbooksJobCostingBase } from './quickbooks-job-costing.base';
 import {
+  QboCustomerRecord,
+  QboJobCostSummary,
   QboJobCostingParams,
   QboProjectApStatusResult,
   QboProjectCashOutResult,
@@ -58,6 +60,45 @@ export class QuickbooksJobCostingService extends QuickbooksJobCostingBase {
       warnings: result.warnings,
       coverage: result.coverage,
     };
+  }
+
+  async getProjectJobCostSummaries(
+    projectNumbers: string[],
+    realmId?: string,
+  ): Promise<Map<string, QboJobCostSummary>> {
+    const projectNumbersClean = [...new Set(projectNumbers.map((value) => this.trim(value)).filter(Boolean))];
+    if (!projectNumbersClean.length) return new Map();
+
+    const effectiveRealmId = await this.resolveRealmId(realmId);
+    const projects = await this.findProjectRefsBatch(projectNumbersClean, effectiveRealmId);
+    if (![...projects.values()].some((project) => this.hasProjectIdentity(project))) {
+      return new Map();
+    }
+
+    const params = { realmId: effectiveRealmId };
+    const rawBundle = await this.fetchCostBundle(effectiveRealmId, params);
+    const billIndex = new Map<string, Record<string, unknown>>();
+    for (const bill of rawBundle.bills) {
+      const id = this.stringValue(bill['Id']);
+      if (id) billIndex.set(id, bill);
+    }
+    await this.loadLinkedBillsForPayments(effectiveRealmId, rawBundle.billPayments, billIndex, []);
+
+    const summaries = new Map<string, QboJobCostSummary>();
+    for (const projectNumber of projectNumbersClean) {
+      const project = projects.get(projectNumber);
+      if (!project || !this.hasProjectIdentity(project)) continue;
+      const descriptors = this.buildTransactionDescriptors(
+        rawBundle,
+        billIndex,
+        project,
+        true,
+        params,
+        [],
+      );
+      summaries.set(projectNumber, this.summarize(descriptors));
+    }
+    return summaries;
   }
 
   async getProjectVendorTransactions(
@@ -246,5 +287,47 @@ export class QuickbooksJobCostingService extends QuickbooksJobCostingBase {
       uniqueStrings: this.uniqueStrings.bind(this),
       trim: this.trim.bind(this),
     };
+  }
+
+  private async findProjectRefsBatch(
+    projectNumbers: string[],
+    realmId: string,
+  ): Promise<Map<string, QboResolvedProjectRef>> {
+    const jobs = this.asArray(
+      await this.apiService.queryAll(realmId, 'Customer', { where: 'Job = true' }),
+    ) as QboCustomerRecord[];
+    const missingJobs = projectNumbers.some(
+      (projectNumber) => !jobs.some((customer) => this.customerMatchesProjectNumber(customer, projectNumber)),
+    );
+    const customers = missingJobs
+      ? (this.asArray(await this.apiService.queryAll(realmId, 'Customer')) as QboCustomerRecord[])
+      : [];
+
+    const refs = new Map<string, QboResolvedProjectRef>();
+    for (const projectNumber of projectNumbers) {
+      const match =
+        jobs.find((customer) => this.customerMatchesProjectNumber(customer, projectNumber)) ??
+        customers.find((customer) => this.customerMatchesProjectNumber(customer, projectNumber));
+      if (!match) {
+        refs.set(projectNumber, {
+          found: false,
+          projectNumber,
+          refs: [{ value: '', name: projectNumber }],
+        });
+        continue;
+      }
+
+      const id = this.stringValue(match.Id);
+      const displayName = this.stringValue(match.DisplayName);
+      refs.set(projectNumber, {
+        found: true,
+        projectNumber,
+        qboCustomerId: id,
+        ...(displayName && { displayName }),
+        refs: [{ value: id, ...(displayName && { name: displayName }) }],
+        raw: match,
+      });
+    }
+    return refs;
   }
 }

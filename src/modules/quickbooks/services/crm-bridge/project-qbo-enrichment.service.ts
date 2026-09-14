@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InvoiceStatus } from '../../../../common/enums/invoice-status.enum';
 import { QuickbooksFinancialsService } from '../financials/quickbooks-financials.service';
+import { QuickbooksJobCostingService } from '../job-costing/quickbooks-job-costing.service';
+import { money } from '../core/qbo-value.utils';
 import { QboReauthorizationRequiredException } from '../../exceptions/qbo-reauthorization-required.exception';
 import {
   EnrichmentOptions,
@@ -25,6 +27,7 @@ export class ProjectQboEnrichmentService {
 
   constructor(
     private readonly quickbooksFinancialsService: QuickbooksFinancialsService,
+    private readonly quickbooksJobCostingService: QuickbooksJobCostingService,
   ) {}
 
   async enrichProjectSummary<T extends ProjectDtoLike>(
@@ -75,15 +78,31 @@ export class ProjectQboEnrichmentService {
     }
 
     try {
-      const [financials, paymentsByProject, schedulesByProject] = await Promise.all([
+      const [financials, paymentsByProject, schedulesByProject, jobCostsByProject] = await Promise.all([
         this.quickbooksFinancialsService.getProjectFinancials(leadNumbers, options.realmId),
         this.quickbooksFinancialsService.getPaymentsByProjects(leadNumbers, options.realmId),
         this.quickbooksFinancialsService.getPaymentSchedulesByProjects(leadNumbers, options.realmId),
+        options.includeJobCosts
+          ? this.quickbooksJobCostingService
+              .getProjectJobCostSummaries(leadNumbers, options.realmId)
+              .catch((error) => {
+                this.logger.warn(`Could not fetch batch project job costs: ${this.errorMessage(error)}`);
+                return undefined;
+              })
+          : Promise.resolve(undefined),
       ]);
       const financialMap = new Map(
         financials.map((financial) => {
           const schedule = schedulesByProject.get(financial.projectNumber);
-          return [financial.projectNumber, schedule ? { ...financial, paymentSchedule: schedule } : financial];
+          const jobCosts = jobCostsByProject?.get(financial.projectNumber);
+          const enriched = jobCosts
+            ? {
+                ...financial,
+                totalJobCost: jobCosts.totalJobCost,
+                grossProfit: money((Number(financial.invoicedAmount) || 0) - jobCosts.totalJobCost),
+              }
+            : financial;
+          return [financial.projectNumber, schedule ? { ...enriched, paymentSchedule: schedule } : enriched];
         }),
       );
 

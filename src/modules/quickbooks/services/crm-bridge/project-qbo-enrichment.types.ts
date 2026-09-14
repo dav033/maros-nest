@@ -28,6 +28,8 @@ export interface QboEnrichmentError {
 export interface QboProjectSummary
   extends Omit<ProjectFinancials, 'projectNumber'> {
   projectNumber: string;
+  totalJobCost?: number;
+  grossProfit?: number;
   payments?: QboPaymentSummary[];
   paymentSummary?: QboProjectPaymentSummary;
   invoiceStatus?: InvoiceStatus;
@@ -47,4 +49,5 @@ export interface QboEnrichmentBlock<
 export interface EnrichmentOptions {
   depth?: 'summary' | 'full';
   realmId?: string;
+  includeJobCosts?: boolean;
 }

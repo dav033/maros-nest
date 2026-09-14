@@ -58,6 +58,11 @@ export class EnvironmentVariables {
   @IsString()
   SUPABASE_DB_WEBHOOK_SECRET: string;
 
+  // OpenAI (invoice photo extraction)
+  @IsString()
+  @IsOptional()
+  OPENAI_KEY: string;
+
   // Trello
   @IsString()
   @IsOptional()
@@ -155,6 +160,19 @@ export class EnvironmentVariables {
   // Session auth — signs/verifies the maros_session JWT (must match maros-next's AUTH_SECRET)
   @IsString()
   AUTH_SECRET: string;
+
+  // Local-only login bypass. The secret must stay separate from AUTH_SECRET.
+  @IsString()
+  @IsOptional()
+  DEV_AUTH_BYPASS: string;
+
+  @IsString()
+  @IsOptional()
+  DEV_AUTH_SECRET: string;
+
+  @IsString()
+  @IsOptional()
+  DEV_AUTH_USER_ID?: string;
 
   /** Comma-separated emails provisioned with the admin role on first login. */
   @IsString()

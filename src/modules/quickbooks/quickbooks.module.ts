@@ -29,17 +29,22 @@ import { QuickbooksAttachmentsService } from './services/attachments/quickbooks-
 import { QuickbooksVendorMatchingService } from './services/vendor/quickbooks-vendor-matching.service';
 import { ProjectQboEnrichmentService } from './services/crm-bridge/project-qbo-enrichment.service';
 import { QuickbooksController } from './quickbooks.controller';
+import { InvoiceScan } from './entities/invoice-scan.entity';
+import { InvoiceScansController } from './invoice-scans.controller';
+import { InvoiceScansService } from './services/invoice-scans.service';
+import { S3Module } from '../s3/s3.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([QboConnection, Company, Lead]),
+    TypeOrmModule.forFeature([QboConnection, Company, Lead, InvoiceScan]),
+    S3Module,
     HttpModule,
     CacheModule.register({
       ttl: 300_000,
       max: 500,
     }),
   ],
-  controllers: [QuickbooksController],
+  controllers: [QuickbooksController, InvoiceScansController],
   providers: [
     TokenCryptoService,
     QuickbooksAuthService,
@@ -64,6 +69,7 @@ import { QuickbooksController } from './quickbooks.controller';
     QuickbooksJobCostingService,
     QuickbooksTokenRefreshCron,
     ProjectQboEnrichmentService,
+    InvoiceScansService,
   ],
   exports: [
     QuickbooksAuthService,

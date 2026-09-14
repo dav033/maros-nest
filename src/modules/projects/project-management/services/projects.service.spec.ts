@@ -114,3 +114,48 @@ describe('ProjectsService.create', () => {
     expect(mailService.sendMail).not.toHaveBeenCalled();
   });
 });
+
+describe('ProjectsService.getProjectPayments', () => {
+  it('adds details for the invoices linked to each payment', async () => {
+    const projectRepo = {
+      findOne: jest.fn().mockResolvedValue({ lead: { leadNumber: '001-0726' } }),
+    };
+    const qboFinancials = {
+      getPaymentsByProject: jest.fn().mockResolvedValue([
+        {
+          entityId: 'payment-1',
+          txnDate: '2026-05-23',
+          totalAmount: 40000,
+          account: { name: 'Checking' },
+          docNumber: 'PAY-01',
+          linkedTxn: [{ txnId: 'invoice-1', txnType: 'Invoice' }],
+          openBalance: 0,
+          memo: 'Initial payment',
+          attachments: [],
+          warnings: [],
+        },
+      ]),
+      getInvoicesByProject: jest.fn().mockResolvedValue([
+        { entityId: 'invoice-1', docNumber: 'INV-01', totalAmount: 40000 },
+      ]),
+    };
+    const service = new ProjectsService(
+      {} as never,
+      projectRepo as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      qboFinancials as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const result = await service.getProjectPayments(1);
+
+    expect(qboFinancials.getInvoicesByProject).toHaveBeenCalledWith('001-0726');
+    expect(result.items[0].linkedInvoices).toEqual([
+      { id: 'invoice-1', documentNumber: 'INV-01', amount: 40000 },
+    ]);
+  });
+});

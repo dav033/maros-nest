@@ -16,6 +16,7 @@ export const PERMISSIONS = [
   // Money: revenue, backlog, costs, P&L, everything sourced from QuickBooks.
   // The one permission most likely to be withheld from a given role.
   'finance:read',
+  'finance:write',
 
   'leads:read',
   'leads:write',
@@ -63,7 +64,11 @@ export const PERMISSION_GROUPS: ReadonlyArray<{
   permissions: readonly Permission[];
 }> = [
   { key: 'dashboard', label: 'Dashboard', permissions: ['dashboard:read'] },
-  { key: 'finance', label: 'Finance', permissions: ['finance:read'] },
+  {
+    key: 'finance',
+    label: 'Finance',
+    permissions: ['finance:read', 'finance:write'],
+  },
   {
     key: 'leads',
     label: 'Leads',
@@ -105,7 +110,8 @@ export const PERMISSION_GROUPS: ReadonlyArray<{
 export const SYSTEM_ROLE_ADMIN = 'admin';
 export const SYSTEM_ROLE_MEMBER = 'member';
 
-/** Everything except user administration. */
+/** Default member permissions omit user administration and elevated finance writes. */
 export const MEMBER_PERMISSIONS: readonly Permission[] = PERMISSIONS.filter(
-  (permission) => !permission.startsWith('users:'),
+  (permission) =>
+    !permission.startsWith('users:') && permission !== 'finance:write',
 );

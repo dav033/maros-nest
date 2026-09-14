@@ -108,8 +108,8 @@ async function bootstrap() {
 
   // Get port from environment
   const port = configService.get<number>('PORT', 8080);
-
-  await app.listen(port, '0.0.0.0');
+  const host = process.env.NODE_ENV === 'development' ? 'localhost' : '0.0.0.0';
+  await app.listen(port, host);
 
   console.log(`
   ╔═══════════════════════════════════════════════════════════════╗

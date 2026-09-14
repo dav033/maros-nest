@@ -247,7 +247,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
     }));
 
     await this.withTimeout(
-      this.qboEnrichment.enrichProjectsSummary(shims),
+      this.qboEnrichment.enrichProjectsSummary(shims, { includeJobCosts: true }),
       25_000,
       'QBO enrichment for projects findAllFinancials',
     );
@@ -296,7 +296,16 @@ export class ProjectsService extends BaseService<any, number, Project> {
     if (!entity) throw new ResourceNotFoundException(`Project not found with id: ${id}`);
     const projectNumber = entity.lead?.leadNumber ?? null;
     if (!projectNumber) return { projectId: id, projectNumber: null, totalAmount: 0, count: 0, source: 'quickbooks', fetchedAt: new Date().toISOString(), items: [] };
-    const payments = await this.qboFinancials.getPaymentsByProject(projectNumber);
+    const [payments, invoices] = await Promise.all([
+      this.qboFinancials.getPaymentsByProject(projectNumber),
+      this.qboFinancials.getInvoicesByProject(projectNumber).catch((error: unknown) => {
+        this.logger.warn(
+          `Invoice details could not be loaded for project ${projectNumber}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return [];
+      }),
+    ]);
+    const invoicesById = new Map(invoices.map((invoice) => [invoice.entityId, invoice] as const));
     return {
       projectId: id,
       projectNumber,
@@ -310,7 +319,16 @@ export class ProjectsService extends BaseService<any, number, Project> {
         amount: payment.totalAmount,
         method: payment.account?.name ?? null,
         reference: payment.docNumber || null,
-        linkedInvoices: payment.linkedTxn.filter((linked) => linked.txnType.toLowerCase() === 'invoice').map((linked) => ({ id: linked.txnId, documentNumber: null, amount: null })),
+        linkedInvoices: payment.linkedTxn
+          .filter((linked) => linked.txnType.toLowerCase() === 'invoice')
+          .map((linked) => {
+            const invoice = invoicesById.get(linked.txnId);
+            return {
+              id: linked.txnId,
+              documentNumber: invoice?.docNumber || null,
+              amount: invoice?.totalAmount ?? null,
+            };
+          }),
         unappliedAmount: payment.openBalance ?? 0,
         memo: payment.memo || null,
         attachmentCount: payment.attachments.length,

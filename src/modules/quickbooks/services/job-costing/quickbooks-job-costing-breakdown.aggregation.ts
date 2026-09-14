@@ -25,7 +25,7 @@ export type BreakdownContext = {
 
 export function summarizeEngine(
   ctx: BreakdownContext,
-  transactions: QboJobCostTransaction[],
+  transactions: Array<Pick<QboJobCostTransaction, 'classification' | 'allocatedAmount'>>,
 ): QboJobCostSummary {
   const summary: QboJobCostSummary = {
     cashOutPaid: 0,

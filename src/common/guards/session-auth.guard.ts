@@ -1,8 +1,15 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { jwtVerify } from 'jose';
+import { isLocalDevAuthBypassEnabled } from '../auth/dev-auth';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+import { PERMISSIONS } from '../auth/permissions';
 import type { RequestWithUser } from '../auth/authenticated-user';
 import { UsersService } from '../../modules/users/user-management/users.service';
 
@@ -40,33 +47,97 @@ export class SessionAuthGuard implements CanActivate {
       throw new UnauthorizedException('Missing session cookie');
     }
 
-    const secret = this.configService.get<string>('AUTH_SECRET');
-    if (!secret) {
-      throw new UnauthorizedException('AUTH_SECRET is not configured');
-    }
-
-    let email: string;
+    let email: string | undefined;
     let name: string | undefined;
     let picture: string | undefined;
-    try {
-      const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
-      if (typeof payload.email !== 'string') {
-        throw new Error('Session token has no email claim');
+
+    const authSecret = this.configService.get<string>('AUTH_SECRET');
+    const devSecret = this.configService.get<string>('DEV_AUTH_SECRET');
+    const isDevBypassEnabled = isLocalDevAuthBypassEnabled({
+      nodeEnv: process.env.NODE_ENV,
+      enabled: this.configService.get<string>('DEV_AUTH_BYPASS'),
+      devSecret,
+      authSecret,
+    });
+    let devSession = false;
+
+    if (isDevBypassEnabled && devSecret) {
+      try {
+        const { payload } = await jwtVerify(
+          token,
+          new TextEncoder().encode(devSecret),
+        );
+        if (payload.devSession === true && typeof payload.email === 'string') {
+          email = payload.email;
+          name = typeof payload.name === 'string' ? payload.name : undefined;
+          picture =
+            typeof payload.picture === 'string' ? payload.picture : undefined;
+          devSession = true;
+        }
+      } catch {
+        // Fall through to the regular session validator.
       }
-      email = payload.email;
-      name = typeof payload.name === 'string' ? payload.name : undefined;
-      picture = typeof payload.picture === 'string' ? payload.picture : undefined;
-    } catch {
-      throw new UnauthorizedException('Invalid or expired session');
     }
 
-    // Throws UserInactiveException (403) for deactivated accounts; provisions
-    // the row on a verified identity's first request.
-    request.user = await this.usersService.resolveForRequest({
-      email,
-      name,
-      picture,
-    });
+    if (!devSession) {
+      if (!authSecret) {
+        throw new UnauthorizedException('AUTH_SECRET is not configured');
+      }
+
+      try {
+        const { payload } = await jwtVerify(
+          token,
+          new TextEncoder().encode(authSecret),
+        );
+        if (typeof payload.email !== 'string') {
+          throw new Error('Session token has no email claim');
+        }
+        email = payload.email;
+        name = typeof payload.name === 'string' ? payload.name : undefined;
+        picture =
+          typeof payload.picture === 'string' ? payload.picture : undefined;
+      } catch {
+        throw new UnauthorizedException('Invalid or expired session');
+      }
+    }
+
+    if (!email) {
+      throw new UnauthorizedException('Session token has no email claim');
+    }
+
+    if (devSession) {
+      const devActorId = Number(
+        this.configService.get<string>('DEV_AUTH_USER_ID'),
+      );
+      if (!Number.isInteger(devActorId) || devActorId <= 0) {
+        throw new UnauthorizedException(
+          'DEV_AUTH_USER_ID must reference an existing user in local development',
+        );
+      }
+      const existingActorId =
+        await this.usersService.findExistingDevActor(devActorId);
+      if (!existingActorId) {
+        throw new UnauthorizedException(
+          'DEV_AUTH_USER_ID does not match an existing user',
+        );
+      }
+      request.user = {
+        id: existingActorId,
+        email,
+        name: name ?? 'Local Developer',
+        picture: picture ?? null,
+        role: { id: 0, name: 'development' },
+        permissions: [...PERMISSIONS],
+      };
+    } else {
+      // Throws UserInactiveException (403) for deactivated accounts; provisions
+      // the row on a verified identity's first request.
+      request.user = await this.usersService.resolveForRequest({
+        email,
+        name,
+        picture,
+      });
+    }
 
     return true;
   }

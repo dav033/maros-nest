@@ -374,7 +374,9 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
     }
   }
 
-  protected summarize(transactions: QboJobCostTransaction[]): QboJobCostSummary {
+  protected summarize(
+    transactions: Array<Pick<QboJobCostTransaction, 'classification' | 'allocatedAmount'>>,
+  ): QboJobCostSummary {
     const context = this as unknown as BreakdownContext;
     return summarizeEngine(context, transactions);
   }

@@ -66,6 +66,12 @@ export class UsersService {
     return this.toAuthenticatedUser(user);
   }
 
+  /** Returns an existing user ID for local development without provisioning or touching it. */
+  async findExistingDevActor(id: number): Promise<number | null> {
+    const user = await this.usersRepo.findById(id);
+    return user?.id ?? null;
+  }
+
   async findAll(): Promise<User[]> {
     return this.usersRepo.findAll();
   }
