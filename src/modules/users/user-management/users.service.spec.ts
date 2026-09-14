@@ -46,8 +46,8 @@ function makeService(
 }
 
 describe('UsersService.resolveForRequest', () => {
-  it('provisions a new user with the default role on first login', async () => {
-    const memberRole = makeRole({ id: 2, name: SYSTEM_ROLE_MEMBER });
+  it('provisions a new user with the Solo task role by default on first login', async () => {
+    const taskRole = makeRole({ id: 2, name: 'Solo task' });
     const usersRepo = {
       findByEmail: jest.fn().mockResolvedValue(null),
       save: jest
@@ -56,7 +56,7 @@ describe('UsersService.resolveForRequest', () => {
       touchLastLogin: jest.fn(),
     };
     const rolesRepo = {
-      findByName: jest.fn().mockResolvedValue(memberRole),
+      findByName: jest.fn().mockResolvedValue(taskRole),
     };
     const service = makeService(usersRepo, rolesRepo);
 
@@ -65,9 +65,10 @@ describe('UsersService.resolveForRequest', () => {
     expect(usersRepo.save).toHaveBeenCalledTimes(1);
     const savedUser = usersRepo.save.mock.calls[0][0] as User;
     expect(savedUser.email).toBe('new@marosconstruction.com');
-    expect(savedUser.role).toBe(memberRole);
+    expect(rolesRepo.findByName).toHaveBeenCalledWith('Solo task');
+    expect(savedUser.role).toBe(taskRole);
     expect(result.id).toBe(42);
-    expect(result.role?.name).toBe(SYSTEM_ROLE_MEMBER);
+    expect(result.role?.name).toBe('Solo task');
   });
 
   it('provisions with the admin role when the email is bootstrap-listed', async () => {

@@ -209,7 +209,7 @@ export class UsersService {
     }
 
     const defaultRoleName =
-      this.configService.get<string>('AUTH_DEFAULT_ROLE') ?? SYSTEM_ROLE_MEMBER;
+      this.configService.get<string>('AUTH_DEFAULT_ROLE') ?? 'Solo task';
     const role = await this.rolesRepo.findByName(defaultRoleName);
     if (!role) {
       this.logger.warn(

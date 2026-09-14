@@ -186,7 +186,7 @@ export class EnvironmentVariables {
   /** Role assigned to everyone else on first login. */
   @IsString()
   @IsOptional()
-  AUTH_DEFAULT_ROLE: string = 'member';
+  AUTH_DEFAULT_ROLE: string = 'Solo task';
 
   // Public note share links
   /**
