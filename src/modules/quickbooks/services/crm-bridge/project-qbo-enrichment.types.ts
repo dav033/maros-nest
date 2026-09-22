@@ -30,6 +30,7 @@ export interface QboProjectSummary
   projectNumber: string;
   totalJobCost?: number;
   grossProfit?: number;
+  cashOutPaid?: number;
   payments?: QboPaymentSummary[];
   paymentSummary?: QboProjectPaymentSummary;
   invoiceStatus?: InvoiceStatus;

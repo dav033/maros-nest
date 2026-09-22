@@ -13,6 +13,8 @@ import axios from 'axios';
 import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
 import { CreateInvoiceScanDto } from '../dto/create-invoice-scan.dto';
+import { UpdateInvoiceScanDto } from '../dto/update-invoice-scan.dto';
+import { Lead } from '../../../entities/lead.entity';
 import {
   ExtractedInvoiceData,
   InvoiceScan,
@@ -107,6 +109,8 @@ export class InvoiceScansService {
     private readonly config: ConfigService,
     private readonly qboApi: QuickbooksApiService,
     private readonly financials: QuickbooksFinancialsService,
+    @InjectRepository(Lead)
+    private readonly leads: Repository<Lead>,
   ) {}
 
   async list(): Promise<InvoiceScanView[]> {
@@ -157,10 +161,29 @@ export class InvoiceScansService {
       qboSuggestions: {},
       errorMessage: null,
       extractedData: null,
+      projectNumber: null,
     });
     await this.scans.save(scan);
 
     return { id: scan.id, uploadUrl: upload.url };
+  }
+
+  async update(
+    id: string,
+    input: UpdateInvoiceScanDto,
+  ): Promise<InvoiceScanView> {
+    const scan = await this.findScan(id);
+    if (input.projectNumber !== undefined) {
+      const projectNumber = input.projectNumber?.trim() || null;
+      if (
+        projectNumber &&
+        !(await this.leads.exists({ where: { leadNumber: projectNumber } }))
+      ) {
+        throw new BadRequestException(`No project found with number ${projectNumber}.`);
+      }
+      scan.projectNumber = projectNumber;
+    }
+    return this.toPublicScan(await this.scans.save(scan));
   }
 
   async scan(id: string): Promise<InvoiceScanView> {
@@ -243,6 +266,7 @@ export class InvoiceScansService {
       extractedData: scan.extractedData,
       qboSuggestions: scan.qboSuggestions,
       errorMessage: scan.errorMessage,
+      projectNumber: scan.projectNumber,
       createdAt: scan.createdAt,
       updatedAt: scan.updatedAt,
     };

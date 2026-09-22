@@ -100,6 +100,7 @@ export class ProjectQboEnrichmentService {
                 ...financial,
                 totalJobCost: jobCosts.totalJobCost,
                 grossProfit: money((Number(financial.invoicedAmount) || 0) - jobCosts.totalJobCost),
+                cashOutPaid: jobCosts.cashOutPaid,
               }
             : financial;
           return [financial.projectNumber, schedule ? { ...enriched, paymentSchedule: schedule } : enriched];

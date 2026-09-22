@@ -4,11 +4,13 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { CreateInvoiceScanDto } from './dto/create-invoice-scan.dto';
+import { UpdateInvoiceScanDto } from './dto/update-invoice-scan.dto';
 import { InvoiceScansService } from './services/invoice-scans.service';
 
 @ApiTags('Invoice scans')
@@ -30,6 +32,14 @@ export class InvoiceScansController {
   @Post()
   create(@Body() body: CreateInvoiceScanDto) {
     return this.invoiceScans.create(body);
+  }
+
+  @Patch(':id')
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: UpdateInvoiceScanDto,
+  ) {
+    return this.invoiceScans.update(id, body);
   }
 
   @Post(':id/scan')

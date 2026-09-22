@@ -24,7 +24,7 @@ describe('ProjectQboEnrichmentService job costs', () => {
     const jobCosting = {
       getProjectJobCostSummaries: jest
         .fn()
-        .mockResolvedValue(new Map([['P-1', { totalJobCost: 47 }]])),
+        .mockResolvedValue(new Map([['P-1', { totalJobCost: 47, cashOutPaid: 30 }]])),
     };
     const service = new ProjectQboEnrichmentService(
       financials as never,
@@ -39,8 +39,8 @@ describe('ProjectQboEnrichmentService job costs', () => {
       undefined,
     );
     expect(projects[0]).toMatchObject({
-      financial: { totalJobCost: 47, grossProfit: 43 },
-      qbo: { totalJobCost: 47, grossProfit: 43 },
+      financial: { totalJobCost: 47, grossProfit: 43, cashOutPaid: 30 },
+      qbo: { totalJobCost: 47, grossProfit: 43, cashOutPaid: 30 },
     });
   });
 });

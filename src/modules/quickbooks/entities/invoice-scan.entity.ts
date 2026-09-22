@@ -67,6 +67,9 @@ export class InvoiceScan {
   @Column({ name: 'error_message', type: 'text', nullable: true })
   errorMessage: string | null;
 
+  @Column({ name: 'project_number', type: 'varchar', length: 50, nullable: true })
+  projectNumber: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

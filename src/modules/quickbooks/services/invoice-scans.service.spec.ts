@@ -3,6 +3,7 @@ import type { ConfigService } from '@nestjs/config';
 import type { Repository } from 'typeorm';
 import { S3Service } from '../../s3/services/s3.service';
 import { InvoiceScan } from '../entities/invoice-scan.entity';
+import { Lead } from '../../../entities/lead.entity';
 import { QuickbooksApiService } from './core/quickbooks-api.service';
 import { QuickbooksFinancialsService } from './financials/quickbooks-financials.service';
 import { InvoiceScansService } from './invoice-scans.service';
@@ -121,6 +122,7 @@ describe('InvoiceScansService', () => {
       config as ConfigService,
       qboApi as unknown as QuickbooksApiService,
       financials as unknown as QuickbooksFinancialsService,
+      {} as Repository<Lead>,
     );
 
     const result = await service.scan(scan.id);
@@ -197,10 +199,52 @@ describe('InvoiceScansService', () => {
       {} as ConfigService,
       {} as QuickbooksApiService,
       {} as QuickbooksFinancialsService,
+      {} as Repository<Lead>,
     );
 
     await expect(service.scan(scan.id)).rejects.toThrow('not a valid PDF');
     expect(scan.status).toBe('failed');
     expect(openAiRequest).not.toHaveBeenCalled();
+  });
+
+  describe('update', () => {
+    const makeService = (leadExists: boolean) => {
+      const scan = { id: 'scan-1', projectNumber: null } as unknown as InvoiceScan;
+      const scans = {
+        findOne: jest.fn().mockResolvedValue(scan),
+        save: jest.fn((value: InvoiceScan) => Promise.resolve(value)),
+      };
+      const leads = { exists: jest.fn().mockResolvedValue(leadExists) };
+      const service = new InvoiceScansService(
+        scans as unknown as Repository<InvoiceScan>,
+        {} as S3Service,
+        {} as ConfigService,
+        {} as QuickbooksApiService,
+        {} as QuickbooksFinancialsService,
+        leads as unknown as Repository<Lead>,
+      );
+      return { service, scan, leads };
+    };
+
+    it('saves a project number that matches an existing lead number', async () => {
+      const { service, leads } = makeService(true);
+      const result = await service.update('scan-1', { projectNumber: ' 074P-0926 ' });
+      expect(leads.exists).toHaveBeenCalledWith({ where: { leadNumber: '074P-0926' } });
+      expect(result.projectNumber).toBe('074P-0926');
+    });
+
+    it('rejects a project number with no matching project', async () => {
+      const { service, scan } = makeService(false);
+      await expect(service.update('scan-1', { projectNumber: 'NOPE' })).rejects.toThrow('No project found');
+      expect(scan.projectNumber).toBeNull();
+    });
+
+    it('clears the project number when given an empty value', async () => {
+      const { service, scan, leads } = makeService(true);
+      scan.projectNumber = '074P-0926';
+      const result = await service.update('scan-1', { projectNumber: '' });
+      expect(leads.exists).not.toHaveBeenCalled();
+      expect(result.projectNumber).toBeNull();
+    });
   });
 });
