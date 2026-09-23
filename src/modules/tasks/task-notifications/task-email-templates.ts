@@ -1,34 +1,23 @@
 /**
  * HTML for the two emails this feature sends (assignment, daily digest). Table-based
  * layout with everything inlined — the safe baseline for Outlook's Word rendering
- * engine, which ignores most CSS outside of inline `style` attributes. Kept local to
- * `task-notifications/` rather than promoted into `modules/mail/`: nothing else in the
- * app sends HTML mail yet, so there's no second consumer to design a shared system for.
+ * engine, which ignores most CSS outside of inline `style` attributes. The chrome
+ * (header, CTA, footer) lives in `modules/mail/templates/email-layout.ts`, shared
+ * with the invoice-scan emails.
  */
 
+import {
+  EMAIL_COLOR,
+  escapeHtml,
+  renderEmailLayout,
+} from '../../mail/templates/email-layout';
+
 const COLOR = {
-  accent: '#0f766e',
-  text: '#1e293b',
-  muted: '#64748b',
-  border: '#e2e8f0',
-  background: '#f1f5f9',
+  ...EMAIL_COLOR,
   overdue: '#dc2626',
   dueToday: '#d97706',
   blocked: '#7c3aed',
 } as const;
-
-const FONT_STACK =
-  "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
-
-/** Task titles are free text — never interpolate one into HTML unescaped. */
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
 
 export type TaskEmailDetails = {
   description?: string | null;
@@ -95,51 +84,7 @@ function taskDetailsHtml(details: TaskEmailDetails | undefined, taskUrl: string)
   return sections.join('');
 }
 
-function layout(opts: {
-  preheader: string;
-  heading: string;
-  bodyHtml: string;
-  ctaLabel: string;
-  ctaUrl: string;
-}): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-  <body style="margin:0;padding:0;background-color:${COLOR.background};font-family:${FONT_STACK};">
-    <span style="display:none;font-size:1px;color:${COLOR.background};line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">${escapeHtml(opts.preheader)}</span>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${COLOR.background};padding:32px 16px;">
-      <tr>
-        <td align="center">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#ffffff;border-radius:12px;border:1px solid ${COLOR.border};">
-            <tr>
-              <td style="background-color:${COLOR.accent};padding:18px 28px;border-radius:12px 12px 0 0;">
-                <span style="color:#ffffff;font-size:15px;font-weight:600;letter-spacing:0.02em;">Maros Construction</span>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:28px;">
-                <h1 style="margin:0 0 16px;font-size:19px;line-height:1.3;font-weight:600;color:${COLOR.text};">${escapeHtml(opts.heading)}</h1>
-                ${opts.bodyHtml}
-                <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:24px;">
-                  <tr>
-                    <td style="border-radius:8px;background-color:${COLOR.accent};">
-                <a href="${escapeHtml(opts.ctaUrl)}" style="display:inline-block;padding:11px 22px;font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;">${escapeHtml(opts.ctaLabel)}</a>
-                    </td>
-                  </tr>
-                </table>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:16px 28px;border-top:1px solid ${COLOR.border};">
-                <p style="margin:0;font-size:12px;color:${COLOR.muted};">This is an automated message from the Maros Construction CRM.</p>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-  </body>
-</html>`;
-}
+const layout = renderEmailLayout;
 
 export function renderTaskAssignedEmail(opts: {
   taskTitle: string;
