@@ -110,8 +110,11 @@ export const PERMISSION_GROUPS: ReadonlyArray<{
 export const SYSTEM_ROLE_ADMIN = 'admin';
 export const SYSTEM_ROLE_MEMBER = 'member';
 
-/** Default member permissions omit user administration and elevated finance writes. */
+/**
+ * Everything except user administration. Members include finance:write: the
+ * finance team (members) are the ones who scan invoices and receive the
+ * "invoices to enter" emails.
+ */
 export const MEMBER_PERMISSIONS: readonly Permission[] = PERMISSIONS.filter(
-  (permission) =>
-    !permission.startsWith('users:') && permission !== 'finance:write',
+  (permission) => !permission.startsWith('users:'),
 );
