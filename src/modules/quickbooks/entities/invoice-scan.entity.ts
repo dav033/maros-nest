@@ -70,6 +70,25 @@ export class InvoiceScan {
   @Column({ name: 'project_number', type: 'varchar', length: 50, nullable: true })
   projectNumber: string | null;
 
+  /** Non-fatal problems found while scanning (unreadable field, QuickBooks down…). */
+  @Column({ type: 'jsonb', default: () => "'[]'::jsonb" })
+  warnings: string[];
+
+  /** Set when the invoice has been entered in QuickBooks; null while pending. */
+  @Column({ name: 'entered_at', type: 'timestamptz', nullable: true })
+  enteredAt: Date | null;
+
+  @Column({ name: 'entered_by', type: 'integer', nullable: true })
+  enteredBy: number | null;
+
+  /** When the "ready to review" email went out. */
+  @Column({ name: 'notified_at', type: 'timestamptz', nullable: true })
+  notifiedAt: Date | null;
+
+  /** Last pending-invoice reminder that listed this scan. */
+  @Column({ name: 'reminded_at', type: 'timestamptz', nullable: true })
+  remindedAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 

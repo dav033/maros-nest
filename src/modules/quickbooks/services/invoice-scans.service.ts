@@ -11,10 +11,20 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import axios from 'axios';
 import { randomUUID } from 'crypto';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
+import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
 import { CreateInvoiceScanDto } from '../dto/create-invoice-scan.dto';
 import { UpdateInvoiceScanDto } from '../dto/update-invoice-scan.dto';
 import { Lead } from '../../../entities/lead.entity';
+import {
+  emptyExtractedInvoice,
+  parseInvoiceExtraction,
+} from './invoice-scans/invoice-extraction.parser';
+import {
+  projectNumberCandidates,
+  resolveProjectNumber,
+} from './invoice-scans/invoice-project-number';
+import { InvoiceScanNotificationsService } from './invoice-scans/invoice-scan-notifications.service';
 import {
   ExtractedInvoiceData,
   InvoiceScan,
@@ -49,6 +59,7 @@ const INVOICE_SCHEMA = {
     'payment_status',
     'confidence',
     'line_items',
+    'project_number',
   ],
   properties: {
     direction: {
@@ -78,6 +89,7 @@ const INVOICE_SCHEMA = {
       enum: ['paid', 'unpaid', 'unknown'],
     },
     confidence: { type: 'number', minimum: 0, maximum: 1 },
+    project_number: { type: ['string', 'null'] },
     line_items: {
       type: 'array',
       items: {
@@ -96,7 +108,29 @@ const INVOICE_SCHEMA = {
 } as const;
 
 type QboRecord = Record<string, unknown>;
-type InvoiceScanView = Omit<InvoiceScan, 'fileKey'>;
+type InvoiceScanView = Omit<InvoiceScan, 'fileKey' | 'notifiedAt' | 'remindedAt'>;
+
+const MANUAL_ENTRY_WARNING =
+  'Details were entered by hand because the automatic scan did not complete.';
+const QBO_UNAVAILABLE_WARNING =
+  'QuickBooks suggestions could not be loaded; match the customer or vendor by hand.';
+const PENDING_LIST_LIMIT = 200;
+const COMPLETED_LIST_LIMIT = 50;
+
+const EDITABLE_FIELDS = [
+  'direction',
+  'classification',
+  'counterpartyName',
+  'invoiceNumber',
+  'issueDate',
+  'dueDate',
+  'currency',
+  'subtotal',
+  'taxTotal',
+  'total',
+  'paymentStatus',
+  'lineItems',
+] as const;
 
 @Injectable()
 export class InvoiceScansService {
@@ -111,14 +145,24 @@ export class InvoiceScansService {
     private readonly financials: QuickbooksFinancialsService,
     @InjectRepository(Lead)
     private readonly leads: Repository<Lead>,
+    private readonly notifications: InvoiceScanNotificationsService,
   ) {}
 
+  /** Every pending scan plus the most recently completed ones. */
   async list(): Promise<InvoiceScanView[]> {
-    const scans = await this.scans.find({
-      order: { createdAt: 'DESC' },
-      take: 100,
-    });
-    return scans.map((scan) => this.toPublicScan(scan));
+    const [pending, completed] = await Promise.all([
+      this.scans.find({
+        where: { enteredAt: IsNull() },
+        order: { createdAt: 'DESC' },
+        take: PENDING_LIST_LIMIT,
+      }),
+      this.scans.find({
+        where: { enteredAt: Not(IsNull()) },
+        order: { enteredAt: 'DESC' },
+        take: COMPLETED_LIST_LIMIT,
+      }),
+    ]);
+    return [...pending, ...completed].map((scan) => this.toPublicScan(scan));
   }
 
   async get(
@@ -162,6 +206,11 @@ export class InvoiceScansService {
       errorMessage: null,
       extractedData: null,
       projectNumber: null,
+      warnings: [],
+      enteredAt: null,
+      enteredBy: null,
+      notifiedAt: null,
+      remindedAt: null,
     });
     await this.scans.save(scan);
 
@@ -171,8 +220,13 @@ export class InvoiceScansService {
   async update(
     id: string,
     input: UpdateInvoiceScanDto,
+    actor?: Pick<AuthenticatedUser, 'id'>,
   ): Promise<InvoiceScanView> {
     const scan = await this.findScan(id);
+    if (scan.status === 'processing') {
+      throw new ConflictException('This invoice is being scanned; try again in a moment.');
+    }
+
     if (input.projectNumber !== undefined) {
       const projectNumber = input.projectNumber?.trim() || null;
       if (
@@ -183,6 +237,64 @@ export class InvoiceScansService {
       }
       scan.projectNumber = projectNumber;
     }
+
+    const edited = EDITABLE_FIELDS.filter((field) => input[field] !== undefined);
+    if (edited.length > 0) {
+      const next = { ...(scan.extractedData ?? emptyExtractedInvoice()) };
+      for (const field of edited) {
+        switch (field) {
+          case 'direction':
+            next.direction = input.direction!;
+            break;
+          case 'classification':
+            next.classification = input.classification!;
+            break;
+          case 'paymentStatus':
+            next.paymentStatus = input.paymentStatus!;
+            break;
+          case 'counterpartyName':
+          case 'invoiceNumber':
+          case 'issueDate':
+          case 'dueDate':
+            next[field] = input[field]?.trim() || null;
+            break;
+          case 'currency':
+            next.currency = input.currency?.trim().toUpperCase() || null;
+            break;
+          case 'subtotal':
+          case 'taxTotal':
+          case 'total':
+            next[field] = input[field] ?? null;
+            break;
+          case 'lineItems':
+            next.lineItems = (input.lineItems ?? []).map((line) => ({
+              description: line.description.trim(),
+              quantity: line.quantity ?? null,
+              unitPrice: line.unitPrice ?? null,
+              amount: line.amount ?? null,
+            }));
+            break;
+        }
+      }
+      scan.extractedData = next;
+      if (scan.status !== 'needs_review') {
+        // A reviewer typing the details in is as good as a successful scan.
+        scan.status = 'needs_review';
+        scan.errorMessage = null;
+        scan.warnings = this.addWarning(scan.warnings, MANUAL_ENTRY_WARNING);
+      }
+    }
+
+    if (input.entered !== undefined) {
+      if (input.entered && scan.status !== 'needs_review') {
+        throw new BadRequestException(
+          'Scan the invoice or enter its details before marking it as entered.',
+        );
+      }
+      scan.enteredAt = input.entered ? new Date() : null;
+      scan.enteredBy = input.entered ? (actor?.id ?? null) : null;
+    }
+
     return this.toPublicScan(await this.scans.save(scan));
   }
 
@@ -197,6 +309,7 @@ export class InvoiceScansService {
 
     scan.status = 'processing';
     scan.errorMessage = null;
+    scan.warnings = [];
     await this.scans.save(scan);
 
     try {
@@ -225,17 +338,35 @@ export class InvoiceScansService {
         throw new BadRequestException('The uploaded file is not a valid PDF.');
       }
 
-      const extracted = await this.extractInvoice(
+      // From here on nothing is fatal: a field we cannot read, QuickBooks being
+      // down or an unknown project number become warnings for the reviewer.
+      const extraction = await this.extractInvoice(
         photo.buffer,
         contentType,
         photo.fileName,
       );
-      const suggestions = await this.getQboSuggestions(extracted);
+      const warnings = [...extraction.warnings];
 
-      scan.extractedData = extracted;
+      const suggestions = await this.getQboSuggestions(extraction.data);
+      if (suggestions.connected === false) warnings.push(QBO_UNAVAILABLE_WARNING);
+
+      if (!scan.projectNumber) {
+        const resolution = await this.resolveProjectNumber(
+          extraction.projectNumberHint,
+          scan.fileName,
+        );
+        scan.projectNumber = resolution.projectNumber;
+        if (resolution.warning) warnings.push(resolution.warning);
+      }
+
+      scan.extractedData = extraction.data;
       scan.qboSuggestions = suggestions;
+      scan.warnings = warnings;
       scan.status = 'needs_review';
-      return this.toPublicScan(await this.scans.save(scan));
+      const saved = await this.scans.save(scan);
+      // Fire-and-forget: the reviewer's response must not wait on SMTP.
+      void this.notifications.notifyScanReady(saved);
+      return this.toPublicScan(saved);
     } catch (error) {
       scan.status = 'failed';
       scan.errorMessage =
@@ -267,16 +398,50 @@ export class InvoiceScansService {
       qboSuggestions: scan.qboSuggestions,
       errorMessage: scan.errorMessage,
       projectNumber: scan.projectNumber,
+      warnings: scan.warnings ?? [],
+      enteredAt: scan.enteredAt ?? null,
+      enteredBy: scan.enteredBy ?? null,
       createdAt: scan.createdAt,
       updatedAt: scan.updatedAt,
     };
+  }
+
+  private addWarning(warnings: string[] | null | undefined, warning: string): string[] {
+    const current = warnings ?? [];
+    return current.includes(warning) ? current : [...current, warning];
+  }
+
+  private async resolveProjectNumber(
+    hint: string | null,
+    fileName: string,
+  ): Promise<{ projectNumber: string | null; warning: string | null }> {
+    const candidates = projectNumberCandidates({ extracted: hint, fileName });
+    if (candidates.length === 0) return resolveProjectNumber([], []);
+    try {
+      const leads = await this.leads.find({
+        select: { leadNumber: true },
+        where: { leadNumber: Not(IsNull()) },
+      });
+      return resolveProjectNumber(
+        candidates,
+        leads.map((lead) => lead.leadNumber).filter((value): value is string => !!value),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Could not load lead numbers to match invoice project: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return {
+        projectNumber: null,
+        warning: 'The project could not be matched automatically; pick it manually.',
+      };
+    }
   }
 
   private async extractInvoice(
     buffer: Buffer,
     contentType: string,
     fileName: string,
-  ): Promise<ExtractedInvoiceData> {
+  ): Promise<ReturnType<typeof parseInvoiceExtraction>> {
     const apiKey =
       this.config.get<string>('OPENAI_KEY') ||
       this.config.get<string>('OPENAI_API_KEY');
@@ -298,7 +463,7 @@ export class InvoiceScansService {
           model: 'gpt-4.1-mini',
           store: false,
           instructions:
-            'Extract invoice facts visible in the image or PDF. Never invent values; use null for unreadable or missing fields. Dates must be YYYY-MM-DD. Direction is outgoing when Maros Construction issued a customer invoice, incoming when a supplier issued a bill to Maros, otherwise unknown. Classify incoming materials vs subcontractor expenses only when the line items make that clear; use unknown otherwise. Return line items as printed.',
+            'Extract invoice facts visible in the image or PDF. Never invent values; use null for unreadable or missing fields. Dates must be YYYY-MM-DD. Direction is outgoing when Maros Construction issued a customer invoice, incoming when a supplier issued a bill to Maros, otherwise unknown. Classify incoming materials vs subcontractor expenses only when the line items make that clear; use unknown otherwise. Return line items as printed. project_number is the Maros job or project reference printed on the document (formats like 050P, 045, 050P-0826), or null when none is printed.',
           input: [
             {
               role: 'user',
@@ -343,47 +508,13 @@ export class InvoiceScansService {
         .find((content) => content.type === 'output_text')?.text;
       if (!text) throw new Error('OpenAI returned no structured invoice data.');
 
-      const parsed = JSON.parse(text) as {
-        direction: ExtractedInvoiceData['direction'];
-        classification: ExtractedInvoiceData['classification'];
-        counterparty_name: string | null;
-        invoice_number: string | null;
-        issue_date: string | null;
-        due_date: string | null;
-        currency: string | null;
-        subtotal: number | null;
-        tax_total: number | null;
-        total: number | null;
-        payment_status: ExtractedInvoiceData['paymentStatus'];
-        confidence: number;
-        line_items: Array<{
-          description: string;
-          quantity: number | null;
-          unit_price: number | null;
-          amount: number | null;
-        }>;
-      };
-
-      return {
-        direction: parsed.direction,
-        classification: parsed.classification,
-        counterpartyName: parsed.counterparty_name,
-        invoiceNumber: parsed.invoice_number,
-        issueDate: parsed.issue_date,
-        dueDate: parsed.due_date,
-        currency: parsed.currency,
-        subtotal: parsed.subtotal,
-        taxTotal: parsed.tax_total,
-        total: parsed.total,
-        paymentStatus: parsed.payment_status,
-        confidence: parsed.confidence,
-        lineItems: parsed.line_items.map((item) => ({
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unit_price,
-          amount: item.amount,
-        })),
-      };
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        throw new Error('OpenAI returned malformed invoice JSON.');
+      }
+      return parseInvoiceExtraction(parsed);
     } catch (error) {
       if (error instanceof ServiceUnavailableException) throw error;
       throw new InternalServerErrorException(
@@ -394,7 +525,7 @@ export class InvoiceScansService {
 
   private async getQboSuggestions(
     invoice: ExtractedInvoiceData,
-  ): Promise<Record<string, unknown>> {
+  ): Promise<Record<string, unknown> & { connected: boolean }> {
     try {
       const realmId = await this.financials.getDefaultRealmId();
       const outgoing = invoice.direction === 'outgoing';

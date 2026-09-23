@@ -33,11 +33,15 @@ import { InvoiceScan } from './entities/invoice-scan.entity';
 import { InvoiceScansController } from './invoice-scans.controller';
 import { InvoiceScansService } from './services/invoice-scans.service';
 import { S3Module } from '../s3/s3.module';
+import { MailModule } from '../mail/mail.module';
+import { InvoiceScanNotificationsService } from './services/invoice-scans/invoice-scan-notifications.service';
+import { InvoiceScanReminderCron } from './cron/invoice-scan-reminder.cron';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([QboConnection, Company, Lead, InvoiceScan]),
     S3Module,
+    MailModule,
     HttpModule,
     CacheModule.register({
       ttl: 300_000,
@@ -70,6 +74,8 @@ import { S3Module } from '../s3/s3.module';
     QuickbooksTokenRefreshCron,
     ProjectQboEnrichmentService,
     InvoiceScansService,
+    InvoiceScanNotificationsService,
+    InvoiceScanReminderCron,
   ],
   exports: [
     QuickbooksAuthService,

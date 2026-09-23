@@ -67,6 +67,14 @@ export class EnvironmentVariables {
   @IsOptional()
   OPENAI_API_KEY: string;
 
+  /**
+   * Who receives the invoice-scan emails (ready to review, pending reminder).
+   * Defaults to the finance inbox in production and to the developer elsewhere.
+   */
+  @IsString()
+  @IsOptional()
+  INVOICE_SCAN_NOTIFY_EMAIL: string;
+
   // Trello
   @IsString()
   @IsOptional()
