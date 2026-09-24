@@ -81,6 +81,10 @@ export class InvoiceScan {
   @Column({ name: 'entered_by', type: 'integer', nullable: true })
   enteredBy: number | null;
 
+  /** Free-text note from the reviewer, shown in the invoice tables. */
+  @Column({ type: 'text', nullable: true })
+  comments: string | null;
+
   /** When the "ready to review" email went out. */
   @Column({ name: 'notified_at', type: 'timestamptz', nullable: true })
   notifiedAt: Date | null;

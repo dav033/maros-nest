@@ -4,6 +4,7 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -107,6 +108,18 @@ export class UpdateInvoiceScanDto {
   @ValidateNested({ each: true })
   @Type(() => InvoiceLineItemDto)
   lineItems?: InvoiceLineItemDto[];
+
+  /** Reviewer note. Empty or null clears it. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  comments?: string | null;
+
+  /** User responsible for entering the invoice. Null clears it. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  enteredBy?: number | null;
 
   /** true = entered in QuickBooks (moves to the completed table); false = back to pending. */
   @IsOptional()

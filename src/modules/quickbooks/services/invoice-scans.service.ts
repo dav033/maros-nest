@@ -16,6 +16,7 @@ import type { AuthenticatedUser } from '../../../common/auth/authenticated-user'
 import { CreateInvoiceScanDto } from '../dto/create-invoice-scan.dto';
 import { UpdateInvoiceScanDto } from '../dto/update-invoice-scan.dto';
 import { Lead } from '../../../entities/lead.entity';
+import { User } from '../../../entities/user.entity';
 import {
   emptyExtractedInvoice,
   parseInvoiceExtraction,
@@ -146,6 +147,8 @@ export class InvoiceScansService {
     @InjectRepository(Lead)
     private readonly leads: Repository<Lead>,
     private readonly notifications: InvoiceScanNotificationsService,
+    @InjectRepository(User)
+    private readonly users: Repository<User>,
   ) {}
 
   /** Every pending scan plus the most recently completed ones. */
@@ -209,6 +212,7 @@ export class InvoiceScansService {
       warnings: [],
       enteredAt: null,
       enteredBy: null,
+      comments: null,
       notifiedAt: null,
       remindedAt: null,
     });
@@ -236,6 +240,10 @@ export class InvoiceScansService {
         throw new BadRequestException(`No project found with number ${projectNumber}.`);
       }
       scan.projectNumber = projectNumber;
+    }
+
+    if (input.comments !== undefined) {
+      scan.comments = input.comments?.trim() || null;
     }
 
     const edited = EDITABLE_FIELDS.filter((field) => input[field] !== undefined);
@@ -293,6 +301,17 @@ export class InvoiceScansService {
       }
       scan.enteredAt = input.entered ? new Date() : null;
       scan.enteredBy = input.entered ? (actor?.id ?? null) : null;
+    }
+
+    // An explicit user wins over the actor set by the checkbox above.
+    if (input.enteredBy !== undefined) {
+      if (
+        input.enteredBy !== null &&
+        !(await this.users.exists({ where: { id: input.enteredBy } }))
+      ) {
+        throw new BadRequestException('That user does not exist.');
+      }
+      scan.enteredBy = input.enteredBy;
     }
 
     return this.toPublicScan(await this.scans.save(scan));
@@ -398,6 +417,7 @@ export class InvoiceScansService {
       qboSuggestions: scan.qboSuggestions,
       errorMessage: scan.errorMessage,
       projectNumber: scan.projectNumber,
+      comments: scan.comments ?? null,
       warnings: scan.warnings ?? [],
       enteredAt: scan.enteredAt ?? null,
       enteredBy: scan.enteredBy ?? null,
