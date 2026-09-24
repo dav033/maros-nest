@@ -81,6 +81,10 @@ export class InvoiceScan {
   @Column({ name: 'entered_by', type: 'integer', nullable: true })
   enteredBy: number | null;
 
+  /** User who last edited the scan (any field, or the entered checkbox). */
+  @Column({ name: 'updated_by', type: 'integer', nullable: true })
+  updatedBy: number | null;
+
   /** Free-text note from the reviewer, shown in the invoice tables. */
   @Column({ type: 'text', nullable: true })
   comments: string | null;

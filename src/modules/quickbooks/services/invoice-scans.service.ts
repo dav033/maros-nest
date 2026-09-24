@@ -16,7 +16,6 @@ import type { AuthenticatedUser } from '../../../common/auth/authenticated-user'
 import { CreateInvoiceScanDto } from '../dto/create-invoice-scan.dto';
 import { UpdateInvoiceScanDto } from '../dto/update-invoice-scan.dto';
 import { Lead } from '../../../entities/lead.entity';
-import { User } from '../../../entities/user.entity';
 import {
   emptyExtractedInvoice,
   parseInvoiceExtraction,
@@ -147,8 +146,6 @@ export class InvoiceScansService {
     @InjectRepository(Lead)
     private readonly leads: Repository<Lead>,
     private readonly notifications: InvoiceScanNotificationsService,
-    @InjectRepository(User)
-    private readonly users: Repository<User>,
   ) {}
 
   /** Every pending scan plus the most recently completed ones. */
@@ -212,6 +209,7 @@ export class InvoiceScansService {
       warnings: [],
       enteredAt: null,
       enteredBy: null,
+      updatedBy: null,
       comments: null,
       notifiedAt: null,
       remindedAt: null,
@@ -303,16 +301,8 @@ export class InvoiceScansService {
       scan.enteredBy = input.entered ? (actor?.id ?? null) : null;
     }
 
-    // An explicit user wins over the actor set by the checkbox above.
-    if (input.enteredBy !== undefined) {
-      if (
-        input.enteredBy !== null &&
-        !(await this.users.exists({ where: { id: input.enteredBy } }))
-      ) {
-        throw new BadRequestException('That user does not exist.');
-      }
-      scan.enteredBy = input.enteredBy;
-    }
+    // Whoever saves a change is recorded as the last editor.
+    if (actor?.id) scan.updatedBy = actor.id;
 
     return this.toPublicScan(await this.scans.save(scan));
   }
@@ -421,6 +411,7 @@ export class InvoiceScansService {
       warnings: scan.warnings ?? [],
       enteredAt: scan.enteredAt ?? null,
       enteredBy: scan.enteredBy ?? null,
+      updatedBy: scan.updatedBy ?? null,
       createdAt: scan.createdAt,
       updatedAt: scan.updatedAt,
     };

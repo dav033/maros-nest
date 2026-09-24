@@ -4,7 +4,6 @@ import type { Repository } from 'typeorm';
 import { S3Service } from '../../s3/services/s3.service';
 import { InvoiceScan } from '../entities/invoice-scan.entity';
 import { Lead } from '../../../entities/lead.entity';
-import { User } from '../../../entities/user.entity';
 import { QuickbooksApiService } from './core/quickbooks-api.service';
 import { QuickbooksFinancialsService } from './financials/quickbooks-financials.service';
 import { InvoiceScansService } from './invoice-scans.service';
@@ -26,6 +25,7 @@ function baseScan(overrides: Partial<InvoiceScan> = {}): InvoiceScan {
     warnings: [],
     enteredAt: null,
     enteredBy: null,
+    updatedBy: null,
     comments: null,
     notifiedAt: null,
     remindedAt: null,
@@ -78,7 +78,6 @@ interface Harness {
   financials: { getDefaultRealmId: jest.Mock };
   config: { get: jest.Mock };
   leads: { exists: jest.Mock; find: jest.Mock };
-  users: { exists: jest.Mock };
   notifications: { notifyScanReady: jest.Mock };
   savedStatuses: string[];
   service: InvoiceScansService;
@@ -130,7 +129,6 @@ function harness(opts: {
       .fn()
       .mockResolvedValue((opts.leadNumbers ?? []).map((leadNumber) => ({ leadNumber }))),
   };
-  const users = { exists: jest.fn().mockResolvedValue(true) };
   const notifications = { notifyScanReady: jest.fn().mockResolvedValue(true) };
   const service = new InvoiceScansService(
     scans as unknown as Repository<InvoiceScan>,
@@ -140,9 +138,8 @@ function harness(opts: {
     financials as unknown as QuickbooksFinancialsService,
     leads as unknown as Repository<Lead>,
     notifications as unknown as InvoiceScanNotificationsService,
-    users as unknown as Repository<User>,
   );
-  return { scan, scans, s3, qboApi, financials, config, leads, users, notifications, savedStatuses, service };
+  return { scan, scans, s3, qboApi, financials, config, leads, notifications, savedStatuses, service };
 }
 
 describe('InvoiceScansService', () => {
@@ -288,18 +285,10 @@ describe('InvoiceScansService', () => {
       expect((await h.service.update(SCAN_ID, { comments: '' })).comments).toBeNull();
     });
 
-    it('reassigns the user after checking that they exist', async () => {
+    it('records the user who saved the change as the last editor', async () => {
       const h = harness();
-      const result = await h.service.update(SCAN_ID, { enteredBy: 7 });
-      expect(h.users.exists).toHaveBeenCalledWith({ where: { id: 7 } });
-      expect(result.enteredBy).toBe(7);
-    });
-
-    it('rejects an unknown user and lets null clear the user', async () => {
-      const h = harness({ scan: { enteredBy: 3 } });
-      h.users.exists.mockResolvedValueOnce(false);
-      await expect(h.service.update(SCAN_ID, { enteredBy: 999 })).rejects.toThrow('does not exist');
-      expect((await h.service.update(SCAN_ID, { enteredBy: null })).enteredBy).toBeNull();
+      const result = await h.service.update(SCAN_ID, { comments: 'Checked' }, { id: 7 });
+      expect(result.updatedBy).toBe(7);
     });
 
     it('edits extracted fields and line items without touching the rest', async () => {
@@ -403,7 +392,6 @@ describe('InvoiceScansService', () => {
         {} as QuickbooksFinancialsService,
         {} as Repository<Lead>,
         {} as InvoiceScanNotificationsService,
-        {} as Repository<User>,
       );
 
       const result = await service.list();
