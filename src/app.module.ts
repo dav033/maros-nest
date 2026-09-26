@@ -28,6 +28,7 @@ import { UsersModule } from './modules/users/users.module';
 import { TasksModule } from './modules/tasks/tasks.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ManagedFilesModule } from './modules/managed-files/managed-files.module';
+import { GoogleCalendarModule } from './modules/google-calendar/google-calendar.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { ManagedFilesModule } from './modules/managed-files/managed-files.module
     NotificationsModule,
     TasksModule,
     ManagedFilesModule,
+    GoogleCalendarModule,
   ],
   controllers: [AppController],
   providers: [

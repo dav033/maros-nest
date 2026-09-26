@@ -236,6 +236,24 @@ export class EnvironmentVariables {
   @IsString()
   @IsOptional()
   QB_ENCRYPTION_KEY: string;
+
+  // Google Calendar / Meet
+  @IsString()
+  @IsOptional()
+  GOOGLE_CLIENT_ID: string;
+
+  @IsString()
+  @IsOptional()
+  GOOGLE_CLIENT_SECRET: string;
+
+  @IsUrl({ require_tld: false })
+  @IsOptional()
+  GOOGLE_CALENDAR_REDIRECT_URI: string;
+
+  /** 64 hex characters = 32 bytes for AES-256-GCM. */
+  @IsString()
+  @IsOptional()
+  GOOGLE_TOKEN_ENCRYPTION_KEY: string;
 }
 
 export function validate(config: Record<string, unknown>) {
@@ -245,6 +263,10 @@ export function validate(config: Record<string, unknown>) {
     'QB_SECRET_KEY',
     'QB_REDIRECT_URI',
     'QB_ENCRYPTION_KEY',
+    'GOOGLE_CLIENT_ID',
+    'GOOGLE_CLIENT_SECRET',
+    'GOOGLE_CALENDAR_REDIRECT_URI',
+    'GOOGLE_TOKEN_ENCRYPTION_KEY',
   ]) {
     if (normalizedConfig[key] === '') delete normalizedConfig[key];
   }

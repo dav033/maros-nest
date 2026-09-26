@@ -78,6 +78,7 @@ import { InvoiceScanReminderCron } from './cron/invoice-scan-reminder.cron';
     InvoiceScanReminderCron,
   ],
   exports: [
+    TokenCryptoService,
     QuickbooksAuthService,
     QuickbooksApiService,
     QuickbooksFinancialsService,
