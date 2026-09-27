@@ -41,3 +41,29 @@ export class CreateGoogleCalendarMeetingDto {
   @IsEmail({}, { each: true })
   attendees?: string[];
 }
+
+export class UpdateGoogleCalendarMeetingDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  title?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  startsAt?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  endsAt?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  timeZone?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(25)
+  @IsEmail({}, { each: true })
+  attendees?: string[];
+}

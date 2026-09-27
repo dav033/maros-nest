@@ -15,7 +15,10 @@ import type { Permission } from '../../common/auth/permissions';
 import { Lead } from '../../entities/lead.entity';
 import { Task } from '../../entities/task.entity';
 import { TokenCryptoService } from '../quickbooks/services/core/token-crypto.service';
-import { CreateGoogleCalendarMeetingDto } from './dto/create-google-calendar-meeting.dto';
+import {
+  CreateGoogleCalendarMeetingDto,
+  UpdateGoogleCalendarMeetingDto,
+} from './dto/create-google-calendar-meeting.dto';
 import { GoogleCalendarConnection } from './entities/google-calendar-connection.entity';
 import {
   GoogleCalendarEntityKind,
@@ -33,9 +36,9 @@ type GoogleCalendarMeetingResponse = Pick<
   | 'startsAt'
   | 'endsAt'
   | 'attendees'
->;
+> & { isOrganizer: boolean };
 
-const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events.owned';
 const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 
 @Injectable()
@@ -118,20 +121,19 @@ export class GoogleCalendarService {
       throw new BadRequestException('entityKind and entityId must be provided together.');
     }
     if (entityKind) this.requirePermission(user, entityKind, 'read');
-    const where: {
-      userId: number;
-      entityKind?: GoogleCalendarEntityKind;
-      entityId?: number;
-    } = { userId: user.id };
+    const query = this.meetings
+      .createQueryBuilder('meeting')
+      .where(
+        '(meeting.user_id = :userId OR meeting.attendees @> CAST(:attendee AS jsonb))',
+        { userId: user.id, attendee: JSON.stringify([user.email.toLowerCase()]) },
+      );
     if (entityKind && entityId !== undefined) {
-      where.entityKind = entityKind;
-      where.entityId = entityId;
+      query
+        .andWhere('meeting.entity_kind = :entityKind', { entityKind })
+        .andWhere('meeting.entity_id = :entityId', { entityId });
     }
-    const meetings = await this.meetings.find({
-      where,
-      order: { startsAt: 'ASC' },
-    });
-    return meetings.map((meeting) => this.toMeetingResponse(meeting));
+    const meetings = await query.orderBy('meeting.starts_at', 'ASC').getMany();
+    return meetings.map((meeting) => this.toMeetingResponse(meeting, user.id));
   }
 
   async createMeeting(
@@ -221,7 +223,7 @@ export class GoogleCalendarService {
           requestBody: { attendees: attendees.map((email) => ({ email })) },
         });
       }
-      return this.toMeetingResponse(meeting);
+      return this.toMeetingResponse(meeting, user.id);
     } catch (error) {
       if (googleEventId) {
         await calendar.events
@@ -233,6 +235,84 @@ export class GoogleCalendarService {
         throw error;
       }
       throw new BadGatewayException('Google Calendar could not create the meeting.');
+    }
+  }
+
+  async updateMeeting(
+    user: AuthenticatedUser,
+    id: number,
+    dto: UpdateGoogleCalendarMeetingDto,
+  ): Promise<GoogleCalendarMeetingResponse> {
+    const meeting = await this.meetings.findOneBy({ id, userId: user.id });
+    if (!meeting) throw new NotFoundException('Meeting not found.');
+
+    const start = dto.startsAt ? new Date(dto.startsAt) : meeting.startsAt;
+    const end = dto.endsAt ? new Date(dto.endsAt) : meeting.endsAt;
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) {
+      throw new BadRequestException('The meeting end must be after its start.');
+    }
+    if (end.getTime() - start.getTime() > 8 * 60 * 60 * 1000) {
+      throw new BadRequestException('Meetings cannot be longer than 8 hours.');
+    }
+    const timeZone = dto.timeZone ?? 'UTC';
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone });
+    } catch {
+      throw new BadRequestException('A valid time zone is required.');
+    }
+    const title = dto.title?.trim() ?? meeting.title;
+    if (!title) throw new BadRequestException('A meeting title is required.');
+    const attendees = dto.attendees === undefined
+      ? meeting.attendees
+      : [...new Set(dto.attendees.map((email) => email.trim().toLowerCase()))];
+
+    try {
+      const calendar = google.calendar({
+        version: 'v3',
+        auth: await this.getAuthorizedClient(user.id),
+      });
+      const { data: event } = await calendar.events.patch({
+        calendarId: 'primary',
+        eventId: meeting.googleEventId,
+        conferenceDataVersion: 1,
+        sendUpdates: 'all',
+        requestBody: {
+          summary: title,
+          start: { dateTime: start.toISOString(), timeZone },
+          end: { dateTime: end.toISOString(), timeZone },
+          attendees: attendees.map((email) => ({ email })),
+        },
+      });
+      meeting.title = title;
+      meeting.startsAt = start;
+      meeting.endsAt = end;
+      meeting.attendees = attendees;
+      meeting.calendarUrl = event.htmlLink ?? meeting.calendarUrl;
+      const saved = await this.meetings.save(meeting);
+      return this.toMeetingResponse(saved, user.id);
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadGatewayException('Google Calendar could not update the meeting.');
+    }
+  }
+
+  async cancelMeeting(user: AuthenticatedUser, id: number): Promise<void> {
+    const meeting = await this.meetings.findOneBy({ id, userId: user.id });
+    if (!meeting) throw new NotFoundException('Meeting not found.');
+    try {
+      const calendar = google.calendar({
+        version: 'v3',
+        auth: await this.getAuthorizedClient(user.id),
+      });
+      await calendar.events.delete({
+        calendarId: 'primary',
+        eventId: meeting.googleEventId,
+        sendUpdates: 'all',
+      });
+      await this.meetings.delete({ id, userId: user.id });
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new BadGatewayException('Google Calendar could not cancel the meeting.');
     }
   }
 
@@ -289,7 +369,10 @@ export class GoogleCalendarService {
       null;
   }
 
-  private toMeetingResponse(meeting: GoogleCalendarMeeting): GoogleCalendarMeetingResponse {
+  private toMeetingResponse(
+    meeting: GoogleCalendarMeeting,
+    userId: number,
+  ): GoogleCalendarMeetingResponse {
     return {
       id: meeting.id,
       entityKind: meeting.entityKind,
@@ -300,6 +383,7 @@ export class GoogleCalendarService {
       startsAt: meeting.startsAt,
       endsAt: meeting.endsAt,
       attendees: meeting.attendees,
+      isOrganizer: meeting.userId === userId,
     };
   }
 

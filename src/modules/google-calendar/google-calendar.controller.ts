@@ -2,7 +2,11 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
+  Param,
+  ParseIntPipe,
+  Patch,
   Post,
   Query,
   Req,
@@ -14,7 +18,10 @@ import { randomBytes } from 'crypto';
 import type { Request, Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/auth/authenticated-user';
-import { CreateGoogleCalendarMeetingDto } from './dto/create-google-calendar-meeting.dto';
+import {
+  CreateGoogleCalendarMeetingDto,
+  UpdateGoogleCalendarMeetingDto,
+} from './dto/create-google-calendar-meeting.dto';
 import type { GoogleCalendarEntityKind } from './entities/google-calendar-meeting.entity';
 import { GoogleCalendarService } from './google-calendar.service';
 
@@ -117,6 +124,25 @@ export class GoogleCalendarController {
   ) {
     if (!user) throw new UnauthorizedException();
     return this.service.createMeeting(user, dto);
+  }
+
+  @Patch('meetings/:id')
+  updateMeeting(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateGoogleCalendarMeetingDto,
+    @CurrentUser() user: AuthenticatedUser | undefined,
+  ) {
+    if (!user) throw new UnauthorizedException();
+    return this.service.updateMeeting(user, id, dto);
+  }
+
+  @Delete('meetings/:id')
+  cancelMeeting(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser | undefined,
+  ) {
+    if (!user) throw new UnauthorizedException();
+    return this.service.cancelMeeting(user, id);
   }
 
   private safeReturnPath(value?: string): string {
