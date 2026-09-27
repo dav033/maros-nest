@@ -18,10 +18,12 @@ import { QuickbooksModule } from '../quickbooks/quickbooks.module';
 import { S3Module } from '../s3/s3.module';
 import { MailModule } from '../mail/mail.module';
 import { TaskWorkspacesModule } from '../task-workspaces/task-workspaces.module';
+import { QuickbooksProjectImportService } from './project-management/services/quickbooks-project-import.service';
+import { QboConnection } from '../quickbooks/entities/qbo-connection.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Project, Lead, ProjectType]),
+    TypeOrmModule.forFeature([Project, Lead, ProjectType, QboConnection]),
     QuickbooksModule,
     S3Module,
     MailModule,
@@ -35,6 +37,7 @@ import { TaskWorkspacesModule } from '../task-workspaces/task-workspaces.module'
     ProjectTypesService,
     ProjectMapper,
     ProjectTypeMapper,
+    QuickbooksProjectImportService,
   ],
   exports: [ProjectsService, ProjectTypesService],
 })

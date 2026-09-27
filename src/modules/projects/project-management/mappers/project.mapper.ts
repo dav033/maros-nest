@@ -36,6 +36,7 @@ export class ProjectMapper {
             : null;
     const dto: any = {
       id: entity.id,
+      qboCustomerId: entity.qboCustomerId ?? null,
       projectProgressStatus: entity.projectProgressStatus,
       overview: entity.overview,
       notes: entity.notes || [],

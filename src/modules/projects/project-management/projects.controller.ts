@@ -22,13 +22,32 @@ import { UpdateEstimateDto } from './dto/update-estimate.dto';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
+import { QuickbooksProjectImportService } from './services/quickbooks-project-import.service';
+import type { ImportQuickbooksProjectDto } from './services/quickbooks-project-import.service';
 
 @ApiTags('projects')
 @Controller('projects')
 // Class-level default; write/delete routes override it below.
 @RequirePermissions('projects:read')
 export class ProjectsController {
-  constructor(private readonly projectsService: ProjectsService) {}
+  constructor(
+    private readonly projectsService: ProjectsService,
+    private readonly quickbooksProjectImport: QuickbooksProjectImportService,
+  ) {}
+
+  @Get('quickbooks-import/jobs')
+  @RequirePermissions('finance:read', 'projects:read')
+  @ApiOperation({ summary: 'List active QuickBooks jobs with matching CRM records' })
+  async getQuickbooksImportJobs() {
+    return this.quickbooksProjectImport.listJobs();
+  }
+
+  @Post('quickbooks-import/import')
+  @RequirePermissions('finance:read', 'projects:write')
+  @ApiOperation({ summary: 'Import a QuickBooks job as a CRM project linked by exact job ID' })
+  async importQuickbooksJob(@Body() dto: ImportQuickbooksProjectDto) {
+    return this.quickbooksProjectImport.importJob(dto);
+  }
 
   @Get('all')
   @ApiOperation({ summary: 'Get all projects' })

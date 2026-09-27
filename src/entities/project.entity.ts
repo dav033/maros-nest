@@ -4,11 +4,16 @@ import {
   Column,
   OneToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { ProjectProgressStatus } from '../common/enums/project-progress-status.enum';
 import { Lead } from './lead.entity';
 
 @Entity('projects')
+@Index('idx_projects_qbo_customer_id_unique', ['qboCustomerId'], {
+  unique: true,
+  where: '"qbo_customer_id" IS NOT NULL',
+})
 export class Project {
   @PrimaryGeneratedColumn()
   id: number;
@@ -23,6 +28,9 @@ export class Project {
 
   @Column({ nullable: true })
   quickbooks?: boolean;
+
+  @Column({ name: 'qbo_customer_id', type: 'varchar', length: 50, nullable: true })
+  qboCustomerId?: string | null;
 
   @Column({ type: 'text', nullable: true })
   overview?: string;
