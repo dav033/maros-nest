@@ -36,10 +36,11 @@ import { S3Module } from '../s3/s3.module';
 import { MailModule } from '../mail/mail.module';
 import { InvoiceScanNotificationsService } from './services/invoice-scans/invoice-scan-notifications.service';
 import { InvoiceScanReminderCron } from './cron/invoice-scan-reminder.cron';
+import { Project } from '../../entities/project.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([QboConnection, Company, Lead, InvoiceScan]),
+    TypeOrmModule.forFeature([QboConnection, Company, Lead, InvoiceScan, Project]),
     S3Module,
     MailModule,
     HttpModule,

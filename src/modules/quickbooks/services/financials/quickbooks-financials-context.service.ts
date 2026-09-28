@@ -2,8 +2,9 @@ import { Inject, Injectable } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { QboConnection } from '../../entities/qbo-connection.entity';
+import { Project } from '../../../../entities/project.entity';
 import { QboReauthorizationRequiredException } from '../../exceptions/qbo-reauthorization-required.exception';
 import { QuickbooksApiService } from '../core/quickbooks-api.service';
 import { mapQboCustomersToProjects } from './quickbooks-financials.helpers';
@@ -16,6 +17,8 @@ export class QuickbooksFinancialsContextService {
   constructor(
     @InjectRepository(QboConnection)
     private readonly connectionRepo: Repository<QboConnection>,
+    @InjectRepository(Project)
+    private readonly projectRepo: Repository<Project>,
     private readonly apiService: QuickbooksApiService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
@@ -59,6 +62,27 @@ export class QuickbooksFinancialsContextService {
     const jobObjectMap: Record<string, QboCustomer> = {};
 
     const projectMatches = mapQboCustomersToProjects(projectNumbers, customers);
+
+    // An imported job's QBO ID is authoritative. This is what keeps a base
+    // project and its CO variants financially separate even when their names
+    // share the same project number.
+    const linkedProjects = projectNumbers.length
+      ? await this.projectRepo.find({
+          where: { lead: { leadNumber: In(projectNumbers) } },
+          relations: ['lead'],
+        })
+      : [];
+    const customerById = new Map<string, QboCustomer>(
+      customers.map((customer) => [String(customer.Id), customer] as const),
+    );
+    for (const project of linkedProjects) {
+      const leadNumber = project.lead?.leadNumber;
+      const customer = project.qboCustomerId
+        ? customerById.get(project.qboCustomerId)
+        : null;
+      if (leadNumber && customer) projectMatches.set(leadNumber, customer);
+    }
+
     for (const [projectNumber, customer] of projectMatches) {
       jobMap[projectNumber] = String(customer.Id);
       jobObjectMap[projectNumber] = customer;

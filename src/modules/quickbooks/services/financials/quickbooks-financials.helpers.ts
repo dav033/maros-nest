@@ -48,6 +48,11 @@ function escapeRegExp(value: string): string {
 function projectNumberPatternPart(value: string): string {
   // QBO occasionally inserts a space around the dash (`022 -0325`) even
   // though the CRM stores the canonical `022-0325` form.
+  const changeOrder = value.match(/^(.*?)[\\s,-]*CO[\\s-]*(\\d+)$/i);
+  if (changeOrder) {
+    const ordinal = String(Number(changeOrder[2]));
+    return `${escapeRegExp(changeOrder[1]).replace(/-/g, '\\s*-\\s*')}[\\s,-]*CO[\\s-]*0*${ordinal}`;
+  }
   return escapeRegExp(value).replace(/-/g, '\\s*-\\s*');
 }
 
@@ -69,7 +74,18 @@ export function matchesProjectNumber(
     `(^|[^\\p{L}\\p{N}])${projectNumberPatternPart(number)}(?=$|[^\\p{L}\\p{N}])`,
     'iu',
   );
-  return pattern.test(name);
+  if (!pattern.test(name)) return false;
+
+  // A base project number is also a prefix of its change orders. Never let a
+  // base project's financials resolve to a CO job just because it was first.
+  if (!/CO[\\s-]*\\d+$/i.test(number)) {
+    const base = new RegExp(
+      `^\\s*\\[?${projectNumberPatternPart(number)}\\]?[\\s,-]+CO[\\s-]*\\d+(?=$|[\\s,|:-])`,
+      'iu',
+    );
+    if (base.test(name)) return false;
+  }
+  return true;
 }
 
 /**

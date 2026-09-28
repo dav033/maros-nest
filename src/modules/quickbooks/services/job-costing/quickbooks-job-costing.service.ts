@@ -228,21 +228,12 @@ export class QuickbooksJobCostingService extends QuickbooksJobCostingBase {
     const realmId = await this.resolveRealmId(params.realmId);
 
     if (qboCustomerId) {
-      const raw = await this.fetchCustomerById(realmId, qboCustomerId);
-      const displayName = this.stringValue(raw['DisplayName']);
-      const ref: QboRef = {
-        value: qboCustomerId,
-        ...(displayName && { name: displayName }),
-      };
-      return {
-        found: true,
-        ...(projectNumber && { projectNumber }),
-        qboCustomerId,
-        ...(displayName && { displayName }),
-        refs: [ref],
-        ...(Object.keys(raw).length && { raw }),
-      };
+      return this.projectRefFromCustomerId(realmId, projectNumber, qboCustomerId);
     }
+
+    const linkedJobIds = await this.financials.getProjectJobIds([projectNumber], realmId);
+    const linkedJobId = linkedJobIds[projectNumber];
+    if (linkedJobId) return this.projectRefFromCustomerId(realmId, projectNumber, linkedJobId);
 
     const customers = await this.findCustomersForProjectNumber(realmId, projectNumber);
     const match = customers[0];
@@ -293,6 +284,7 @@ export class QuickbooksJobCostingService extends QuickbooksJobCostingBase {
     projectNumbers: string[],
     realmId: string,
   ): Promise<Map<string, QboResolvedProjectRef>> {
+    const linkedJobIds = await this.financials.getProjectJobIds(projectNumbers, realmId);
     const jobs = this.asArray(
       await this.apiService.queryAll(realmId, 'Customer', { where: 'Job = true' }),
     ) as QboCustomerRecord[];
@@ -306,6 +298,9 @@ export class QuickbooksJobCostingService extends QuickbooksJobCostingBase {
     const refs = new Map<string, QboResolvedProjectRef>();
     for (const projectNumber of projectNumbers) {
       const match =
+        (linkedJobIds[projectNumber]
+          ? jobs.find((customer) => this.stringValue(customer.Id) === linkedJobIds[projectNumber])
+          : undefined) ??
         jobs.find((customer) => this.customerMatchesProjectNumber(customer, projectNumber)) ??
         customers.find((customer) => this.customerMatchesProjectNumber(customer, projectNumber));
       if (!match) {
@@ -329,5 +324,26 @@ export class QuickbooksJobCostingService extends QuickbooksJobCostingBase {
       });
     }
     return refs;
+  }
+
+  private async projectRefFromCustomerId(
+    realmId: string,
+    projectNumber: string,
+    qboCustomerId: string,
+  ): Promise<QboResolvedProjectRef> {
+    const raw = await this.fetchCustomerById(realmId, qboCustomerId);
+    const displayName = this.stringValue(raw['DisplayName']);
+    const ref: QboRef = {
+      value: qboCustomerId,
+      ...(displayName && { name: displayName }),
+    };
+    return {
+      found: true,
+      ...(projectNumber && { projectNumber }),
+      qboCustomerId,
+      ...(displayName && { displayName }),
+      refs: [ref],
+      ...(Object.keys(raw).length && { raw }),
+    };
   }
 }

@@ -2,7 +2,9 @@
 -- clients must not read invoice images or financial data through PostgREST.
 CREATE TABLE IF NOT EXISTS public.invoice_scans (
   id uuid PRIMARY KEY,
-  file_key text NOT NULL,
+  record_type varchar(20) NOT NULL DEFAULT 'invoice'
+    CHECK (record_type IN ('invoice', 'transaction')),
+  file_key text,
   file_name varchar(255) NOT NULL,
   content_type varchar(100) NOT NULL,
   status varchar(20) NOT NULL DEFAULT 'uploaded'

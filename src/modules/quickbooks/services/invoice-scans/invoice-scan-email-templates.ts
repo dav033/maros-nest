@@ -6,8 +6,9 @@ import {
 
 export interface InvoiceEmailItem {
   id: string;
-  /** Invoice number or, failing that, the file name. */
+  /** Invoice number, transaction description, or file name. */
   label: string;
+  kind?: 'invoice' | 'transaction';
   counterpartyName: string | null;
   projectNumber: string | null;
   total: number | null;
@@ -91,21 +92,28 @@ export function renderInvoicePendingReminderEmail(opts: {
   listUrl: string;
 }): RenderedEmail {
   const count = opts.items.length;
-  const subject = `${count} invoice${count === 1 ? '' : 's'} still to enter in QuickBooks`;
+  const includesTransactions = opts.items.some((item) => item.kind === 'transaction');
+  const subject = includesTransactions
+    ? `${count} item${count === 1 ? '' : 's'} still to enter in QuickBooks`
+    : `${count} invoice${count === 1 ? '' : 's'} still to enter in QuickBooks`;
   const textLines = [
-    `${count} scanned invoice${count === 1 ? ' is' : 's are'} waiting to be entered in QuickBooks:`,
+    includesTransactions
+      ? `${count} invoice${count === 1 ? ' or payment is' : 's or payments are'} waiting to be entered in QuickBooks:`
+      : `${count} scanned invoice${count === 1 ? ' is' : 's are'} waiting to be entered in QuickBooks:`,
     '',
     ...opts.items.map(
       (item) => `  - ${itemLine(item)} · pending ${item.daysPending} day${item.daysPending === 1 ? '' : 's'}\n    ${item.url}`,
     ),
     '',
-    `All pending invoices: ${opts.listUrl}`,
+    `${includesTransactions ? 'All pending items' : 'All pending invoices'}: ${opts.listUrl}`,
   ];
   const html = renderEmailLayout({
-    preheader: `${count} invoice${count === 1 ? '' : 's'} waiting to be entered in QuickBooks`,
-    heading: 'Invoices waiting to be entered',
+    preheader: includesTransactions
+      ? `${count} item${count === 1 ? '' : 's'} waiting to be entered in QuickBooks`
+      : `${count} invoice${count === 1 ? '' : 's'} waiting to be entered in QuickBooks`,
+    heading: includesTransactions ? 'Items waiting to be entered' : 'Invoices waiting to be entered',
     bodyHtml: `
-      <p style="margin:0 0 6px;font-size:14px;line-height:1.5;color:${EMAIL_COLOR.text};">These scanned invoices have not been marked as entered in QuickBooks yet. You will get this reminder every three days until they are.</p>
+      <p style="margin:0 0 6px;font-size:14px;line-height:1.5;color:${EMAIL_COLOR.text};">${includesTransactions ? 'These invoices and payments have' : 'These scanned invoices have'} not been marked as entered in QuickBooks yet. You will get this reminder every three days until they are.</p>
       <ul style="margin:12px 0 0;padding:0;list-style:none;">
         ${opts.items
           .map((item) =>
@@ -117,7 +125,7 @@ export function renderInvoicePendingReminderEmail(opts: {
           .join('')}
       </ul>
     `,
-    ctaLabel: 'Open pending invoices',
+    ctaLabel: includesTransactions ? 'Open pending items' : 'Open pending invoices',
     ctaUrl: opts.listUrl,
   });
   return { subject, text: textLines.join('\n'), html };

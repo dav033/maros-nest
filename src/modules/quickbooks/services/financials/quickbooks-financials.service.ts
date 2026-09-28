@@ -51,6 +51,15 @@ export class QuickbooksFinancialsService {
     return this.projectsService.getProjectFinancials(projectNumbers, realmId);
   }
 
+  async getProjectJobIds(
+    projectNumbers: string[],
+    realmId?: string,
+  ): Promise<Record<string, string>> {
+    const effectiveRealmId = realmId ?? await this.contextService.resolveDefaultRealmId();
+    const context = await this.contextService.resolveJobs(effectiveRealmId, projectNumbers);
+    return context.jobMap;
+  }
+
   async getPaymentSchedulesByProjects(
     projectNumbers: string[],
     realmId?: string,

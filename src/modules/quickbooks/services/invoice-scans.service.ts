@@ -13,6 +13,7 @@ import axios from 'axios';
 import { randomUUID } from 'crypto';
 import { IsNull, Not, Repository } from 'typeorm';
 import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
+import { CreateManualInvoiceTransactionDto } from '../dto/create-manual-invoice-transaction.dto';
 import { CreateInvoiceScanDto } from '../dto/create-invoice-scan.dto';
 import { UpdateInvoiceScanDto } from '../dto/update-invoice-scan.dto';
 import { Lead } from '../../../entities/lead.entity';
@@ -167,8 +168,9 @@ export class InvoiceScansService {
 
   async get(
     id: string,
-  ): Promise<InvoiceScanView & { imageUrl: string }> {
+  ): Promise<InvoiceScanView & { imageUrl?: string }> {
     const scan = await this.findScan(id);
+    if (!scan.fileKey) return this.toPublicScan(scan);
     const image = await this.s3.getPresignedGetUrl({
       key: scan.fileKey,
       expiresInSeconds: 900,
@@ -198,6 +200,7 @@ export class InvoiceScansService {
     });
     const scan = this.scans.create({
       id: randomUUID(),
+      recordType: 'invoice',
       fileKey: upload.key,
       fileName: input.fileName,
       contentType: input.contentType,
@@ -217,6 +220,58 @@ export class InvoiceScansService {
     await this.scans.save(scan);
 
     return { id: scan.id, uploadUrl: upload.url };
+  }
+
+  async createManualTransaction(
+    input: CreateManualInvoiceTransactionDto,
+    actor: Pick<AuthenticatedUser, 'id'>,
+  ): Promise<InvoiceScanView> {
+    const projectNumber = input.projectNumber?.trim() || null;
+    if (
+      projectNumber &&
+      !(await this.leads.exists({ where: { leadNumber: projectNumber } }))
+    ) {
+      throw new BadRequestException(`No project found with number ${projectNumber}.`);
+    }
+
+    const description = input.description.trim();
+    const amount = input.amount;
+    const scan = this.scans.create({
+      id: randomUUID(),
+      recordType: 'transaction',
+      fileKey: null,
+      fileName: description,
+      contentType: 'application/x-manual-transaction',
+      status: 'needs_review',
+      extractedData: {
+        direction: 'unknown',
+        classification: 'other',
+        counterpartyName: input.counterpartyName?.trim() || null,
+        invoiceNumber: null,
+        issueDate: input.transactionDate,
+        dueDate: null,
+        currency: input.currency?.trim().toUpperCase() || 'USD',
+        subtotal: amount,
+        taxTotal: null,
+        total: amount,
+        paymentStatus: 'paid',
+        description,
+        transactionDirection: input.direction,
+        confidence: 1,
+        lineItems: [],
+      },
+      qboSuggestions: {},
+      errorMessage: null,
+      projectNumber,
+      warnings: [],
+      enteredAt: null,
+      enteredBy: null,
+      updatedBy: actor.id,
+      comments: null,
+      notifiedAt: null,
+      remindedAt: null,
+    });
+    return this.toPublicScan(await this.scans.save(scan));
   }
 
   async update(
@@ -309,6 +364,9 @@ export class InvoiceScansService {
 
   async scan(id: string): Promise<InvoiceScanView> {
     const scan = await this.findScan(id);
+    if (!scan.fileKey) {
+      throw new BadRequestException('A manual transaction has no invoice file to scan.');
+    }
     if (scan.status === 'processing') {
       throw new ConflictException('This invoice is already being scanned.');
     }
@@ -400,6 +458,7 @@ export class InvoiceScansService {
   private toPublicScan(scan: InvoiceScan): InvoiceScanView {
     return {
       id: scan.id,
+      recordType: scan.recordType ?? 'invoice',
       fileName: scan.fileName,
       contentType: scan.contentType,
       status: scan.status,

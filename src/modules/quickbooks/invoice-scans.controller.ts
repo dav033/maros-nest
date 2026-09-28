@@ -11,6 +11,7 @@ import { ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUser } from '../../common/auth/authenticated-user';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
+import { CreateManualInvoiceTransactionDto } from './dto/create-manual-invoice-transaction.dto';
 import { CreateInvoiceScanDto } from './dto/create-invoice-scan.dto';
 import { UpdateInvoiceScanDto } from './dto/update-invoice-scan.dto';
 import { InvoiceScansService } from './services/invoice-scans.service';
@@ -34,6 +35,14 @@ export class InvoiceScansController {
   @Post()
   create(@Body() body: CreateInvoiceScanDto) {
     return this.invoiceScans.create(body);
+  }
+
+  @Post('manual')
+  createManual(
+    @Body() body: CreateManualInvoiceTransactionDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.invoiceScans.createManualTransaction(body, user);
   }
 
   @Patch(':id')

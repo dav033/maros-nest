@@ -77,9 +77,19 @@ export class InvoiceScanNotificationsService {
 
   private toItem(scan: InvoiceScan, now: Date): InvoiceEmailItem {
     const invoice = scan.extractedData;
+    const transactionLabel =
+      invoice?.transactionDirection === 'payment_received'
+        ? 'Payment received'
+        : 'Payment made';
     return {
       id: scan.id,
-      label: invoice?.invoiceNumber ? `Invoice ${invoice.invoiceNumber}` : scan.fileName,
+      kind: scan.recordType === 'transaction' ? 'transaction' : 'invoice',
+      label:
+        scan.recordType === 'transaction'
+          ? `${transactionLabel}: ${invoice?.description ?? scan.fileName}`
+          : invoice?.invoiceNumber
+            ? `Invoice ${invoice.invoiceNumber}`
+            : scan.fileName,
       counterpartyName: invoice?.counterpartyName ?? null,
       projectNumber: scan.projectNumber,
       total: invoice?.total ?? null,

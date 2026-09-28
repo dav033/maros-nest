@@ -13,6 +13,9 @@ export type InvoiceScanStatus =
   | 'needs_review'
   | 'failed';
 
+export type InvoiceScanRecordType = 'invoice' | 'transaction';
+export type ManualTransactionDirection = 'payment_made' | 'payment_received';
+
 export interface ExtractedInvoiceData {
   direction: 'outgoing' | 'incoming' | 'unknown';
   classification:
@@ -30,6 +33,9 @@ export interface ExtractedInvoiceData {
   taxTotal: number | null;
   total: number | null;
   paymentStatus: 'paid' | 'unpaid' | 'unknown';
+  /** Present only for manually entered payment transactions. */
+  description?: string | null;
+  transactionDirection?: ManualTransactionDirection;
   confidence: number;
   lineItems: Array<{
     description: string;
@@ -46,8 +52,11 @@ export class InvoiceScan {
   @PrimaryColumn({ type: 'uuid' })
   id: string;
 
-  @Column({ name: 'file_key', type: 'text' })
-  fileKey: string;
+  @Column({ name: 'record_type', type: 'varchar', length: 20, default: 'invoice' })
+  recordType: InvoiceScanRecordType;
+
+  @Column({ name: 'file_key', type: 'text', nullable: true })
+  fileKey: string | null;
 
   @Column({ name: 'file_name', type: 'varchar', length: 255 })
   fileName: string;
