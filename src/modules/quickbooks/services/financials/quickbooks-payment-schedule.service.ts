@@ -50,6 +50,14 @@ const PROJECT_NUMBER_IN_NAME = /\b(\d{3}[A-Za-z]?-\d{4,6})\b/g;
 
 const MAX_CANDIDATES_PER_PROJECT = 3;
 const SCHEDULES_CACHE_TTL_MS = 30 * 60 * 1000;
+/** Espera minima entre dos calentados de la misma clave que no dejaron cache. */
+const WARM_COOLDOWN_MS = 5 * 60 * 1000;
+/**
+ * Tope de claves vivas en el enfriamiento. La clave es el conjunto exacto de
+ * numeros de proyecto, asi que cada filtro distinto del listado crea una clave
+ * nueva y el Map crecia sin limite mientras el proceso siguiera en pie.
+ */
+const MAX_WARM_COOLDOWN_KEYS = 200;
 
 /**
  * Encabezados bajo los que aparece la tabla. Maros emite proposals en inglés y
@@ -70,6 +78,10 @@ const SCHEDULE_ANCHORS = [
 export class QuickbooksPaymentScheduleService {
   private readonly logger = new Logger(QuickbooksPaymentScheduleService.name);
   private readonly helpers = new QuickbooksAttachmentsHelpers();
+  /** Claves cuyo calentado en segundo plano ya esta en marcha. */
+  private readonly warming = new Set<string>();
+  /** Clave -> instante hasta el que no se vuelve a calentar. */
+  private readonly warmCooldownUntil = new Map<string, number>();
 
   constructor(
     private readonly apiService: QuickbooksApiService,
@@ -84,6 +96,44 @@ export class QuickbooksPaymentScheduleService {
    * the project number. Metadata is fetched in batches; PDF downloads stay
    * bounded so this does not multiply QBO requests per project.
    */
+  /**
+   * Camino del LISTADO. Descargar y parsear los PDF cuesta ~15-20s (y en el
+   * peor caso minutos), demasiado para una pantalla que ya tiene el resto de
+   * los numeros. Devuelve el cronograma solo si ya esta en cache; si no, lo
+   * calcula en segundo plano y devuelve `null` — que significa "todavia no se
+   * sabe", no "este proyecto no tiene cronograma".
+   */
+  async getCachedByProjects(
+    projectNumbers: string[],
+    realmId?: string,
+  ): Promise<Map<string, PaymentSchedule | null> | null> {
+    const numbers = [...new Set(projectNumbers.filter(Boolean))];
+    if (!numbers.length) return new Map();
+
+    let effectiveRealmId: string;
+    try {
+      effectiveRealmId = realmId ?? (await this.contextService.resolveDefaultRealmId());
+    } catch {
+      return null;
+    }
+
+    const cacheKey = this.buildCacheKey(effectiveRealmId, numbers);
+    const cached = await this.cacheManager?.get<Array<[string, PaymentSchedule | null]>>(cacheKey);
+    if (cached) return new Map(cached);
+
+    // `getByProjects` puede terminar sin escribir la cache: sale temprano si
+    // QuickBooks no conoce ninguno de estos proyectos, y traga los errores.
+    // Sin enfriamiento eso relanza el calentado en cada peticion, para siempre.
+    if (!this.warming.has(cacheKey) && Date.now() >= (this.warmCooldownUntil.get(cacheKey) ?? 0)) {
+      this.warming.add(cacheKey);
+      void this.getByProjects(numbers, effectiveRealmId).finally(() => {
+        this.warming.delete(cacheKey);
+        this.rememberWarmCooldown(cacheKey);
+      });
+    }
+    return null;
+  }
+
   async getByProjects(
     projectNumbers: string[],
     realmId?: string,
@@ -339,6 +389,25 @@ export class QuickbooksPaymentScheduleService {
       ? 'remaining-balance'
       : 'total';
     return { ...schedule, basis };
+  }
+
+  /**
+   * Anota el enfriamiento y acota el Map: primero barre lo ya vencido (que no
+   * frena nada) y, si aun sobra, tira las claves mas antiguas. Un Map sin tope
+   * era una fuga: la clave incluye el conjunto exacto de numeros de proyecto.
+   */
+  private rememberWarmCooldown(cacheKey: string): void {
+    const now = Date.now();
+    for (const [key, until] of this.warmCooldownUntil) {
+      if (until <= now) this.warmCooldownUntil.delete(key);
+    }
+    this.warmCooldownUntil.delete(cacheKey);
+    while (this.warmCooldownUntil.size >= MAX_WARM_COOLDOWN_KEYS) {
+      const oldest = this.warmCooldownUntil.keys().next().value;
+      if (oldest === undefined) break;
+      this.warmCooldownUntil.delete(oldest);
+    }
+    this.warmCooldownUntil.set(cacheKey, now + WARM_COOLDOWN_MS);
   }
 
   private buildCacheKey(realmId: string, projectNumbers: string[]): string {

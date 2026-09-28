@@ -10,10 +10,25 @@ import { QuickbooksApiService } from '../core/quickbooks-api.service';
 import { mapQboCustomersToProjects } from './quickbooks-financials.helpers';
 import { JobContext, QboCustomer } from './quickbooks-financials.types';
 
-const JOBS_CACHE_TTL_MS = 10_000;
+/**
+ * El indice de jobs de QuickBooks apenas cambia y es la puerta de entrada de
+ * todo el enriquecimiento (financials, pagos, cronogramas). A 10s se volvia a
+ * pedir entero en cada carga de pagina. Lo que si lo invalida — importar o
+ * desvincular un proyecto — llama a `invalidateJobs()`.
+ *
+ * OJO AL DESPLEGAR: esa invalidacion es una generacion en memoria, local al
+ * proceso. Solo es correcta con UNA instancia y cache en memoria. Con varias
+ * instancias (o con un cache compartido tipo Redis) un import hecho en una
+ * instancia no invalida a las demas, y las otras seguiran sirviendo el indice
+ * viejo hasta 10 min. Para escalar a mas de una instancia hay que mover la
+ * generacion al cache compartido o bajar este TTL.
+ */
+const JOBS_CACHE_TTL_MS = 10 * 60_000;
 
 @Injectable()
 export class QuickbooksFinancialsContextService {
+  private jobsCacheGeneration = 0;
+
   constructor(
     @InjectRepository(QboConnection)
     private readonly connectionRepo: Repository<QboConnection>,
@@ -22,6 +37,18 @@ export class QuickbooksFinancialsContextService {
     private readonly apiService: QuickbooksApiService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {}
+
+  /** Sube la generacion de la cache de jobs: importar o desvincular un
+   * proyecto cambia el mapa numero-de-proyecto -> job de QBO. */
+  invalidateJobs(): void {
+    this.jobsCacheGeneration += 1;
+  }
+
+  /** Generacion actual del indice de jobs. Cualquier otra cache derivada del
+   * indice la mete en su clave para invalidarse con el mismo `invalidateJobs()`. */
+  get jobsGeneration(): number {
+    return this.jobsCacheGeneration;
+  }
 
   async resolveDefaultRealmId(): Promise<string> {
     const [connection] = await this.connectionRepo.find({ take: 1 });
@@ -95,6 +122,6 @@ export class QuickbooksFinancialsContextService {
   }
 
   private buildJobsCacheKey(realmId: string, projectNumbers: string[]): string {
-    return `qbo:jobs:${realmId}:${[...projectNumbers].sort().join(',')}`;
+    return `qbo:jobs:${this.jobsCacheGeneration}:${realmId}:${[...projectNumbers].sort().join(',')}`;
   }
 }

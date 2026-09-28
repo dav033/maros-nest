@@ -150,6 +150,7 @@ describe('QuickbooksProjectImportService', () => {
       leadRepo as never,
       projectRepo as never,
       api as never,
+      { invalidateJobIndex: jest.fn() } as never,
       dataSource as never,
       taskWorkspaceAssignment as never,
     );

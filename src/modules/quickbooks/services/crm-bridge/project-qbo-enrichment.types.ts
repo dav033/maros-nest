@@ -7,7 +7,8 @@ import { InvoiceStatus } from '../../../../common/enums/invoice-status.enum';
 export interface QboPaymentSummary {
   id?: string;
   date?: string;
-  amount: number;
+  /** `null` si QuickBooks no expuso el importe: desconocido, no cero. */
+  amount: number | null;
   method?: string;
   reference?: string;
   linkedInvoice?: string;
@@ -34,6 +35,12 @@ export interface QboProjectSummary
   payments?: QboPaymentSummary[];
   paymentSummary?: QboProjectPaymentSummary;
   invoiceStatus?: InvoiceStatus;
+  /**
+   * El cronograma de pagos aun no se ha leido de los PDF. Distingue "todavia
+   * no se sabe" de "este proyecto no tiene cronograma", que es la ausencia de
+   * `paymentSchedule` sin esta bandera.
+   */
+  paymentSchedulePending?: boolean;
 }
 
 export type QboProjectFullProfile = ProjectFullProfile & {

@@ -12,7 +12,7 @@ import {
 import type { UserType } from '../../../../entities/user.entity';
 
 export class InviteUserDto {
-  @ApiProperty({ example: 'client@example.com' })
+  @ApiProperty({ example: 'external@example.com' })
   @IsEmail()
   email: string;
 
@@ -26,19 +26,19 @@ export class InviteUserDto {
   @IsInt()
   roleId: number;
 
-  @ApiProperty({ enum: ['internal', 'client'] })
-  @IsIn(['internal', 'client'])
+  @ApiProperty({ enum: ['internal', 'external'] })
+  @IsIn(['internal', 'external'])
   userType: UserType;
 
   @ApiPropertyOptional({
     description:
-      'Company this client belongs to. Stored and returned, not enforced yet',
+      'Company this external user belongs to. Stored and returned, not enforced yet',
   })
   @IsInt()
   @IsOptional()
   scopedCompanyId?: number;
 
-  @ApiPropertyOptional({ description: 'Contact this client belongs to' })
+  @ApiPropertyOptional({ description: 'Contact this external user belongs to' })
   @IsInt()
   @IsOptional()
   scopedContactId?: number;

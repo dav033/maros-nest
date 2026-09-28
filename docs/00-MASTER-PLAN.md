@@ -96,7 +96,7 @@ Dos cambios:
 **a) Columnas nuevas en `users`**
 | Columna | Tipo | Para qué |
 |---|---|---|
-| `user_type` | `text NOT NULL DEFAULT 'internal'` (`'internal' \| 'client'`) | Distinguir al externo del equipo |
+| `user_type` | `text NOT NULL DEFAULT 'internal'` (`'internal' \| 'external'`) | Distinguir al externo del equipo |
 | `status` | `text NOT NULL DEFAULT 'active'` (`'invited' \| 'active' \| 'disabled'`) | Hoy no existe estado "invitado pero nunca entró" |
 | `scoped_company_id` | `int NULL REFERENCES companies(id)` | A qué empresa se limita |
 | `scoped_contact_id` | `int NULL REFERENCES contacts(id)` | O a qué contacto |
@@ -124,7 +124,7 @@ hd === WORKSPACE_DOMAIN || await isInvitedActiveUser(email)
 **Invariante de seguridad:** el correo de invitación **no autentica**. Solo avisa. La autenticación sigue siendo Google verificando que esa persona es dueña de ese buzón. Por eso el token de invitación es opcional para entrar — su único valor es trazar quién invitó, cuándo, y caducar el ofrecimiento.
 
 ### 2.5 Scoping — "que solo sea por parte del usuario acceder"
-Hoy no hay filtrado por fila en ningún módulo. Se añade en el punto de menor superficie: `UsersService.resolveForRequest` adjunta `scopedCompanyId`/`scopedContactId` a `AuthenticatedUser`, y un `ScopeGuard`/interceptor filtra las consultas de `projects`, `leads`, `companies` y `contacts` cuando `userType === 'client'`.
+Hoy no hay filtrado por fila en ningún módulo. Se añade en el punto de menor superficie: `UsersService.resolveForRequest` adjunta `scopedCompanyId`/`scopedContactId` a `AuthenticatedUser`, y un `ScopeGuard`/interceptor filtra las consultas de `projects`, `leads`, `companies` y `contacts` cuando `userType === 'external'`.
 **Regla de códigos de error:** fuera de alcance → **404**, nunca 403 (misma política que ya rige en notas; un 403 confirmaría que el recurso existe).
 
 ### 2.6 Rol nuevo `client`

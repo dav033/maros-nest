@@ -23,6 +23,12 @@ export function normalizeJournalEntry(
   const customer = extractRef(raw['CustomerRef']);
   const account = firstLineAccount(lineItems);
   const projectRefs = collectProjectRefs(customer, lineItems);
+  // QBO no expone TotalAmt en JournalEntry (responde 400 "Property TotalAmt not
+  // found for Entity JournalEntry"), asi que el importe de cabecera no se puede
+  // saber. Eso es `null`, no cero: con cero el asiento se dibujaria como si
+  // moviera $0 y nadie notaria que el dato falta.
+  const rawTotal = raw['TotalAmt'];
+  const totalAmount = rawTotal === undefined || rawTotal === null ? null : n(rawTotal);
   const result: QboNormalizedTransaction = {
     source: 'quickbooks',
     direction: 'adjustment',
@@ -30,7 +36,7 @@ export function normalizeJournalEntry(
     entityId: s(raw['Id']),
     docNumber: s(raw['DocNumber']),
     txnDate: s(raw['TxnDate']),
-    totalAmount: n(raw['TotalAmt']),
+    totalAmount,
     projectRefs,
     lineItems,
     linkedTxn: extractLinkedTxn(raw),
@@ -38,7 +44,18 @@ export function normalizeJournalEntry(
     description: extractDescription(raw),
     attachments: normalizeAttachments(attachments),
     rawRef: buildRawRef('JournalEntry', raw),
-    warnings: buildProjectWarnings(projectRefs),
+    warnings: [
+      ...buildProjectWarnings(projectRefs),
+      ...(totalAmount === null
+        ? [
+            {
+              code: 'TOTAL_AMOUNT_UNAVAILABLE',
+              message:
+                'QuickBooks does not expose TotalAmt for JournalEntry; the header amount is unknown, not zero.',
+            },
+          ]
+        : []),
+    ],
   };
   if (customer) result.customer = customer;
   if (account) {

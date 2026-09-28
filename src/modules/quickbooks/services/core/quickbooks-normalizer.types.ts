@@ -14,7 +14,6 @@ export interface QboAttachmentSummary {
   contentType: string;
   fileSize: number | null;
   note: string;
-  txnDate: string;
   entityRefs: Array<{ entityType: string; entityId: string; name?: string }>;
 }
 
@@ -54,7 +53,13 @@ export interface QboNormalizedTransaction {
   docNumber: string;
   txnDate: string;
   dueDate?: string;
-  totalAmount: number;
+  /**
+   * `null` cuando QuickBooks no expone el importe para esa entidad (p. ej.
+   * JournalEntry no tiene TotalAmt). Un importe que no se puede saber no es
+   * cero: quien sume decide que hacer con el, igual que con `openBalance`.
+   */
+  totalAmount: number | null;
+  /** Ausente cuando la entidad no expone saldo (p. ej. VendorCredit). */
   openBalance?: number;
   customer?: QboRef;
   vendor?: QboRef;

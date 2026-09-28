@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import { QuickbooksApiService } from '../core/quickbooks-api.service';
 import { QuickbooksFinancialsService } from '../financials/quickbooks-financials.service';
 import { QuickbooksAttachmentsService } from '../attachments/quickbooks-attachments.service';
@@ -19,6 +21,8 @@ import {
 import { QuickbooksJobCostingProjectProfileService } from './quickbooks-job-costing-profile.service';
 import { QuickbooksJobCostingProfileContext } from './quickbooks-job-costing-profile.types';
 
+const JOB_COST_SUMMARIES_CACHE_TTL_MS = 5 * 60_000;
+
 @Injectable()
 export class QuickbooksJobCostingService extends QuickbooksJobCostingBase {
   constructor(
@@ -28,6 +32,7 @@ export class QuickbooksJobCostingService extends QuickbooksJobCostingBase {
     attachmentsService: QuickbooksAttachmentsService,
     vendorMatching: QuickbooksVendorMatchingService,
     private readonly projectProfile: QuickbooksJobCostingProjectProfileService,
+    @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
   ) {
     super(apiService, normalizer, financials, attachmentsService, vendorMatching);
   }
@@ -69,6 +74,16 @@ export class QuickbooksJobCostingService extends QuickbooksJobCostingBase {
     const projectNumbersClean = [...new Set(projectNumbers.map((value) => this.trim(value)).filter(Boolean))];
     if (!projectNumbersClean.length) return new Map();
 
+    // Recorrer el libro de compras completo (3k+ transacciones) por cada carga
+    // del listado costaba ~7s. El costo por trabajo se mueve con el ritmo al
+    // que se registran facturas y gastos, no con el de las recargas de pagina.
+    // La generacion del indice de jobs va en la clave: importar o desvincular
+    // un proyecto cambia a que job pertenece cada cifra, e `invalidateJobIndex()`
+    // tiene que tirar tambien estas sumas, no solo el indice.
+    const cacheKey = `qbo:job-cost-summaries:${this.financials.jobIndexGeneration}:${realmId ?? 'default'}:${[...projectNumbersClean].sort().join(',')}`;
+    const cached = await this.cacheManager.get<Array<[string, QboJobCostSummary]>>(cacheKey);
+    if (cached) return new Map(cached);
+
     const effectiveRealmId = await this.resolveRealmId(realmId);
     const projects = await this.findProjectRefsBatch(projectNumbersClean, effectiveRealmId);
     if (![...projects.values()].some((project) => this.hasProjectIdentity(project))) {
@@ -98,6 +113,7 @@ export class QuickbooksJobCostingService extends QuickbooksJobCostingBase {
       );
       summaries.set(projectNumber, this.summarize(descriptors));
     }
+    await this.cacheManager.set(cacheKey, [...summaries.entries()], JOB_COST_SUMMARIES_CACHE_TTL_MS);
     return summaries;
   }
 
@@ -285,14 +301,27 @@ export class QuickbooksJobCostingService extends QuickbooksJobCostingBase {
     realmId: string,
   ): Promise<Map<string, QboResolvedProjectRef>> {
     const linkedJobIds = await this.financials.getProjectJobIds(projectNumbers, realmId);
+    // Solo se emparejan Id/DisplayName/FullyQualifiedName (customerMatchesProjectNumber),
+    // y los refs que salen de aqui no exponen el customer crudo. Pedir `SELECT *`
+    // de todos los customers era lo mas caro del listado.
+    const customerFields = 'Id, DisplayName, FullyQualifiedName';
     const jobs = this.asArray(
-      await this.apiService.queryAll(realmId, 'Customer', { where: 'Job = true' }),
+      await this.apiService.queryAll(realmId, 'Customer', {
+        where: 'Job = true',
+        select: customerFields,
+        cacheKey: 'job-costing-refs',
+      }),
     ) as QboCustomerRecord[];
     const missingJobs = projectNumbers.some(
       (projectNumber) => !jobs.some((customer) => this.customerMatchesProjectNumber(customer, projectNumber)),
     );
     const customers = missingJobs
-      ? (this.asArray(await this.apiService.queryAll(realmId, 'Customer')) as QboCustomerRecord[])
+      ? (this.asArray(
+          await this.apiService.queryAll(realmId, 'Customer', {
+            select: customerFields,
+            cacheKey: 'job-costing-refs',
+          }),
+        ) as QboCustomerRecord[])
       : [];
 
     const refs = new Map<string, QboResolvedProjectRef>();

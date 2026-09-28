@@ -71,6 +71,23 @@ describe('QuickbooksFinancialsAttachmentsService', () => {
       expect(result).toHaveLength(refs.length);
     });
 
+    it('never asks Attachable for TxnDate, a property QBO does not expose', async () => {
+      apiService.queryAll.mockResolvedValue([]);
+
+      await service.getAttachablesForEntityRefs('realm-1', [
+        { entityType: 'Invoice', entityId: 'inv-1' },
+      ]);
+
+      const options = apiService.queryAll.mock.calls[0][2] as {
+        select?: string;
+        where?: string;
+      };
+      expect(options.select).toBe('Id, FileName, ContentType, Size, Note, AttachableRef');
+      expect(options.select).not.toContain('TxnDate');
+      expect(options.where).not.toContain(' OR ');
+      expect(options.where).not.toContain('(');
+    });
+
     it('deduplicates entity refs before fetching attachments', async () => {
       apiService.queryAll.mockResolvedValue([]);
 
@@ -81,6 +98,35 @@ describe('QuickbooksFinancialsAttachmentsService', () => {
       ]);
 
       expect(apiService.queryAll).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('getProjectRelatedEntityRefs', () => {
+    /**
+     * Properties QuickBooks refuses to project for each entity (verified
+     * against the live API: 400 "Property X not found for Entity Y").
+     */
+    const REJECTED: Record<string, string[]> = {
+      Estimate: ['Memo'],
+      Invoice: ['Memo'],
+      Payment: ['Memo', 'CustomerMemo'],
+      Purchase: ['Memo', 'CustomerMemo', 'CustomerRef', 'LinkedTxn'],
+    };
+
+    it('only projects properties QuickBooks accepts for each entity', async () => {
+      apiService.queryAll.mockResolvedValue([]);
+
+      await service.getProjectRelatedEntityRefs('realm-1', '001-0924', 'job-1');
+
+      for (const call of apiService.queryAll.mock.calls) {
+        const entity = call[1];
+        const select = (call[2] as { select?: string })?.select;
+        if (!select || !REJECTED[entity]) continue;
+        const fields = select.split(',').map((field) => field.trim());
+        for (const property of REJECTED[entity]) {
+          expect(fields).not.toContain(property);
+        }
+      }
     });
   });
 });

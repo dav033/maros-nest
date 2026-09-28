@@ -43,13 +43,16 @@ Ponlas antes de desplegar nada. Una variable de más no rompe nada; una de menos
 
 ```sql
 \i db/add-user-invitations.sql
+\i db/rename-client-user-type-to-external.sql
 ```
 
 Idempotente y se puede volver a ejecutar. Hace tres cosas que conviene entender:
 
 1. Añade a `users`: `user_type`, `status`, `scoped_company_id`, `scoped_contact_id`, `invited_by_id`.
 2. **Rellena `status`**: `UPDATE users SET status = 'disabled' WHERE is_active = FALSE AND status = 'active'`. Sin eso, el `DEFAULT 'active'` solo aplica a filas nuevas y toda cuenta ya desactivada aparecería como activa en la lista de admin — mintiendo sobre quién puede entrar.
-3. Siembra los roles `client` y **`Solo task`**. Este último ya existe en tu producción, pero **no estaba versionado en ningún archivo**, aunque `AUTH_DEFAULT_ROLE` apunta a él. En tu base el `INSERT` no hará nada; en una base nueva, evita que todo usuario nuevo quede sin rol y sin permisos con solo un warning en el log.
+3. Siembra los roles `external` (sembrado como `client` y renombrado por `rename-client-user-type-to-external.sql`) y **`Solo task`**. Este último ya existe en tu producción, pero **no estaba versionado en ningún archivo**, aunque `AUTH_DEFAULT_ROLE` apunta a él. En tu base el `INSERT` no hará nada; en una base nueva, evita que todo usuario nuevo quede sin rol y sin permisos con solo un warning en el log.
+
+`rename-client-user-type-to-external.sql` renombra el **tipo de usuario** `client` a `external`: cambia el `CHECK` de `users.user_type`, pasa a `external` las filas que quedaran en `client` y renombra el rol de sistema. No toca `contacts.is_client` ni `companies.is_client`, que marcan a quien nos compra y son otra cosa.
 
 Después: `SELECT status, count(*) FROM users GROUP BY status;` y compara con lo que anotaste.
 
@@ -67,7 +70,7 @@ Para cada una, con una sesión de admin:
 
 ```
 POST /api/users/invite
-{ "email": "<la dirección>", "roleId": <el rol que le corresponda>, "userType": "client" }
+{ "email": "<la dirección>", "roleId": <el rol que le corresponda>, "userType": "external" }
 ```
 
 Verifica antes de seguir:

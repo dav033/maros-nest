@@ -111,6 +111,10 @@ describe('QuickbooksJobCostingService batch summaries', () => {
       getDefaultRealmId: jest.fn(async () => 'realm-1'),
       getProjectJobIds: jest.fn(async () => ({}) as Record<string, string>),
     };
+    const cache = {
+      get: jest.fn(async () => undefined),
+      set: jest.fn(async () => undefined),
+    };
     const service = new QuickbooksJobCostingService(
       api as never,
       new QuickbooksNormalizerService(),
@@ -118,6 +122,7 @@ describe('QuickbooksJobCostingService batch summaries', () => {
       {} as never,
       {} as never,
       {} as never,
+      cache as never,
     );
 
     const summaries = await service.getProjectJobCostSummaries(

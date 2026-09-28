@@ -81,7 +81,7 @@ export class ProjectQboEnrichmentService {
       const [financials, paymentsByProject, schedulesByProject, jobCostsByProject] = await Promise.all([
         this.quickbooksFinancialsService.getProjectFinancials(leadNumbers, options.realmId),
         this.quickbooksFinancialsService.getPaymentsByProjects(leadNumbers, options.realmId),
-        this.quickbooksFinancialsService.getPaymentSchedulesByProjects(leadNumbers, options.realmId),
+        this.quickbooksFinancialsService.getCachedPaymentSchedulesByProjects(leadNumbers, options.realmId),
         options.includeJobCosts
           ? this.quickbooksJobCostingService
               .getProjectJobCostSummaries(leadNumbers, options.realmId)
@@ -91,9 +91,13 @@ export class ProjectQboEnrichmentService {
               })
           : Promise.resolve(undefined),
       ]);
+      // `null` = los PDF de los cronogramas aun no estan parseados. No es lo
+      // mismo que "este proyecto no tiene cronograma", asi que se marca como
+      // pendiente en vez de dejar el campo vacio sin explicacion.
+      const schedulesPending = schedulesByProject === null;
       const financialMap = new Map(
         financials.map((financial) => {
-          const schedule = schedulesByProject.get(financial.projectNumber);
+          const schedule = schedulesByProject?.get(financial.projectNumber);
           const jobCosts = jobCostsByProject?.get(financial.projectNumber);
           const enriched = jobCosts
             ? {
@@ -103,7 +107,11 @@ export class ProjectQboEnrichmentService {
                 cashOutPaid: jobCosts.cashOutPaid,
               }
             : financial;
-          return [financial.projectNumber, schedule ? { ...enriched, paymentSchedule: schedule } : enriched];
+          if (schedule) return [financial.projectNumber, { ...enriched, paymentSchedule: schedule }];
+          return [
+            financial.projectNumber,
+            schedulesPending ? { ...enriched, paymentSchedulePending: true } : enriched,
+          ];
         }),
       );
 

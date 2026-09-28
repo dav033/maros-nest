@@ -51,6 +51,21 @@ export class QuickbooksFinancialsService {
     return this.projectsService.getProjectFinancials(projectNumbers, realmId);
   }
 
+  /**
+   * Invalida el indice de jobs cacheado. Importar o desvincular un proyecto
+   * cambia el mapa numero-de-proyecto -> job de QBO, y el indice cacheado deja
+   * de ser valido en ese instante.
+   */
+  invalidateJobIndex(): void {
+    this.contextService.invalidateJobs();
+  }
+
+  /** Generacion actual del indice de jobs, para que las caches derivadas de el
+   * la incluyan en su clave y caduquen con `invalidateJobIndex()`. */
+  get jobIndexGeneration(): number {
+    return this.contextService.jobsGeneration;
+  }
+
   async getProjectJobIds(
     projectNumbers: string[],
     realmId?: string,
@@ -65,6 +80,14 @@ export class QuickbooksFinancialsService {
     realmId?: string,
   ): Promise<Map<string, PaymentSchedule | null>> {
     return this.paymentScheduleService.getByProjects(projectNumbers, realmId);
+  }
+
+  /** `null` = aun no calculado (se esta calentando en segundo plano). */
+  async getCachedPaymentSchedulesByProjects(
+    projectNumbers: string[],
+    realmId?: string,
+  ): Promise<Map<string, PaymentSchedule | null> | null> {
+    return this.paymentScheduleService.getCachedByProjects(projectNumbers, realmId);
   }
 
   async getProjectDetail(

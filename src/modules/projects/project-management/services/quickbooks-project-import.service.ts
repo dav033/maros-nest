@@ -16,6 +16,7 @@ import { LeadStatus } from '../../../../common/enums/lead-status.enum';
 import { ProjectProgressStatus } from '../../../../common/enums/project-progress-status.enum';
 import { QboConnection } from '../../../quickbooks/entities/qbo-connection.entity';
 import { QuickbooksApiService } from '../../../quickbooks/services/core/quickbooks-api.service';
+import { QuickbooksFinancialsService } from '../../../quickbooks/services/financials/quickbooks-financials.service';
 import { TaskWorkspaceAssignmentService } from '../../../task-workspaces/services/task-workspace-assignment.service';
 import { ImportQuickbooksBatchDto } from '../dto/import-quickbooks-batch.dto';
 import { ImportQuickbooksProjectDto } from '../dto/import-quickbooks-project.dto';
@@ -66,6 +67,7 @@ export class QuickbooksProjectImportService {
     @InjectRepository(Project)
     private readonly projectRepo: Repository<Project>,
     private readonly api: QuickbooksApiService,
+    private readonly financials: QuickbooksFinancialsService,
     private readonly dataSource: DataSource,
     @Optional()
     private readonly taskWorkspaceAssignment?: TaskWorkspaceAssignmentService,
@@ -147,6 +149,7 @@ export class QuickbooksProjectImportService {
     if (result.outcome !== 'already_imported') {
       await this.taskWorkspaceAssignment?.ensureCanonicalLead(result.project.lead.id);
     }
+    this.financials.invalidateJobIndex();
     return {
       projectId: result.project.id,
       leadId: result.project.lead.id,
@@ -212,6 +215,8 @@ export class QuickbooksProjectImportService {
       return applied;
     });
 
+    this.financials.invalidateJobIndex();
+
     // After commit: a task-workspace hiccup must not discard accepted decisions.
     for (const leadId of touchedLeadIds) {
       try {
@@ -261,6 +266,7 @@ export class QuickbooksProjectImportService {
       );
     }
 
+    this.financials.invalidateJobIndex();
     return {
       projectId: result.project.id,
       leadId: result.project.lead?.id ?? null,

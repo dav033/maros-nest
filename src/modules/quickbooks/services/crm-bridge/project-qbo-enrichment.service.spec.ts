@@ -19,7 +19,7 @@ describe('ProjectQboEnrichmentService job costs', () => {
       getPaymentsByProjects: jest
         .fn()
         .mockResolvedValue(new Map([['P-1', []]])),
-      getPaymentSchedulesByProjects: jest.fn().mockResolvedValue(new Map()),
+      getCachedPaymentSchedulesByProjects: jest.fn().mockResolvedValue(new Map()),
     };
     const jobCosting = {
       getProjectJobCostSummaries: jest
@@ -42,5 +42,27 @@ describe('ProjectQboEnrichmentService job costs', () => {
       financial: { totalJobCost: 47, grossProfit: 43, cashOutPaid: 30 },
       qbo: { totalJobCost: 47, grossProfit: 43, cashOutPaid: 30 },
     });
+  });
+
+  it('marks the payment schedule as pending instead of passing it off as absent', async () => {
+    const financials = {
+      getProjectFinancials: jest.fn().mockResolvedValue([
+        { projectNumber: 'P-1', found: true, invoicedAmount: 90 },
+      ]),
+      getPaymentsByProjects: jest.fn().mockResolvedValue(new Map()),
+      // `null` = los PDF aun no se han leido.
+      getCachedPaymentSchedulesByProjects: jest.fn().mockResolvedValue(null),
+    };
+    const service = new ProjectQboEnrichmentService(
+      financials as never,
+      { getProjectJobCostSummaries: jest.fn() } as never,
+    );
+    const projects = [{ lead: { leadNumber: 'P-1' } }];
+
+    await service.enrichProjectsSummary(projects);
+
+    const enriched = projects[0] as { financial?: Record<string, unknown> };
+    expect(enriched.financial).toMatchObject({ paymentSchedulePending: true });
+    expect(enriched.financial).not.toHaveProperty('paymentSchedule');
   });
 });

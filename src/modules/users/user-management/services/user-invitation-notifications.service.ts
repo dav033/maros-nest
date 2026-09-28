@@ -11,7 +11,7 @@ const DEFAULT_APP_URL = 'https://app.marosconstruction.com';
  * Unlike every other MailService call-site in this codebase, this one does NOT swallow
  * a send failure. Those notifications are commentary on work that already happened; an
  * invitation IS the access grant. An admin who is told "invited" while the message
- * bounced would wait for a client who never heard anything, so the error propagates and
+ * bounced would wait for a person who never heard anything, so the error propagates and
  * rolls the whole invitation back.
  */
 @Injectable()

@@ -15,6 +15,9 @@ export class QuickbooksFinancialsAttachmentsService {
     private readonly normalizer: QuickbooksNormalizerService,
   ) {}
 
+  // Los SELECT de abajo solo piden propiedades que QBO acepta proyectar: pedir
+  // una que la entidad no expone (Memo, CustomerRef en Purchase, etc.) hace que
+  // QBO rechace la consulta entera con 400 y la ficha se quede sin adjuntos.
   async getProjectRelatedEntityRefs(
     realmId: string,
     projectNumber: string,
@@ -26,21 +29,21 @@ export class QuickbooksFinancialsAttachmentsService {
       this.apiService.queryAll(realmId, 'Estimate', {
         where: `CustomerRef IN ('${escapedJobId}')`,
         select:
-          'Id, DocNumber, TxnDate, ExpirationDate, CustomerRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo, TxnStatus',
+          'Id, DocNumber, TxnDate, ExpirationDate, CustomerRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, TxnStatus',
       }) as Promise<Record<string, unknown>[]>,
       this.apiService.queryAll(realmId, 'Invoice', {
         where: `CustomerRef IN ('${escapedJobId}')`,
         select:
-          'Id, DocNumber, TxnDate, DueDate, CustomerRef, TotalAmt, Balance, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo',
+          'Id, DocNumber, TxnDate, DueDate, CustomerRef, TotalAmt, Balance, Line, LinkedTxn, PrivateNote, CustomerMemo',
       }) as Promise<Record<string, unknown>[]>,
       this.apiService.queryAll(realmId, 'Payment', {
         where: `CustomerRef IN ('${escapedJobId}')`,
         select:
-          'Id, DocNumber, TxnDate, CustomerRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo, UnappliedAmt, DepositToAccountRef',
+          'Id, DocNumber, TxnDate, CustomerRef, TotalAmt, Line, LinkedTxn, PrivateNote, UnappliedAmt, DepositToAccountRef',
       }) as Promise<Record<string, unknown>[]>,
       this.apiService.queryAll(realmId, 'Purchase', {
         select:
-          'Id, DocNumber, TxnDate, CustomerRef, EntityRef, AccountRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo, PaymentType',
+          'Id, DocNumber, TxnDate, EntityRef, AccountRef, TotalAmt, Line, PrivateNote, PaymentType',
       }) as Promise<Record<string, unknown>[]>,
     ]);
 
@@ -97,8 +100,9 @@ export class QuickbooksFinancialsAttachmentsService {
           where:
             `AttachableRef.EntityRef.Type = '${entityType}' ` +
             `AND AttachableRef.EntityRef.Value = '${entityId}'`,
-          select:
-            'Id, FileName, ContentType, Size, Note, TxnDate, AttachableRef',
+          // Attachable has no TxnDate property; asking for it makes QBO reject
+          // the whole query with a 400 "Property TxnDate not found" error.
+          select: 'Id, FileName, ContentType, Size, Note, AttachableRef',
         }) as Promise<Record<string, unknown>[]>;
       }),
       QBO_ATTACHMENT_CONCURRENCY,

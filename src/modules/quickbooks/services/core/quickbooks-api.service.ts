@@ -382,6 +382,11 @@ export class QuickbooksApiService {
    * (`_`) so the literal characters are matched, preventing accidental
    * wildcard expansion in QBO's `LIKE` operator.
    *
+   * NOTE: QBO's query parser does not accept an `ESCAPE` clause, so the
+   * backslashes added here would be matched literally. Unless a QBO query is
+   * confirmed to support `ESCAPE`, escape with `escapeQboString` instead and
+   * re-check the candidate rows in code.
+   *
    * @param value  Raw string to escape.
    * @returns The escaped string, safe to embed in a QBO `LIKE` clause
    *          with `ESCAPE '\'`.

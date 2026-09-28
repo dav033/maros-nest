@@ -271,7 +271,6 @@ export function normalizeAttachable(raw: Record<string, unknown>): QboAttachment
     contentType: s(raw['ContentType']),
     fileSize: raw['Size'] != null ? n(raw['Size']) : null,
     note: s(raw['Note']),
-    txnDate: s(raw['TxnDate']),
     entityRefs: extractAttachableEntityRefs(raw),
   };
 }

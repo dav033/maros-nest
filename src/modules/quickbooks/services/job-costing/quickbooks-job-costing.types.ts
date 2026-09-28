@@ -88,7 +88,8 @@ export interface QboJobCostTransaction {
   description: string;
   billableStatus?: string;
   status?: string;
-  totalAmount: number;
+  /** `null` si QuickBooks no expone el importe de cabecera (JournalEntry). */
+  totalAmount: number | null;
   openBalance?: number;
   allocatedAmount: number;
   allocationRatio: number;
@@ -229,7 +230,8 @@ export interface QboMissingAttachmentTransaction {
   entityId: string;
   docNumber: string;
   txnDate: string;
-  totalAmount: number;
+  /** `null` si QuickBooks no expone el importe: desconocido, no cero. */
+  totalAmount: number | null;
   vendor?: QboRef;
   customer?: QboRef;
 }

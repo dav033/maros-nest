@@ -1,4 +1,6 @@
+import { Logger } from '@nestjs/common';
 import {
+  QboAiWarning,
   QboNormalizedTransaction,
   QuickbooksNormalizerService,
 } from '../core/quickbooks-normalizer.service';
@@ -11,6 +13,10 @@ import {
   QboProjectAttachmentsParams,
 } from './quickbooks-attachments.types';
 import { QuickbooksAttachmentsHelpers } from './quickbooks-attachments.helpers';
+import {
+  QBO_MAX_CONCURRENCY,
+  runWithConcurrency,
+} from '../core/quickbooks-concurrency.utils';
 
 interface ProjectTransactionRef {
   entityType: ProjectAttachmentEntity;
@@ -19,18 +25,50 @@ interface ProjectTransactionRef {
 }
 
 export class QuickbooksAttachmentsProjectService {
+  private readonly logger = new Logger(QuickbooksAttachmentsProjectService.name);
+
   constructor(
     private readonly apiService: QuickbooksApiService,
     private readonly normalizer: QuickbooksNormalizerService,
     private readonly helpers: QuickbooksAttachmentsHelpers,
   ) {}
 
+  /**
+   * Devuelve tambien los avisos de las entidades que QuickBooks no pudo dar.
+   * Antes las 9 consultas iban bajo un unico `Promise.all`: una entidad mala se
+   * llevaba por delante los adjuntos de las otras ocho y la ficha entera salia
+   * con "Could not load QuickBooks attachments". Ahora cada entidad se resuelve
+   * por separado y un fallo solo pierde los adjuntos de esa entidad, con un
+   * aviso que llega hasta la respuesta para que se pueda ver.
+   */
   async getProjectRelatedEntityRefs(
     realmId: string,
     project: QboProjectAttachmentRef,
     params: QboProjectAttachmentsParams,
-  ): Promise<QboAttachmentEntityRef[]> {
+  ): Promise<{ refs: QboAttachmentEntityRef[]; warnings: QboAiWarning[] }> {
     const refs: QboAttachmentEntityRef[] = [];
+    const warnings: QboAiWarning[] = [];
+
+    /** Nunca rechaza: un fallo se convierte en aviso y en cero filas. */
+    const queryEntity = async (
+      entity: ProjectAttachmentEntity,
+      options: Record<string, unknown>,
+    ): Promise<Record<string, unknown>[]> => {
+      try {
+        const rows = await this.apiService.queryAll(realmId, entity, options);
+        return rows.map((row) => this.helpers.asRecord(row));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`QBO ${entity} query failed for project attachments: ${message}`);
+        warnings.push(
+          this.normalizer.warning(
+            'project_entity_query_failed',
+            `QuickBooks did not return ${entity} records for this project (${message}); attachments hanging off ${entity} transactions are missing.`,
+          ),
+        );
+        return [];
+      }
+    };
     const customerId =
       project.qboCustomerId || project.refs.find((ref) => ref.value)?.value;
     if (customerId) {
@@ -56,6 +94,10 @@ export class QuickbooksAttachmentsProjectService {
       ? { ...baseOptions, where: this.combineWhere(baseOptions.where, `CustomerRef = '${customerWhere}'`) }
       : baseOptions;
 
+    // Cada SELECT pide solo propiedades que QBO acepta proyectar para esa
+    // entidad. Pedir una que no expone (Memo, CustomerRef en Bill/Purchase,
+    // LinkedTxn en Bill, TotalAmt en JournalEntry...) hace que QBO rechace la
+    // consulta con 400 y el proyecto se quede sin datos de QuickBooks.
     const [
       invoices,
       estimates,
@@ -67,57 +109,48 @@ export class QuickbooksAttachmentsProjectService {
       purchaseOrders,
       journalEntries,
     ] = await Promise.all([
-      this.apiService.queryAll(realmId, 'Invoice', {
+      queryEntity('Invoice', {
         ...invoiceOptions,
-        select:
-          'Id, DocNumber, TxnDate, DueDate, CustomerRef, TotalAmt, Balance, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo',
+        select: 'Id, DocNumber, TxnDate, DueDate, CustomerRef, TotalAmt, Balance, Line, LinkedTxn, PrivateNote, CustomerMemo',
       }),
-      this.apiService.queryAll(realmId, 'Estimate', {
+      queryEntity('Estimate', {
         ...estimateOptions,
-        select:
-          'Id, DocNumber, TxnDate, ExpirationDate, CustomerRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo, TxnStatus',
+        select: 'Id, DocNumber, TxnDate, ExpirationDate, CustomerRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, TxnStatus',
       }),
-      this.apiService.queryAll(realmId, 'Payment', {
+      queryEntity('Payment', {
         ...paymentOptions,
-        select:
-          'Id, DocNumber, TxnDate, CustomerRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo, UnappliedAmt, DepositToAccountRef',
+        select: 'Id, DocNumber, TxnDate, CustomerRef, TotalAmt, Line, LinkedTxn, PrivateNote, UnappliedAmt, DepositToAccountRef',
       }),
-      this.apiService.queryAll(realmId, 'Purchase', {
+      queryEntity('Purchase', {
         ...baseOptions,
-        select:
-          'Id, DocNumber, TxnDate, CustomerRef, EntityRef, AccountRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo, PaymentType',
+        select: 'Id, DocNumber, TxnDate, EntityRef, AccountRef, TotalAmt, Line, PrivateNote, PaymentType',
       }),
-      this.apiService.queryAll(realmId, 'Bill', {
+      queryEntity('Bill', {
         ...baseOptions,
-        select:
-          'Id, DocNumber, TxnDate, DueDate, CustomerRef, VendorRef, APAccountRef, TotalAmt, Balance, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo',
+        select: 'Id, DocNumber, TxnDate, DueDate, VendorRef, APAccountRef, TotalAmt, Balance, Line, PrivateNote',
       }),
-      this.apiService.queryAll(realmId, 'BillPayment', {
+      queryEntity('BillPayment', {
         ...baseOptions,
-        select:
-          'Id, DocNumber, TxnDate, CustomerRef, VendorRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo, PayType, CheckPayment, CreditCardPayment',
+        select: 'Id, DocNumber, TxnDate, VendorRef, TotalAmt, Line, LinkedTxn, PrivateNote',
       }),
-      this.apiService.queryAll(realmId, 'VendorCredit', {
+      queryEntity('VendorCredit', {
         ...baseOptions,
-        select:
-          'Id, DocNumber, TxnDate, CustomerRef, VendorRef, APAccountRef, TotalAmt, Balance, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo',
+        select: 'Id, DocNumber, TxnDate, VendorRef, APAccountRef, TotalAmt, Line, PrivateNote',
       }),
-      this.apiService.queryAll(realmId, 'PurchaseOrder', {
+      queryEntity('PurchaseOrder', {
         ...baseOptions,
-        select:
-          'Id, DocNumber, TxnDate, ShipDate, CustomerRef, VendorRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo, POStatus',
+        select: 'Id, DocNumber, TxnDate, VendorRef, TotalAmt, Line, PrivateNote, Memo',
       }),
-      this.apiService.queryAll(realmId, 'JournalEntry', {
+      queryEntity('JournalEntry', {
         ...baseOptions,
-        select:
-          'Id, DocNumber, TxnDate, CustomerRef, TotalAmt, Line, LinkedTxn, PrivateNote, CustomerMemo, Memo',
+        select: 'Id, DocNumber, TxnDate, Line, PrivateNote',
       }),
     ]);
 
     const projectBillIds = new Set<string>();
     const transactionRefs: ProjectTransactionRef[] = [];
 
-    for (const raw of invoices.map((row) => this.helpers.asRecord(row))) {
+    for (const raw of invoices) {
       this.addProjectTransactionRef(
         transactionRefs,
         'Invoice',
@@ -126,7 +159,7 @@ export class QuickbooksAttachmentsProjectService {
         project,
       );
     }
-    for (const raw of estimates.map((row) => this.helpers.asRecord(row))) {
+    for (const raw of estimates) {
       this.addProjectTransactionRef(
         transactionRefs,
         'Estimate',
@@ -135,7 +168,7 @@ export class QuickbooksAttachmentsProjectService {
         project,
       );
     }
-    for (const raw of payments.map((row) => this.helpers.asRecord(row))) {
+    for (const raw of payments) {
       this.addProjectTransactionRef(
         transactionRefs,
         'Payment',
@@ -144,7 +177,7 @@ export class QuickbooksAttachmentsProjectService {
         project,
       );
     }
-    for (const raw of purchases.map((row) => this.helpers.asRecord(row))) {
+    for (const raw of purchases) {
       this.addProjectTransactionRef(
         transactionRefs,
         'Purchase',
@@ -153,7 +186,7 @@ export class QuickbooksAttachmentsProjectService {
         project,
       );
     }
-    for (const raw of bills.map((row) => this.helpers.asRecord(row))) {
+    for (const raw of bills) {
       const normalized = this.normalizer.normalizeBill(raw);
       const added = this.addProjectTransactionRef(
         transactionRefs,
@@ -164,7 +197,7 @@ export class QuickbooksAttachmentsProjectService {
       );
       if (added) projectBillIds.add(normalized.entityId);
     }
-    for (const raw of vendorCredits.map((row) => this.helpers.asRecord(row))) {
+    for (const raw of vendorCredits) {
       this.addProjectTransactionRef(
         transactionRefs,
         'VendorCredit',
@@ -173,7 +206,7 @@ export class QuickbooksAttachmentsProjectService {
         project,
       );
     }
-    for (const raw of purchaseOrders.map((row) => this.helpers.asRecord(row))) {
+    for (const raw of purchaseOrders) {
       this.addProjectTransactionRef(
         transactionRefs,
         'PurchaseOrder',
@@ -182,7 +215,7 @@ export class QuickbooksAttachmentsProjectService {
         project,
       );
     }
-    for (const raw of journalEntries.map((row) => this.helpers.asRecord(row))) {
+    for (const raw of journalEntries) {
       this.addProjectTransactionRef(
         transactionRefs,
         'JournalEntry',
@@ -191,7 +224,7 @@ export class QuickbooksAttachmentsProjectService {
         project,
       );
     }
-    for (const raw of billPayments.map((row) => this.helpers.asRecord(row))) {
+    for (const raw of billPayments) {
       const normalized = this.normalizer.normalizeBillPayment(raw);
       const linksProjectBill = normalized.linkedTxn.some(
         (linked) => linked.txnType === 'Bill' && projectBillIds.has(linked.txnId),
@@ -217,7 +250,7 @@ export class QuickbooksAttachmentsProjectService {
       });
     }
 
-    return this.helpers.uniqueEntityRefs(refs);
+    return { refs: this.helpers.uniqueEntityRefs(refs), warnings };
   }
 
   async findProjectRefs(
@@ -248,14 +281,10 @@ export class QuickbooksAttachmentsProjectService {
     if (!projectNumber) return { found: false, refs: [] };
 
     const normalizedProject = this.helpers.normalizeName(projectNumber);
-    const likePattern = `${this.apiService.escapeQboLike(normalizedProject)}%`;
-    const jobs = (await this.apiService.queryAll(realmId, 'Customer', {
-      where:
-        `Job = true ` +
-        `AND (DisplayName LIKE '${likePattern}' ESCAPE '\\' ` +
-        `OR FullyQualifiedName LIKE '${likePattern}' ESCAPE '\\')`,
-      select: 'Id, DisplayName, FullyQualifiedName, Job',
-    })) as QboCustomerRecord[];
+    // QBO's LIKE accepts no ESCAPE clause, so `%`/`_` inside the project number
+    // stay wildcards; candidates are re-checked in customerMatchesProjectNumber.
+    const likePattern = `${this.apiService.escapeQboString(normalizedProject)}%`;
+    const jobs = await this.queryJobsByName(realmId, likePattern);
     const match = jobs.find((customer) =>
       this.customerMatchesProjectNumber(customer, projectNumber),
     );
@@ -322,6 +351,59 @@ export class QuickbooksAttachmentsProjectService {
     return values.some((value) =>
       this.helpers.nameMatchesProject(this.helpers.normalizeName(value), normalizedProject),
     );
+  }
+
+  /**
+   * QBO's query language supports neither `OR` nor grouping parentheses in the
+   * WHERE clause, so each name field is queried separately and the rows merged,
+   * deduplicated by Id.
+   *
+   * Cada campo falla por su cuenta. `runWithConcurrency` es fail-fast: el primer
+   * rechazo tumbaba la promesa entera, asi que un fallo en FullyQualifiedName se
+   * llevaba por delante el DisplayName que si habia respondido y el proyecto se
+   * quedaba sin resolver — justo el fallo que se venia a arreglar. Solo se
+   * propaga el error si NINGUNO de los dos campos respondio.
+   */
+  private async queryJobsByName(
+    realmId: string,
+    likePattern: string,
+  ): Promise<QboCustomerRecord[]> {
+    const fields = ['DisplayName', 'FullyQualifiedName'];
+    const pages = await runWithConcurrency(
+      fields.map(
+        (field) => async (): Promise<QboCustomerRecord[] | Error> => {
+          try {
+            return (await this.apiService.queryAll(realmId, 'Customer', {
+              where: `Job = true AND ${field} LIKE '${likePattern}'`,
+              select: 'Id, DisplayName, FullyQualifiedName, Job',
+            })) as QboCustomerRecord[];
+          } catch (error) {
+            return error instanceof Error ? error : new Error(String(error));
+          }
+        },
+      ),
+      QBO_MAX_CONCURRENCY,
+    );
+
+    const failures = pages.filter((page): page is Error => page instanceof Error);
+    if (failures.length === fields.length) throw failures[0];
+    for (const [index, page] of pages.entries()) {
+      if (page instanceof Error) {
+        this.logger.warn(
+          `Customer lookup by ${fields[index]} failed (${page.message}); using the other name field only.`,
+        );
+      }
+    }
+
+    const byId = new Map<string, QboCustomerRecord>();
+    for (const page of pages) {
+      if (page instanceof Error) continue;
+      for (const customer of page) {
+        const id = this.helpers.stringValue(customer.Id);
+        byId.set(id || `${byId.size}`, customer);
+      }
+    }
+    return [...byId.values()];
   }
 
   private combineWhere(existing: string | undefined, extra: string): string {

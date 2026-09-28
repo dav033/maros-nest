@@ -19,7 +19,7 @@ function formatExpiry(expiresAt: Date): string {
 }
 
 /**
- * The one email an invited client ever gets. It must say, in this order: who invited
+ * The one email an invited user ever gets. It must say, in this order: who invited
  * them, that they sign in with the Google account this was sent to, and when the
  * invitation stops working.
  */

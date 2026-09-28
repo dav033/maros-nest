@@ -246,17 +246,32 @@ export class ProjectsService extends BaseService<any, number, Project> {
       lead: { leadNumber: entity.lead?.leadNumber ?? undefined },
     }));
 
-    await this.withTimeout(
+    const enriched = await this.withTimeout(
       this.qboEnrichment.enrichProjectsSummary(shims, { includeJobCosts: true }),
       25_000,
       'QBO enrichment for projects findAllFinancials',
     );
+    // Al agotarse el presupuesto los shims salen sin tocar. Un proyecto sin
+    // enriquecer no puede viajar igual que uno que QuickBooks no conoce: se
+    // marca el error para que la pantalla lo muestre en vez de un guion.
+    const timedOut = enriched === undefined;
 
     const duration = Date.now() - startTime;
     const entries = shims.map((shim) => ({
       id: shim.id,
       financial: (shim as any).financial ?? null,
-      qbo: (shim as any).qbo ?? null,
+      qbo:
+        (shim as any).qbo ??
+        (timedOut
+          ? {
+              data: null,
+              error: {
+                code: 'qbo_query_failed',
+                message:
+                  'QuickBooks tardo demasiado y este proyecto quedo sin datos financieros.',
+              },
+            }
+          : null),
     }));
     const enrichedCount = entries.filter((entry) => entry.financial !== null).length;
     const errorCount = entries.filter((entry) => Boolean((entry.qbo as any)?.error)).length;
@@ -280,10 +295,13 @@ export class ProjectsService extends BaseService<any, number, Project> {
    * blocking the whole request for minutes.
    */
   private withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T | void> {
+    let timer: NodeJS.Timeout | undefined;
+    // El temporizador se cancela al resolver: sin esto avisaba de un
+    // vencimiento de 25s en cada carga aunque la consulta hubiera terminado en 8.
     return Promise.race([
-      promise,
+      promise.finally(() => clearTimeout(timer)),
       new Promise<void>((resolve) => {
-        setTimeout(() => {
+        timer = setTimeout(() => {
           this.logger.warn(`${label} exceeded ${ms}ms — returning without waiting further`);
           resolve();
         }, ms);

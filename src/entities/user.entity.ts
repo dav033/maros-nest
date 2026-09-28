@@ -11,8 +11,8 @@ import {
 import { Role } from './role.entity';
 import { UserInvitation } from './user-invitation.entity';
 
-/** 'client' is someone outside the company, invited to see their own work. */
-export type UserType = 'internal' | 'client';
+/** 'external' is someone outside the company, invited to see their own work. */
+export type UserType = 'internal' | 'external';
 
 /** Lifecycle, not access: `isActive` is the flag the session guard enforces. */
 export type UserStatus = 'invited' | 'active' | 'disabled';
@@ -78,7 +78,7 @@ export class User {
   status: UserStatus;
 
   /**
-   * Which company/contact this account belongs to, for client users.
+   * Which company/contact this account belongs to, for external users.
    *
    * Persisted and exposed, NOT yet enforced: filtering projects and leads by these is
    * a follow-up. Setting one today scopes nothing on its own.

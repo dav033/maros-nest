@@ -175,11 +175,15 @@ export class QuickbooksAttachmentsService {
       };
     }
 
-    const entityRefs = await this.projectService.getProjectRelatedEntityRefs(
-      realmId,
-      project,
-      effectiveParams,
-    );
+    // Las entidades que QuickBooks no pudo dar llegan como avisos, no como un
+    // fallo global: se pierden los adjuntos de esa entidad, no los del proyecto.
+    const { refs: entityRefs, warnings: entityWarnings } =
+      await this.projectService.getProjectRelatedEntityRefs(
+        realmId,
+        project,
+        effectiveParams,
+      );
+    warnings.push(...entityWarnings);
     const attachmentResult = await this.getAttachmentsForEntities(realmId, entityRefs, {
       includeTempDownloadUrl: effectiveParams.includeTempDownloadUrl,
     });

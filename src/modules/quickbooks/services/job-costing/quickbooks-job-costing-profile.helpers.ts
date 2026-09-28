@@ -128,18 +128,18 @@ export const buildFullProjectSummary = (
   isAcceptedEstimate: (txn: QboNormalizedTransaction) => boolean,
 ): QboFullProjectSummary => {
   const estimateAmount = money(
-    cashIn.estimates.reduce((sum, txn) => sum + txn.totalAmount, 0),
+    cashIn.estimates.reduce((sum, txn) => sum + (txn.totalAmount ?? 0), 0),
   );
   const acceptedEstimateAmount = money(
     cashIn.estimates
       .filter((txn) => isAcceptedEstimate(txn))
-      .reduce((sum, txn) => sum + txn.totalAmount, 0),
+      .reduce((sum, txn) => sum + (txn.totalAmount ?? 0), 0),
   );
   const invoicedAmount = money(
-    cashIn.invoices.reduce((sum, txn) => sum + txn.totalAmount, 0),
+    cashIn.invoices.reduce((sum, txn) => sum + (txn.totalAmount ?? 0), 0),
   );
   const customerPaymentsReceived = money(
-    cashIn.payments.reduce((sum, txn) => sum + txn.totalAmount, 0),
+    cashIn.payments.reduce((sum, txn) => sum + (txn.totalAmount ?? 0), 0),
   );
   const customerOutstandingBalance = money(
     cashIn.invoices.reduce((sum, txn) => sum + (txn.openBalance ?? 0), 0),

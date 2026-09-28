@@ -68,8 +68,11 @@ export type AllocationContext = {
   ): TransactionDescriptor;
   stringValue(value: unknown): string;
   money(value: number): number;
-  fullAllocation(amount: number, method: ProjectAllocation['method']): ProjectAllocation;
-  lineBasisAmount(lineItems: QboNormalizedTransaction['lineItems'], totalAmount: number): number;
+  fullAllocation(amount: number | null, method: ProjectAllocation['method']): ProjectAllocation;
+  lineBasisAmount(
+    lineItems: QboNormalizedTransaction['lineItems'],
+    totalAmount: number | null,
+  ): number;
   lineMatchesProject(line: QboNormalizedTransaction['lineItems'][number], project: QboResolvedProjectRef): boolean;
   ratio(value: number, total: number): number;
   emptyAllocation(method: ProjectAllocation['method']): ProjectAllocation;
@@ -383,6 +386,10 @@ export function paymentAllocationLinesEngine(
     .filter((line) => line.linkedTxn.length > 0);
 
   if (lines.length) return lines;
+
+  // Sin lineas con LinkedTxn se cae al total de cabecera. Si tampoco se sabe, no
+  // hay nada que repartir: mejor ninguna linea que una linea de importe 0.
+  if (txn.totalAmount === null) return [];
 
   return [
     {

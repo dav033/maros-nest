@@ -34,7 +34,6 @@ export function normalizeVendorCredit(
     docNumber: s(raw['DocNumber']),
     txnDate: s(raw['TxnDate']),
     totalAmount: n(raw['TotalAmt']),
-    openBalance: n(raw['Balance']),
     projectRefs,
     lineItems,
     linkedTxn: extractLinkedTxn(raw),
@@ -44,6 +43,10 @@ export function normalizeVendorCredit(
     rawRef: buildRawRef('VendorCredit', raw),
     warnings: buildProjectWarnings(projectRefs),
   };
+  // QBO no expone Balance en VendorCredit (400 "Property Balance not found for
+  // Entity VendorCredit"), asi que el saldo pendiente no se puede saber. Se deja
+  // ausente en vez de 0, como ya hace normalizePayment con UnappliedAmt.
+  if (raw['Balance'] !== undefined) result.openBalance = n(raw['Balance']);
   if (customer) result.customer = customer;
   if (vendor) result.vendor = vendor;
   if (account) {

@@ -61,11 +61,13 @@ export class QuickbooksJobCostingUtils {
   ): boolean {
     const normalizedProject = this.normalizeName(projectNumber);
     if (!normalizedProject) return false;
+    // `ProjectNumber` no es una propiedad de Customer en la API de QuickBooks
+    // ni se rellena en ningun punto de este codigo: comparar contra ella era
+    // codigo muerto, no un criterio que se haya perdido al recortar el select.
     const values = [
       this.stringValue(customer.Id),
       this.stringValue(customer.DisplayName),
       this.stringValue(customer.FullyQualifiedName),
-      this.stringValue(customer['ProjectNumber']),
     ];
     return values.some((value) =>
       this.nameMatchesProject(this.normalizeName(value), normalizedProject),
@@ -183,7 +185,14 @@ export class QuickbooksJobCostingUtils {
     return this.normalizeName(txn.status) === 'closed';
   }
 
-  protected fullAllocation(amount: number, method: string): ProjectAllocation {
+  /**
+   * `amount` es `null` cuando QuickBooks no expone el importe de cabecera de esa
+   * entidad (JournalEntry no tiene TotalAmt). No se puede repartir lo que no se
+   * sabe, y repartir 0 lo haria pasar por un asiento sin dinero: se devuelve una
+   * asignacion vacia cuyo `method` dice que el importe se desconoce.
+   */
+  protected fullAllocation(amount: number | null, method: string): ProjectAllocation {
+    if (amount === null) return this.emptyAllocation(`${method}_amount_unknown`);
     const rounded = this.money(amount);
     return {
       amount: rounded,
@@ -214,10 +223,10 @@ export class QuickbooksJobCostingUtils {
 
   protected lineBasisAmount(
     lines: QboNormalizedLine[],
-    fallbackAmount: number,
+    fallbackAmount: number | null,
   ): number {
     const lineSum = lines.reduce((sum, line) => sum + Math.abs(line.amount), 0);
-    return this.money(lineSum || Math.abs(fallbackAmount));
+    return this.money(lineSum || Math.abs(fallbackAmount ?? 0));
   }
 
   protected ratio(amount: number, basis: number): number {
