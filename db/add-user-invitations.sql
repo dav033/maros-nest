@@ -30,6 +30,11 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS scoped_company_id INTEGER REFERENCES 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS scoped_contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS invited_by_id     INTEGER REFERENCES users(id) ON DELETE SET NULL;
 
+-- El DEFAULT solo aplica a filas nuevas: sin este backfill toda cuenta ya
+-- desactivada aterrizaria en 'active' y la lista de admin mentiria sobre quien
+-- puede entrar. Idempotente.
+UPDATE users SET status = 'disabled' WHERE is_active = FALSE AND status = 'active';
+
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_user_type_check') THEN

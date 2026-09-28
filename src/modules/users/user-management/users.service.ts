@@ -161,8 +161,12 @@ export class UsersService {
       user.isActive = changes.isActive!;
       // Status is what the admin list shows; letting it say "active" for an account
       // somebody just switched off would be a lie about who can sign in.
-      if (!user.isActive) user.status = 'disabled';
-      else if (user.status === 'disabled') user.status = 'active';
+      // 'invited' significa "todavia no ha entrado nunca" y es ortogonal al
+      // interruptor de activo: sobreescribirlo perderia que la invitacion sigue
+      // sin aceptarse. Solo lo cambia acceptInvitationIfPending, en el primer login.
+      if (user.status !== 'invited') {
+        user.status = user.isActive ? 'active' : 'disabled';
+      }
     }
 
     return this.usersRepo.save(user);

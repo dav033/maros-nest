@@ -198,7 +198,7 @@ export class EnvironmentVariables {
 
   /**
    * Shared secret for POST /auth/invitations/check, called server-side by the Next.js
-   * Google callback before any session exists. Must match INVITATION_CHECK_TOKEN in
+   * Google callback before any session exists. Must match AUTH_INVITATION_CHECK_TOKEN in
    * maros-next. Optional at startup, like the other integration secrets; the guard
    * refuses every request while it is unset. Generate with: openssl rand -hex 32
    */

@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { MailService } from '../../../mail/services/mail.service';
 import { renderUserInvitationEmail } from './user-invitation-email-templates';
 
-const DEFAULT_FRONTEND_URL = 'https://marosconstruction.com';
+const DEFAULT_APP_URL = 'https://app.marosconstruction.com';
 
 /**
  * The invitation email.
@@ -46,7 +46,7 @@ export class UserInvitationNotificationsService {
 
   private acceptUrl(token: string): string {
     const base =
-      this.config.get<string>('FRONTEND_URL')?.trim() || DEFAULT_FRONTEND_URL;
+      this.config.get<string>('TASK_APP_URL')?.trim() || DEFAULT_APP_URL;
     return `${base.replace(/\/+$/, '')}/login?invitation=${encodeURIComponent(token)}`;
   }
 }
