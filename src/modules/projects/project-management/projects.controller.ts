@@ -24,7 +24,10 @@ import { RequirePermissions } from '../../../common/decorators/require-permissio
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
 import { QuickbooksProjectImportService } from './services/quickbooks-project-import.service';
-import type { ImportQuickbooksProjectDto } from './services/quickbooks-project-import.service';
+import type {
+  ImportQuickbooksBatchDto,
+  ImportQuickbooksProjectDto,
+} from './services/quickbooks-project-import.service';
 import { ProjectQboReportService } from './services/project-qbo-report.service';
 
 @ApiTags('projects')
@@ -50,6 +53,30 @@ export class ProjectsController {
   @ApiOperation({ summary: 'Import a QuickBooks job as a CRM project linked by exact job ID' })
   async importQuickbooksJob(@Body() dto: ImportQuickbooksProjectDto) {
     return this.quickbooksProjectImport.importJob(dto);
+  }
+
+  @Post('quickbooks-import/import-batch')
+  @RequirePermissions('finance:read', 'projects:write')
+  @ApiOperation({
+    summary:
+      'Import many QuickBooks jobs in one transaction — each decision gets its own savepoint, so a rejected one does not discard the rest',
+  })
+  @ApiResponse({ status: 201, description: 'Returns one result per decision: created, linked, already_imported or rejected with a reason' })
+  async importQuickbooksJobsBatch(@Body() dto: ImportQuickbooksBatchDto) {
+    return this.quickbooksProjectImport.importBatch(dto);
+  }
+
+  @Delete(':id/qbo-link')
+  @RequirePermissions('projects:write')
+  @ApiOperation({
+    summary:
+      'Break the QuickBooks link of a project (clears qboCustomerId + quickbooks). Keeps the project and its lead.',
+  })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({ status: 200, description: 'Returns the previous QuickBooks job id, or unlinked=false when there was nothing to clear' })
+  @ApiResponse({ status: 404, description: 'Project not found' })
+  async unlinkProjectQboLink(@Param('id', ParseIntPipe) id: number) {
+    return this.quickbooksProjectImport.unlinkProject(id);
   }
 
   @Get('all')

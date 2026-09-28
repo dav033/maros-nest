@@ -17,6 +17,10 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { QuickbooksApiService } from './services/core/quickbooks-api.service';
 import { QuickbooksAuthService } from './services/core/quickbooks-auth.service';
 import {
+  QuickbooksConnectionStatus,
+  QuickbooksConnectionStatusService,
+} from './services/core/quickbooks-connection-status.service';
+import {
   ProjectFinancials,
   QuickbooksFinancialsService,
 } from './services/financials/quickbooks-financials.service';
@@ -39,6 +43,7 @@ export class QuickbooksController {
 
   constructor(
     private readonly authService: QuickbooksAuthService,
+    private readonly connectionStatusService: QuickbooksConnectionStatusService,
     private readonly apiService: QuickbooksApiService,
     private readonly financialsService: QuickbooksFinancialsService,
     private readonly attachmentsService: QuickbooksAttachmentsService,
@@ -112,6 +117,20 @@ export class QuickbooksController {
         </body>
       </html>
     `);
+  }
+
+  /**
+   * Readable connection state for a settings card: is QuickBooks connected, to
+   * which realm, and when does the stored access token expire. Answered from the
+   * stored connection alone, so it is safe to poll and it still works while the
+   * QuickBooks API is refusing calls.
+   */
+  @Get('connection-status')
+  @ApiOperation({
+    summary: 'QuickBooks connection state (no QuickBooks call, safe to poll)',
+  })
+  async connectionStatus(): Promise<QuickbooksConnectionStatus> {
+    return this.connectionStatusService.getStatus();
   }
 
   /**

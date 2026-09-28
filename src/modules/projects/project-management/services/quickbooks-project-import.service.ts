@@ -1,20 +1,32 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Injectable,
+  Logger,
   NotFoundException,
   Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, FindOptionsWhere, Repository } from 'typeorm';
 import { Lead } from '../../../../entities/lead.entity';
 import { Project } from '../../../../entities/project.entity';
 import { LeadStatus } from '../../../../common/enums/lead-status.enum';
 import { ProjectProgressStatus } from '../../../../common/enums/project-progress-status.enum';
+import { BaseException } from '../../../../common/exceptions/base.exception';
 import { QboConnection } from '../../../quickbooks/entities/qbo-connection.entity';
 import { QuickbooksApiService } from '../../../quickbooks/services/core/quickbooks-api.service';
 import { TaskWorkspaceAssignmentService } from '../../../task-workspaces/services/task-workspace-assignment.service';
+import {
+  diagnoseImportJobs,
+  normalizeProjectNumber,
+  detectChangeOrder,
+  projectNumberFromName,
+} from './quickbooks-import-diagnostics';
+
+/** One screenful of decisions at a time — keeps a single transaction short. */
+const MAX_BATCH_DECISIONS = 200;
 
 type QboJob = {
   Id?: string | number;
@@ -34,8 +46,31 @@ export type ImportQuickbooksProjectDto = {
   projectId?: number;
 };
 
+export type ImportQuickbooksBatchDto = {
+  decisions: ImportQuickbooksProjectDto[];
+};
+
+/**
+ * `created` opened a new CRM lead + project, `linked` attached the job to a CRM
+ * record that already existed, `already_imported` found the link in place.
+ */
+export type ImportQuickbooksOutcome = 'created' | 'linked' | 'already_imported';
+
+export type ImportQuickbooksBatchResult = {
+  qboCustomerId: string;
+  projectNumber: string;
+  outcome: ImportQuickbooksOutcome | 'rejected';
+  projectId: number | null;
+  leadId: number | null;
+  reason: string | null;
+  httpStatus: number | null;
+  errorCode: string | null;
+};
+
 @Injectable()
 export class QuickbooksProjectImportService {
+  private readonly logger = new Logger(QuickbooksProjectImportService.name);
+
   constructor(
     @InjectRepository(QboConnection)
     private readonly connectionRepo: Repository<QboConnection>,
@@ -67,20 +102,20 @@ export class QuickbooksProjectImportService {
     );
     const leadsByProjectNumber = new Map<string, Lead[]>();
     for (const lead of leads) {
-      const key = this.normalizeProjectNumber(lead.leadNumber);
+      const key = normalizeProjectNumber(lead.leadNumber);
       if (!key) continue;
       leadsByProjectNumber.set(key, [...(leadsByProjectNumber.get(key) ?? []), lead]);
     }
 
-    return jobs
+    const rows = jobs
       .filter((job) => job.Id != null && job.DisplayName)
       .map((job) => {
         const qboCustomerId = String(job.Id);
         const displayName = String(job.DisplayName ?? '');
         const linkedProject = projectsByQboId.get(qboCustomerId);
-        const projectNumber = this.projectNumberFromName(displayName);
+        const projectNumber = projectNumberFromName(displayName);
         const matches = projectNumber
-          ? (leadsByProjectNumber.get(this.normalizeProjectNumber(projectNumber)) ?? [])
+          ? (leadsByProjectNumber.get(normalizeProjectNumber(projectNumber)) ?? [])
               .map((lead) => {
                 const project = projectsByLeadId.get(lead.id);
                 return {
@@ -104,13 +139,269 @@ export class QuickbooksProjectImportService {
           importedProjectId: linkedProject?.id ?? null,
           matchingLeads: matches,
         };
-      })
+      });
+
+    // Collisions are only visible across the whole list, so diagnose in one pass.
+    const diagnoses = diagnoseImportJobs(rows);
+
+    return rows
+      .map((row, index) => ({ ...row, ...diagnoses[index] }))
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
   }
 
   async importJob(dto: ImportQuickbooksProjectDto) {
-    const qboCustomerId = String(dto.qboCustomerId ?? '').trim();
-    const projectNumber = String(dto.projectNumber ?? '').trim();
+    const { qboCustomerId, projectNumber } = this.normalizeDecision(dto);
+    const job = this.requireActiveJob(await this.fetchJobs(), qboCustomerId);
+
+    const result = await this.dataSource.transaction((manager) =>
+      this.linkJob(manager, dto, job, qboCustomerId, projectNumber),
+    );
+
+    if (result.outcome !== 'already_imported') {
+      await this.taskWorkspaceAssignment?.ensureCanonicalLead(result.project.lead.id);
+    }
+    return {
+      projectId: result.project.id,
+      leadId: result.project.lead.id,
+      qboCustomerId,
+      outcome: result.outcome,
+      alreadyImported: result.outcome === 'already_imported',
+    };
+  }
+
+  /**
+   * Applies many decisions inside ONE transaction, each one wrapped in its own
+   * nested transaction. On Postgres a nested transaction is a SAVEPOINT, so a
+   * decision that fails rolls back only its own writes: the operator keeps the
+   * 39 rows that worked instead of losing the screen to one bad row, and a
+   * failure still cannot leave half a link behind.
+   */
+  async importBatch(dto: ImportQuickbooksBatchDto) {
+    const decisions = Array.isArray(dto?.decisions) ? dto.decisions : [];
+    if (!decisions.length) {
+      throw new BadRequestException('Provide at least one import decision.');
+    }
+    if (decisions.length > MAX_BATCH_DECISIONS) {
+      throw new BadRequestException(
+        `A batch cannot exceed ${MAX_BATCH_DECISIONS} decisions.`,
+      );
+    }
+
+    const jobs = await this.fetchJobs();
+    const touchedLeadIds: number[] = [];
+
+    const results = await this.dataSource.transaction(async (manager) => {
+      const applied: ImportQuickbooksBatchResult[] = [];
+      for (const decision of decisions) {
+        try {
+          const { qboCustomerId, projectNumber } = this.normalizeDecision(decision);
+          const job = this.requireActiveJob(jobs, qboCustomerId);
+          const result = await manager.transaction((savepoint) =>
+            this.linkJob(savepoint, decision, job, qboCustomerId, projectNumber),
+          );
+          if (result.outcome !== 'already_imported') {
+            touchedLeadIds.push(result.project.lead.id);
+          }
+          applied.push({
+            qboCustomerId,
+            projectNumber,
+            outcome: result.outcome,
+            projectId: result.project.id,
+            leadId: result.project.lead.id,
+            reason: null,
+            httpStatus: null,
+            errorCode: null,
+          });
+        } catch (error) {
+          applied.push({
+            qboCustomerId: String(decision?.qboCustomerId ?? '').trim(),
+            projectNumber: String(decision?.projectNumber ?? '').trim(),
+            outcome: 'rejected',
+            projectId: null,
+            leadId: null,
+            ...this.describeFailure(error),
+          });
+        }
+      }
+      return applied;
+    });
+
+    // After commit: a task-workspace hiccup must not discard accepted decisions.
+    for (const leadId of touchedLeadIds) {
+      try {
+        await this.taskWorkspaceAssignment?.ensureCanonicalLead(leadId);
+      } catch (error) {
+        this.logger.warn(
+          `Task workspace for lead ${leadId} could not be ensured after batch import: ${String(error)}`,
+        );
+      }
+    }
+
+    return {
+      total: results.length,
+      created: results.filter((result) => result.outcome === 'created').length,
+      linked: results.filter((result) => result.outcome === 'linked').length,
+      alreadyImported: results.filter((result) => result.outcome === 'already_imported').length,
+      rejected: results.filter((result) => result.outcome === 'rejected').length,
+      results,
+    };
+  }
+
+  /**
+   * Breaks the QuickBooks link so a mislinked job can be fixed from the UI
+   * instead of by hand in SQL. The lead and the project stay exactly as they
+   * are — only `qbo_customer_id` and `quickbooks` are cleared, which frees the
+   * partial unique index for the job that should have been linked.
+   */
+  async unlinkProject(projectId: number) {
+    const result = await this.dataSource.transaction(async (manager) => {
+      const projectRepo = manager.getRepository(Project);
+      const project = await this.lockProject(manager, { id: projectId });
+      if (!project) throw new NotFoundException('CRM project not found.');
+
+      const previousQboCustomerId = project.qboCustomerId ?? null;
+      if (!previousQboCustomerId) return { project, previousQboCustomerId };
+
+      project.qboCustomerId = null;
+      project.quickbooks = false;
+      return { project: await projectRepo.save(project), previousQboCustomerId };
+    });
+
+    return {
+      projectId: result.project.id,
+      leadId: result.project.lead?.id ?? null,
+      previousQboCustomerId: result.previousQboCustomerId,
+      unlinked: result.previousQboCustomerId != null,
+    };
+  }
+
+  /**
+   * Postgres rechaza `FOR UPDATE` sobre el lado nullable de un outer join, y las
+   * `relations` de TypeORM siempre generan un LEFT JOIN: bloquear y unir en la misma
+   * consulta revienta en tiempo de ejecucion. Se bloquea la fila sola y luego se lee
+   * con sus relaciones, ya dentro de la misma transaccion.
+   */
+  private async lockProject(
+    manager: EntityManager,
+    where: FindOptionsWhere<Project>,
+  ): Promise<Project | null> {
+    const repo = manager.getRepository(Project);
+    const locked = await repo.findOne({
+      where,
+      select: { id: true },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!locked) return null;
+    return repo.findOne({ where: { id: locked.id }, relations: ['lead'] });
+  }
+
+  private async linkJob(
+    manager: EntityManager,
+    dto: ImportQuickbooksProjectDto,
+    job: QboJob,
+    qboCustomerId: string,
+    projectNumber: string,
+  ): Promise<{ project: Project; outcome: ImportQuickbooksOutcome }> {
+    const projectRepo = manager.getRepository(Project);
+    const leadRepo = manager.getRepository(Lead);
+    const existingLink = await projectRepo.findOne({
+      where: { qboCustomerId },
+      relations: ['lead'],
+    });
+    if (existingLink) {
+      // Una decision que apuntaba a OTRO destino no puede contestarse con este:
+      // devolver 'already_imported' del proyecto de otro esconde un conflicto real.
+      const aimedElsewhere =
+        (dto.projectId != null && dto.projectId !== existingLink.id) ||
+        (dto.leadId != null && dto.leadId !== existingLink.lead?.id);
+      if (aimedElsewhere) {
+        throw new ConflictException(
+          'This QuickBooks job is already linked to a different CRM project.',
+        );
+      }
+      return { project: existingLink, outcome: 'already_imported' };
+    }
+
+    // El diagnostico de GET .../jobs es solo de lectura: sin esta guarda, el camino de
+    // escritura crearia alegremente la colision que la pantalla acaba de avisar. Es el
+    // caso 283/387: la orden de cambio no puede quedarse con el numero del contrato base.
+    const jobMarker = detectChangeOrder(String(job.DisplayName ?? ''));
+    if (jobMarker.isChangeOrder && !detectChangeOrder(projectNumber).isChangeOrder) {
+      const suggestion = jobMarker.suggestedProjectNumber
+        ? ` Use "${jobMarker.suggestedProjectNumber}" instead.`
+        : '';
+      throw new ConflictException(
+        `This QuickBooks job is a change order and cannot take the base contract number "${projectNumber}".${suggestion}`,
+      );
+    }
+
+    let project: Project | null = null;
+    let lead: Lead;
+    let createdLead = false;
+
+    if (dto.projectId) {
+      project = await this.lockProject(manager, { id: dto.projectId });
+      if (!project) throw new NotFoundException('CRM project not found.');
+      if (project.qboCustomerId && project.qboCustomerId !== qboCustomerId) {
+        throw new ConflictException('This project is already linked to a different QuickBooks job.');
+      }
+      if (!project.lead) throw new ConflictException('The selected project has no linked lead.');
+      lead = project.lead;
+      this.assertMatchingNumber(lead, projectNumber);
+    } else if (dto.leadId) {
+      const existingLead = await leadRepo.findOne({
+        where: { id: dto.leadId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!existingLead) throw new NotFoundException('CRM lead not found.');
+      lead = existingLead;
+      this.assertMatchingNumber(lead, projectNumber);
+      project = await this.lockProject(manager, { lead: { id: lead.id } });
+      if (project?.qboCustomerId && project.qboCustomerId !== qboCustomerId) {
+        throw new ConflictException('This project is already linked to a different QuickBooks job.');
+      }
+    } else {
+      const duplicate = (await leadRepo.find()).find(
+        (candidate) => normalizeProjectNumber(candidate.leadNumber) === normalizeProjectNumber(projectNumber),
+      );
+      if (duplicate) {
+        throw new ConflictException('A CRM lead already uses this project number. Select it from the matching records instead.');
+      }
+      lead = leadRepo.create({
+        leadNumber: projectNumber,
+        name: String(dto.name || job.DisplayName || projectNumber).trim().slice(0, 100),
+        location: String(dto.location ?? '').trim().slice(0, 255) || undefined,
+        status: LeadStatus.WON,
+        inReview: false,
+      });
+      lead = await leadRepo.save(lead);
+      createdLead = true;
+    }
+
+    if (lead.status !== LeadStatus.WON) {
+      lead.status = LeadStatus.WON;
+      lead = await leadRepo.save(lead);
+    }
+
+    if (!project) {
+      project = projectRepo.create({
+        lead,
+        projectProgressStatus: ProjectProgressStatus.NOT_EXECUTED,
+        quickbooks: true,
+      });
+    }
+    project.qboCustomerId = qboCustomerId;
+    project.quickbooks = true;
+    const savedProject = await projectRepo.save(project);
+    return { project: savedProject, outcome: createdLead ? 'created' : 'linked' };
+  }
+
+  private normalizeDecision(dto: ImportQuickbooksProjectDto): {
+    qboCustomerId: string;
+    projectNumber: string;
+  } {
+    const qboCustomerId = String(dto?.qboCustomerId ?? '').trim();
+    const projectNumber = String(dto?.projectNumber ?? '').trim();
     if (!qboCustomerId || !projectNumber) {
       throw new BadRequestException('A QuickBooks job and project number are required.');
     }
@@ -120,96 +411,33 @@ export class QuickbooksProjectImportService {
     if (dto.projectId && dto.leadId) {
       throw new BadRequestException('Choose a CRM lead or project, not both.');
     }
+    return { qboCustomerId, projectNumber };
+  }
 
-    const job = (await this.fetchJobs()).find((candidate) => String(candidate.Id) === qboCustomerId);
+  private requireActiveJob(jobs: QboJob[], qboCustomerId: string): QboJob {
+    const job = jobs.find((candidate) => String(candidate.Id) === qboCustomerId);
     if (!job || job.Active === false) {
       throw new NotFoundException('The active QuickBooks job could not be found. Refresh the list and try again.');
     }
+    return job;
+  }
 
-    const result = await this.dataSource.transaction(async (manager) => {
-      const projectRepo = manager.getRepository(Project);
-      const leadRepo = manager.getRepository(Lead);
-      const existingLink = await projectRepo.findOne({
-        where: { qboCustomerId },
-        relations: ['lead'],
-      });
-      if (existingLink) return { project: existingLink, alreadyImported: true };
-
-      let project: Project | null = null;
-      let lead: Lead;
-
-      if (dto.projectId) {
-        project = await projectRepo.findOne({
-          where: { id: dto.projectId },
-          relations: ['lead'],
-          lock: { mode: 'pessimistic_write' },
-        });
-        if (!project) throw new NotFoundException('CRM project not found.');
-        if (project.qboCustomerId && project.qboCustomerId !== qboCustomerId) {
-          throw new ConflictException('This project is already linked to a different QuickBooks job.');
-        }
-        if (!project.lead) throw new ConflictException('The selected project has no linked lead.');
-        lead = project.lead;
-        this.assertMatchingNumber(lead, projectNumber);
-      } else if (dto.leadId) {
-        const existingLead = await leadRepo.findOne({
-          where: { id: dto.leadId },
-          lock: { mode: 'pessimistic_write' },
-        });
-        if (!existingLead) throw new NotFoundException('CRM lead not found.');
-        lead = existingLead;
-        this.assertMatchingNumber(lead, projectNumber);
-        project = await projectRepo.findOne({
-          where: { lead: { id: lead.id } },
-          relations: ['lead'],
-          lock: { mode: 'pessimistic_write' },
-        });
-        if (project?.qboCustomerId && project.qboCustomerId !== qboCustomerId) {
-          throw new ConflictException('This project is already linked to a different QuickBooks job.');
-        }
-      } else {
-        const duplicate = (await leadRepo.find()).find(
-          (candidate) => this.normalizeProjectNumber(candidate.leadNumber) === this.normalizeProjectNumber(projectNumber),
-        );
-        if (duplicate) {
-          throw new ConflictException('A CRM lead already uses this project number. Select it from the matching records instead.');
-        }
-        lead = leadRepo.create({
-          leadNumber: projectNumber,
-          name: String(dto.name || job.DisplayName || projectNumber).trim().slice(0, 100),
-          location: String(dto.location ?? '').trim().slice(0, 255) || undefined,
-          status: LeadStatus.WON,
-          inReview: false,
-        });
-        lead = await leadRepo.save(lead);
-      }
-
-      if (lead.status !== LeadStatus.WON) {
-        lead.status = LeadStatus.WON;
-        lead = await leadRepo.save(lead);
-      }
-
-      if (!project) {
-        project = projectRepo.create({
-          lead,
-          projectProgressStatus: ProjectProgressStatus.NOT_EXECUTED,
-          quickbooks: true,
-        });
-      }
-      project.qboCustomerId = qboCustomerId;
-      project.quickbooks = true;
-      const savedProject = await projectRepo.save(project);
-      return { project: savedProject, alreadyImported: false };
-    });
-
-    if (!result.alreadyImported) {
-      await this.taskWorkspaceAssignment?.ensureCanonicalLead(result.project.lead.id);
+  private describeFailure(error: unknown): {
+    reason: string;
+    httpStatus: number | null;
+    errorCode: string | null;
+  } {
+    if (error instanceof HttpException) {
+      return {
+        reason: error.message,
+        httpStatus: error.getStatus(),
+        errorCode: error instanceof BaseException ? (error.code ?? null) : null,
+      };
     }
     return {
-      projectId: result.project.id,
-      leadId: result.project.lead.id,
-      qboCustomerId,
-      alreadyImported: result.alreadyImported,
+      reason: error instanceof Error ? error.message : 'Unexpected error.',
+      httpStatus: null,
+      errorCode: null,
     };
   }
 
@@ -223,21 +451,8 @@ export class QuickbooksProjectImportService {
     })) as QboJob[];
   }
 
-  private projectNumberFromName(name: string): string | null {
-    const match = name.match(/^\s*\[?([0-9]{3}[A-Z]?-[0-9]{4})\]?(?:[\s,|-]*CO[\s-]*(\d+))?(?=$|[\s,|:)\]])/i);
-    if (!match) return null;
-    return match[2] ? `${match[1]} CO${String(Number(match[2])).padStart(2, '0')}` : match[1];
-  }
-
-  private normalizeProjectNumber(value?: string | null): string {
-    const number = String(value ?? '').trim().toUpperCase().replace(/\s*-\s*/g, '-');
-    const changeOrder = number.match(/^(.*?)[\s,|-]*CO[\s-]*(\d+)$/i);
-    if (!changeOrder) return number;
-    return `${changeOrder[1].trim()} CO${Number(changeOrder[2])}`;
-  }
-
   private assertMatchingNumber(lead: Lead, projectNumber: string): void {
-    if (this.normalizeProjectNumber(lead.leadNumber) !== this.normalizeProjectNumber(projectNumber)) {
+    if (normalizeProjectNumber(lead.leadNumber) !== normalizeProjectNumber(projectNumber)) {
       throw new ConflictException('The selected CRM record no longer matches this project number. Refresh the list and choose a matching record.');
     }
   }

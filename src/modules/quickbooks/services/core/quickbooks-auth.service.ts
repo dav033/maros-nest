@@ -213,7 +213,8 @@ export class QuickbooksAuthService {
     };
   }
 
-  private isOAuthConfigured(): boolean {
+  /** Public so a connection-status card can tell "never set up" from "expired". */
+  isOAuthConfigured(): boolean {
     return Boolean(this.clientId && this.clientSecret && this.redirectUri);
   }
 

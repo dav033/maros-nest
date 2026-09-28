@@ -7,6 +7,7 @@ import { Company } from '../../entities/company.entity';
 import { Lead } from '../../entities/lead.entity';
 import { TokenCryptoService } from './services/core/token-crypto.service';
 import { QuickbooksAuthService } from './services/core/quickbooks-auth.service';
+import { QuickbooksConnectionStatusService } from './services/core/quickbooks-connection-status.service';
 import { QuickbooksApiService } from './services/core/quickbooks-api.service';
 import { QuickbooksFinancialsService } from './services/financials/quickbooks-financials.service';
 import { QuickbooksFinancialsContextService } from './services/financials/quickbooks-financials-context.service';
@@ -53,6 +54,7 @@ import { Project } from '../../entities/project.entity';
   providers: [
     TokenCryptoService,
     QuickbooksAuthService,
+    QuickbooksConnectionStatusService,
     QuickbooksApiService,
     QuickbooksFinancialsService,
     QuickbooksFinancialsContextService,

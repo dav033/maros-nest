@@ -51,19 +51,35 @@ export class QuickbooksReportsContextService {
       .createQueryBuilder('lead')
       .innerJoin('lead.project', 'project')
       .select('lead.leadNumber', 'leadNumber')
+      .addSelect('project.qboCustomerId', 'qboCustomerId')
       .where('lead.leadNumber IS NOT NULL')
       .andWhere("lead.leadNumber <> ''")
-      .getRawMany<{ leadNumber: string }>();
+      .getRawMany<{ leadNumber: string; qboCustomerId: string | null }>();
     const projectNumbers = projectRows
       .map((row) => row.leadNumber)
       .filter(Boolean);
     const projectMatches = mapQboCustomersToProjects(projectNumbers, customers);
-    const projectNumberByCustomerId = new Map(
-      [...projectMatches.entries()].map(([projectNumber, customer]) => [
-        String(customer.Id),
-        projectNumber,
-      ]),
-    );
+
+    // An imported job's QBO ID is authoritative — same rule the financials and
+    // job-costing contexts already follow. A change order is named after its
+    // base contract, so matching on the job name alone can report one job under
+    // the other's project number.
+    // Keyed on the trimmed number, the same form mapQboCustomersToProjects uses.
+    const linkedCustomerIdByNumber = new Map<string, string>();
+    for (const row of projectRows) {
+      if (row.leadNumber?.trim() && row.qboCustomerId) {
+        linkedCustomerIdByNumber.set(row.leadNumber.trim(), String(row.qboCustomerId));
+      }
+    }
+    const projectNumberByCustomerId = new Map<string, string>();
+    for (const [projectNumber, customer] of projectMatches) {
+      // Skip the name-derived guess: the stored link below replaces it.
+      if (linkedCustomerIdByNumber.has(projectNumber)) continue;
+      projectNumberByCustomerId.set(String(customer.Id), projectNumber);
+    }
+    for (const [projectNumber, customerId] of linkedCustomerIdByNumber) {
+      projectNumberByCustomerId.set(customerId, projectNumber);
+    }
 
     const byId: JobIndex['byId'] = {};
     const projectNumberById: JobIndex['projectNumberById'] = {};
