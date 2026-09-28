@@ -10,6 +10,7 @@ describe('QuickbooksProjectImportService', () => {
   let service: QuickbooksProjectImportService;
   let leads: Map<number, Lead>;
   let projects: Map<number, Project>;
+  let projectRepo: { findOne: jest.Mock; create: jest.Mock; save: jest.Mock };
   let nextLeadId: number;
   let nextProjectId: number;
   let savepointsOpened: number;
@@ -52,7 +53,7 @@ describe('QuickbooksProjectImportService', () => {
         return Promise.resolve(lead);
       }),
     };
-    const projectRepo = {
+    projectRepo = {
       findOne: jest.fn(
         ({
           where,
@@ -82,6 +83,29 @@ describe('QuickbooksProjectImportService', () => {
       }),
     };
 
+    // Contar savepoints no prueba que exista el savepoint: lo que hay que
+    // imitar es que al fallar una decision se deshaga lo que ya habia escrito.
+    const snapshot = () => ({
+      leads: new Map<number, Lead>([...leads].map(([id, lead]) => [id, { ...lead }])),
+      projects: new Map<number, Project>(
+        [...projects].map(([id, project]) => [id, { ...project }]),
+      ),
+      nextLeadId,
+      nextProjectId,
+    });
+    const rollbackTo = (saved: ReturnType<typeof snapshot>) => {
+      for (const id of [...leads.keys()]) {
+        if (!saved.leads.has(id)) leads.delete(id);
+      }
+      for (const [id, fields] of saved.leads) Object.assign(leads.get(id)!, fields);
+      for (const id of [...projects.keys()]) {
+        if (!saved.projects.has(id)) projects.delete(id);
+      }
+      for (const [id, fields] of saved.projects) Object.assign(projects.get(id)!, fields);
+      nextLeadId = saved.nextLeadId;
+      nextProjectId = saved.nextProjectId;
+    };
+
     const manager = {
       getRepository: jest.fn((entity) => {
         if (entity === Lead) return leadRepo;
@@ -91,10 +115,12 @@ describe('QuickbooksProjectImportService', () => {
       // Nested transactions are SAVEPOINTs on Postgres — one per decision.
       transaction: jest.fn(async (callback: (m: unknown) => Promise<unknown>) => {
         savepointsOpened += 1;
+        const saved = snapshot();
         try {
           return await callback(manager);
         } catch (error) {
           savepointsRolledBack += 1;
+          rollbackTo(saved);
           throw error;
         }
       }),
@@ -207,6 +233,34 @@ describe('QuickbooksProjectImportService', () => {
       expect(savepointsOpened).toBe(3);
       expect(savepointsRolledBack).toBe(1);
       expect(taskWorkspaceAssignment.ensureCanonicalLead).toHaveBeenCalledTimes(2);
+    });
+
+    it('undoes what a decision already wrote when it fails halfway', async () => {
+      // El lead nuevo se guarda antes que el proyecto: si el proyecto revienta
+      // contra el indice unico de qbo_customer_id, el savepoint tiene que
+      // llevarse tambien el lead que esa misma decision acababa de crear.
+      const saveProject = projectRepo.save.getMockImplementation()!;
+      projectRepo.save.mockImplementation((project: Project) =>
+        project.qboCustomerId === '501'
+          ? Promise.reject(new Error('duplicate key value violates unique constraint'))
+          : saveProject(project),
+      );
+
+      const summary = await service.importBatch({
+        decisions: [
+          { qboCustomerId: '387', projectNumber: '001R-0625', projectId: 70 },
+          { qboCustomerId: '501', projectNumber: '002R-0725' },
+        ],
+      });
+
+      expect(summary).toMatchObject({ total: 2, linked: 1, created: 0, rejected: 1 });
+      expect(savepointsRolledBack).toBe(1);
+      // La decision aceptada sobrevive...
+      expect(projects.get(70)?.qboCustomerId).toBe('387');
+      // ...y la rechazada no deja el lead huerfano que alcanzo a crear.
+      expect([...leads.values()].some((lead) => lead.leadNumber === '002R-0725')).toBe(
+        false,
+      );
     });
 
     it('rejects a decision instead of the whole batch when the QuickBooks job is unknown', async () => {

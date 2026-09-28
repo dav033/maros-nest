@@ -27,7 +27,7 @@ export function renderUserInvitationEmail(opts: {
   recipientEmail: string;
   recipientName: string | null;
   inviterName: string | null;
-  acceptUrl: string;
+  loginUrl: string;
   expiresAt: Date;
 }): RenderedEmail {
   const greeting = opts.recipientName ? `Hi ${opts.recipientName},` : 'Hi,';
@@ -42,7 +42,7 @@ export function renderUserInvitationEmail(opts: {
     '',
     `Sign in with the Google account for ${opts.recipientEmail} — there is no password to set.`,
     '',
-    opts.acceptUrl,
+    opts.loginUrl,
     '',
     `This invitation expires on ${expiry}.`,
   ].join('\n');
@@ -56,7 +56,7 @@ export function renderUserInvitationEmail(opts: {
       <p style="margin:0;font-size:14px;line-height:1.6;color:${EMAIL_COLOR.text};">Sign in with the Google account for <strong>${escapeHtml(opts.recipientEmail)}</strong> — there is no password to set.</p>
       <p style="margin:14px 0 0;font-size:12px;color:${EMAIL_COLOR.muted};">This invitation expires on ${escapeHtml(expiry)}.</p>`,
     ctaLabel: 'Sign in with Google',
-    ctaUrl: opts.acceptUrl,
+    ctaUrl: opts.loginUrl,
   });
 
   return { subject, text, html };

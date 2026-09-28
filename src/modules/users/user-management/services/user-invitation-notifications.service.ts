@@ -25,14 +25,13 @@ export class UserInvitationNotificationsService {
     email: string;
     name: string | null;
     inviterName: string | null;
-    token: string;
     expiresAt: Date;
   }): Promise<void> {
     const rendered = renderUserInvitationEmail({
       recipientEmail: opts.email,
       recipientName: opts.name,
       inviterName: opts.inviterName,
-      acceptUrl: this.acceptUrl(opts.token),
+      loginUrl: this.loginUrl(),
       expiresAt: opts.expiresAt,
     });
 
@@ -44,9 +43,13 @@ export class UserInvitationNotificationsService {
     });
   }
 
-  private acceptUrl(token: string): string {
+  /**
+   * The plain login page: the link carries nothing, because it grants nothing. What the
+   * recipient needs is the address of the door, and Google does the rest.
+   */
+  private loginUrl(): string {
     const base =
       this.config.get<string>('TASK_APP_URL')?.trim() || DEFAULT_APP_URL;
-    return `${base.replace(/\/+$/, '')}/login?invitation=${encodeURIComponent(token)}`;
+    return `${base.replace(/\/+$/, '')}/login`;
   }
 }

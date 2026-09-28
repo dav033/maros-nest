@@ -2,6 +2,7 @@ import {
   detectChangeOrder,
   diagnoseImportJobs,
   ImportJobDiagnosisInput,
+  normalizeProjectNumber,
   projectNumberFromName,
 } from './quickbooks-import-diagnostics';
 
@@ -51,6 +52,9 @@ describe('detectChangeOrder', () => {
     expect(detectChangeOrder(JOB_387).isChangeOrder).toBe(false);
     expect(detectChangeOrder('001R-0625 Corner St Roofing').isChangeOrder).toBe(false);
     expect(detectChangeOrder('001R-0625 C0123 Main St').isChangeOrder).toBe(false);
+    // Street names: a county road is not a change order, however it is punctuated.
+    expect(detectChangeOrder('001R-0625, Co. Rd 12, Miami, FL').isChangeOrder).toBe(false);
+    expect(detectChangeOrder('001R-0625 Co. Rd 12').isChangeOrder).toBe(false);
   });
 
   it('does not suggest a number when the name already spells CO the canonical way', () => {
@@ -60,6 +64,24 @@ describe('detectChangeOrder', () => {
       changeOrderNumber: 1,
       suggestedProjectNumber: null,
     });
+  });
+});
+
+describe('normalizeProjectNumber', () => {
+  it('collapses every spelling of one change order onto the same key', () => {
+    // 'C01' es la grafia que detectChangeOrder entiende: la clave de comparacion
+    // tiene que verla igual que 'CO1', o los chequeos de duplicado creen que son
+    // dos proyectos distintos.
+    expect(normalizeProjectNumber('001R-0625 C01')).toBe('001R-0625 CO1');
+    expect(normalizeProjectNumber('001R-0625 CO1')).toBe('001R-0625 CO1');
+    expect(normalizeProjectNumber('001R-0625 CO 01')).toBe('001R-0625 CO1');
+    expect(normalizeProjectNumber(' 001r - 0625  co-1 ')).toBe('001R-0625 CO1');
+  });
+
+  it('leaves a base contract number alone', () => {
+    expect(normalizeProjectNumber('001R-0625')).toBe('001R-0625');
+    expect(normalizeProjectNumber('001R - 0625')).toBe('001R-0625');
+    expect(normalizeProjectNumber(null)).toBe('');
   });
 });
 

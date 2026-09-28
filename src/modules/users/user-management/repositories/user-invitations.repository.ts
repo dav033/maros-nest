@@ -24,6 +24,19 @@ export class UserInvitationsRepository {
     return this.repo.findOne({ where: { userId, ...PENDING_INVITATION } });
   }
 
+  /**
+   * The newest invitation sent to an address, in whatever state it ended up.
+   *
+   * The admission check needs the revoked and expired rows too: "your invitation was
+   * cancelled" is only tellable from "we never invited you" by reading them.
+   */
+  async findLatestByEmail(email: string): Promise<UserInvitation | null> {
+    return this.repo.findOne({
+      where: { email },
+      order: { createdAt: 'DESC', id: 'DESC' },
+    });
+  }
+
   async markAccepted(id: number, at: Date): Promise<void> {
     await this.repo.update(id, { acceptedAt: at });
   }

@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { createHash, randomBytes } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { User, UserStatus } from '../../../../entities/user.entity';
 import { UserInvitation } from '../../../../entities/user-invitation.entity';
@@ -21,21 +20,29 @@ import { UserInvitationNotificationsService } from './user-invitation-notificati
 
 const DEFAULT_EXPIRES_IN_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** 32 bytes = 256 bits, same shape as the note share tokens. */
-const TOKEN_BYTES = 32;
 
-/** What the caller is told about an invitation. Never the token itself. */
+/** What the caller is told about an invitation. */
 export interface IssuedInvitation {
   id: number;
   expiresAt: Date;
-  tokenHint: string;
 }
+
+/**
+ * Why the door stayed shut, so the login page can say which of these it was instead of
+ * falling back to "that domain is not allowed".
+ */
+export type InvitationDenialReason =
+  | 'not_invited'
+  | 'expired'
+  | 'revoked'
+  | 'disabled';
 
 /** Answer for the Next.js Google callback, which has no session to authenticate with. */
 export interface InvitationCheckResult {
   allowed: boolean;
   userId?: number;
   status?: UserStatus;
+  reason?: InvitationDenialReason;
 }
 
 @Injectable()
@@ -95,7 +102,7 @@ export class UserInvitationsService {
     });
   }
 
-  /** Supersedes the outstanding invitation with a fresh token and expiry. */
+  /** Supersedes the outstanding invitation with a fresh expiry. */
   async resend(userId: number, actor: AuthenticatedUser): Promise<IssuedInvitation> {
     const user = await this.usersRepo.findById(userId);
     if (!user) throw new UserNotFoundException(userId);
@@ -110,9 +117,9 @@ export class UserInvitationsService {
   /**
    * Cancels the invitation.
    *
-   * Deactivating the account is part of cancelling, not an extra: an 'invited' row left
-   * active still passes checkAccess(), so revoking only the token would leave the door
-   * open. The row itself is kept — who was invited, and by whom, is worth more than a
+   * Deactivating the account is part of cancelling, not an extra: `revoked_at` is what
+   * checkAccess() refuses on, and the account is closed with it so an invitation nobody
+   * may use does not linger as a live 'invited' row. The row itself is kept — who was invited, and by whom, is worth more than a
    * tidy table.
    */
   async revoke(userId: number): Promise<void> {
@@ -138,23 +145,36 @@ export class UserInvitationsService {
    * The database answer to the question the Next.js callback used to answer from a
    * hardcoded allowlist: may this Google account have a session?
    *
+   * This is the whole gate. Google proves who the person is; the invitation only says
+   * they were expected, so its expiry and its revocation are enforced here or nowhere.
+   *
    * An unknown address is always denied, so the callback must keep letting its own
    * Workspace domain through first — internal staff have no user row until their very
    * first login provisions one.
    */
   async checkAccess(email: string): Promise<InvitationCheckResult> {
-    const user = await this.usersRepo.findByEmail(email.trim().toLowerCase());
-    if (!user) return { allowed: false };
+    const normalized = email.trim().toLowerCase();
+    const user = await this.usersRepo.findByEmail(normalized);
+    if (!user) return { allowed: false, reason: 'not_invited' };
 
     if (!user.isActive || user.status === 'disabled') {
-      return { allowed: false, userId: user.id, status: 'disabled' };
+      // Cancelling an invitation also disables the account, so the invitation is what
+      // tells "yours was cancelled" apart from "somebody turned your account off".
+      const invitation = await this.invitationsRepo.findLatestByEmail(normalized);
+      return {
+        allowed: false,
+        userId: user.id,
+        status: 'disabled',
+        reason: invitation?.revokedAt ? 'revoked' : 'disabled',
+      };
     }
 
     if (user.status === 'invited') {
-      // An expiry nobody enforces is decoration.
-      const pending = await this.invitationsRepo.findPendingByUserId(user.id);
-      const usable = !!pending && pending.expiresAt.getTime() > Date.now();
-      return { allowed: usable, userId: user.id, status: 'invited' };
+      const invitation = await this.invitationsRepo.findLatestByEmail(normalized);
+      const reason = denialReason(invitation);
+      return reason
+        ? { allowed: false, userId: user.id, status: 'invited', reason }
+        : { allowed: true, userId: user.id, status: 'invited' };
     }
 
     return { allowed: true, userId: user.id, status: user.status };
@@ -175,15 +195,9 @@ export class UserInvitationsService {
       { revokedAt: new Date() },
     );
 
-    // The token exists in the emailed link and nowhere else; only its SHA-256 is
-    // stored. 256 bits of entropy need no key stretching — see share-token.util.ts.
-    const token = randomBytes(TOKEN_BYTES).toString('base64url');
-
     const invitation = new UserInvitation();
     invitation.userId = user.id;
     invitation.email = user.email;
-    invitation.tokenHash = createHash('sha256').update(token).digest('hex');
-    invitation.tokenHint = token.slice(0, 8);
     invitation.expiresAt = new Date(
       Date.now() + (expiresInDays ?? DEFAULT_EXPIRES_IN_DAYS) * DAY_MS,
     );
@@ -196,7 +210,6 @@ export class UserInvitationsService {
       email: user.email,
       name: user.name ?? null,
       inviterName: actor.name,
-      token,
       expiresAt: saved.expiresAt,
     });
 
@@ -204,10 +217,19 @@ export class UserInvitationsService {
   }
 }
 
+/** Why this invitation cannot open the door, or null if it can. */
+function denialReason(
+  invitation: UserInvitation | null,
+): InvitationDenialReason | null {
+  if (!invitation || invitation.acceptedAt) return 'not_invited';
+  if (invitation.revokedAt) return 'revoked';
+  if (invitation.expiresAt.getTime() <= Date.now()) return 'expired';
+  return null;
+}
+
 function toIssued(invitation: UserInvitation): IssuedInvitation {
   return {
     id: invitation.id,
     expiresAt: invitation.expiresAt,
-    tokenHint: invitation.tokenHint,
   };
 }

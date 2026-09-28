@@ -56,9 +56,10 @@ CREATE INDEX IF NOT EXISTS idx_users_scoped_contact ON users (scoped_contact_id)
 -- --------------------------------------------------------------------------
 -- 2. The invitations themselves
 --
--- The token is never stored in clear: 32 random bytes (base64url) go out in the email
--- link and only their SHA-256 lives here, exactly as note_page_links does it. A leaked
--- backup hands nobody a working invitation.
+-- There is no token. An invitation is not a credential: Google authenticates the person,
+-- and this row only records that the address was expected. What it must hold instead is
+-- the two facts that close the door — expires_at and revoked_at — which
+-- POST /auth/invitations/check reads on every external login.
 --
 -- Revocation is soft (revoked_at) so cancelling an invitation keeps the record of who
 -- invited whom, and `email` is stored alongside user_id because it is the address the
@@ -69,10 +70,6 @@ CREATE TABLE IF NOT EXISTS user_invitations (
   id            SERIAL PRIMARY KEY,
   user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   email         VARCHAR(255) NOT NULL,
-  token_hash    CHAR(64) NOT NULL,
-  -- First characters of the token, so the UI can tell two invitations apart without
-  -- being able to reconstruct either.
-  token_hint    VARCHAR(8) NOT NULL,
   expires_at    TIMESTAMP NOT NULL,
   accepted_at   TIMESTAMP,
   revoked_at    TIMESTAMP,
@@ -80,8 +77,21 @@ CREATE TABLE IF NOT EXISTS user_invitations (
   created_at    TIMESTAMP NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_user_invitations_token ON user_invitations (token_hash);
+-- An earlier version of this file stored a SHA-256 of a 32-byte token that went out in
+-- the invitation link. Nothing ever read it back — the link was never a login — so it
+-- was a 256-bit secret travelling by email for nothing. Dropped rather than left
+-- unused: token_hash is NOT NULL, so a database created before this would reject every
+-- new invitation. Both statements are no-ops on a database that never had the columns.
+DROP INDEX IF EXISTS uq_user_invitations_token;
+ALTER TABLE user_invitations
+  DROP COLUMN IF EXISTS token_hash,
+  DROP COLUMN IF EXISTS token_hint;
+
 CREATE INDEX IF NOT EXISTS idx_user_invitations_user ON user_invitations (user_id, created_at DESC);
+
+-- The admission check knows the Google address and nothing else, so this is the lookup
+-- every external login makes.
+CREATE INDEX IF NOT EXISTS idx_user_invitations_email ON user_invitations (email, created_at DESC);
 
 -- One live invitation per user. Resending revokes the previous one before writing the
 -- new one; this index is what guarantees it rather than trusting the service to.

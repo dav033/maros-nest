@@ -17,10 +17,13 @@ const PROJECT_NUMBER =
  * Change-order markers as operators actually type them right after the project
  * number: `CO1`, `CO 01`, `CO-2`, `C.O. 3` and — the form that made jobs 283 and
  * 387 collapse onto one number — `C01`, with a zero instead of the letter O.
- * Ordinals stop at two digits and must end on a word boundary, so `Corner St`
- * and street numbers such as `C0123 Main St` do not read as change orders.
+ * With an ordinal it stops at two digits, so the street number in
+ * `C0123 Main St` is not one. Without an ordinal only the bare `CO` / `C.O.`
+ * token counts, so `Corner St` and the street name `Co. Rd 12` — a period after
+ * the O but not after the C — are not change orders either.
  */
-const CHANGE_ORDER_MARKER = /^[\s,|:;.-]*\(?C[\s.]*[O0][\s.\-#]*(\d{1,2})?\b/i;
+const CHANGE_ORDER_MARKER =
+  /^[\s,|:;.-]*\(?(?:C[\s.]*[O0][\s.\-#]*(\d{1,2})(?!\d)|(?:CO|C\.O\.?)(?![\w.]))/i;
 
 export type QuickbooksImportJobStatus =
   | 'ok'
@@ -81,13 +84,18 @@ export function projectNumberFromName(name: string): string | null {
     : match[1];
 }
 
-/** Comparison key for project numbers written with stray spaces or `CO 01`. */
+/**
+ * Comparison key for project numbers written with stray spaces or `CO 01`.
+ * `C01` is the same change order as `CO1`, so both have to collapse onto one
+ * key — otherwise the duplicate checks compare the two spellings as if they
+ * were different projects.
+ */
 export function normalizeProjectNumber(value?: string | null): string {
   const number = String(value ?? '')
     .trim()
     .toUpperCase()
     .replace(/\s*-\s*/g, '-');
-  const changeOrder = number.match(/^(.*?)[\s,|-]*CO[\s-]*(\d+)$/i);
+  const changeOrder = number.match(/^(.*?)[\s,|-]*C[O0][\s-]*(\d+)$/i);
   if (!changeOrder) return number;
   return `${changeOrder[1].trim()} CO${Number(changeOrder[2])}`;
 }

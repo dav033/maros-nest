@@ -12,8 +12,9 @@ import { User } from './user.entity';
 /**
  * One emailed invitation to sign in with Google.
  *
- * The token is never stored: `tokenHash` holds its SHA-256 and the raw value only
- * exists in the link that went out, exactly as NotePageLink does it.
+ * It carries no secret: Google authenticates, so the row only records that the address
+ * was expected. `expiresAt` and `revokedAt` are what close the door, and
+ * POST /auth/invitations/check is the one place they are read.
  *
  * Revocation is soft (`revokedAt`) so cancelling keeps the record of who invited whom,
  * and only one row per user may be live at a time — enforced by a partial unique index
@@ -35,13 +36,6 @@ export class UserInvitation {
   /** The address the message actually went to; users.email may change later. */
   @Column({ length: 255 })
   email: string;
-
-  @Column({ name: 'token_hash', type: 'char', length: 64 })
-  tokenHash: string;
-
-  /** First characters of the token, so the UI can tell two invitations apart safely. */
-  @Column({ name: 'token_hint', type: 'varchar', length: 8 })
-  tokenHint: string;
 
   @Column({ name: 'expires_at', type: 'timestamp' })
   expiresAt: Date;

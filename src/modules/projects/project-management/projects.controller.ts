@@ -24,10 +24,8 @@ import { RequirePermissions } from '../../../common/decorators/require-permissio
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
 import { QuickbooksProjectImportService } from './services/quickbooks-project-import.service';
-import type {
-  ImportQuickbooksBatchDto,
-  ImportQuickbooksProjectDto,
-} from './services/quickbooks-project-import.service';
+import { ImportQuickbooksBatchDto } from './dto/import-quickbooks-batch.dto';
+import { ImportQuickbooksProjectDto } from './dto/import-quickbooks-project.dto';
 import { ProjectQboReportService } from './services/project-qbo-report.service';
 
 @ApiTags('projects')

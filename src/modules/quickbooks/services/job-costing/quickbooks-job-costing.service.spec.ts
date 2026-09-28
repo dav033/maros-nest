@@ -105,10 +105,16 @@ describe('QuickbooksJobCostingService batch summaries', () => {
       queryAll,
       buildDateWhereClause: jest.fn(() => ({ where: undefined })),
     };
+    // Los proyectos de prueba no están importados, así que no hay job vinculado
+    // en el CRM y la resolución cae en el emparejamiento por nombre.
+    const financials = {
+      getDefaultRealmId: jest.fn(async () => 'realm-1'),
+      getProjectJobIds: jest.fn(async () => ({}) as Record<string, string>),
+    };
     const service = new QuickbooksJobCostingService(
       api as never,
       new QuickbooksNormalizerService(),
-      { getDefaultRealmId: jest.fn() } as never,
+      financials as never,
       {} as never,
       {} as never,
       {} as never,

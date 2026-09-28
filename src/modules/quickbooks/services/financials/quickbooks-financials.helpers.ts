@@ -47,11 +47,17 @@ function escapeRegExp(value: string): string {
 
 function projectNumberPatternPart(value: string): string {
   // QBO occasionally inserts a space around the dash (`022 -0325`) even
-  // though the CRM stores the canonical `022-0325` form.
-  const changeOrder = value.match(/^(.*?)[\\s,-]*CO[\\s-]*(\\d+)$/i);
+  // though the CRM stores the canonical `022-0325` form. The change-order
+  // marker is just as loose: the CRM stores `CO01`, while the job is typed
+  // `CO1`, `CO-01` or — the form behind jobs 283 and 387 — `C01`, with a zero
+  // standing in for the letter O. That O — or the zero standing in for it — is
+  // what makes it a marker, the same rule quickbooks-import-diagnostics reads
+  // job names by: a bare `C` before digits is a street number, so `001C-0625`
+  // stays a base number and so does the `C0123` of `C0123 Main St`.
+  const changeOrder = value.match(/^(.*?)[\s,-]*C[O0][\s-]*(\d+)$/i);
   if (changeOrder) {
     const ordinal = String(Number(changeOrder[2]));
-    return `${escapeRegExp(changeOrder[1]).replace(/-/g, '\\s*-\\s*')}[\\s,-]*CO[\\s-]*0*${ordinal}`;
+    return `${escapeRegExp(changeOrder[1]).replace(/-/g, '\\s*-\\s*')}[\\s,-]*C[O0][\\s-]*0*${ordinal}`;
   }
   return escapeRegExp(value).replace(/-/g, '\\s*-\\s*');
 }
@@ -78,9 +84,12 @@ export function matchesProjectNumber(
 
   // A base project number is also a prefix of its change orders. Never let a
   // base project's financials resolve to a CO job just because it was first.
-  if (!/CO[\\s-]*\\d+$/i.test(number)) {
+  // The ordinal stops at two digits, again as the diagnostics do: without that
+  // cap the street number in `001R-0625 C0123 Main St` reads as change order
+  // 123 and the base contract stops matching its own job.
+  if (!/C[O0][\s-]*\d+$/i.test(number)) {
     const base = new RegExp(
-      `^\\s*\\[?${projectNumberPatternPart(number)}\\]?[\\s,-]+CO[\\s-]*\\d+(?=$|[\\s,|:-])`,
+      `^\\s*\\[?${projectNumberPatternPart(number)}\\]?[\\s,-]+C[O0][\\s-]*0*\\d{1,2}(?=$|[\\s,|:-])`,
       'iu',
     );
     if (base.test(name)) return false;

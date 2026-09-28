@@ -9,15 +9,16 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, FindOptionsWhere, Repository } from 'typeorm';
+import { DataSource, EntityManager, FindOptionsWhere, ILike, Repository } from 'typeorm';
 import { Lead } from '../../../../entities/lead.entity';
 import { Project } from '../../../../entities/project.entity';
 import { LeadStatus } from '../../../../common/enums/lead-status.enum';
 import { ProjectProgressStatus } from '../../../../common/enums/project-progress-status.enum';
-import { BaseException } from '../../../../common/exceptions/base.exception';
 import { QboConnection } from '../../../quickbooks/entities/qbo-connection.entity';
 import { QuickbooksApiService } from '../../../quickbooks/services/core/quickbooks-api.service';
 import { TaskWorkspaceAssignmentService } from '../../../task-workspaces/services/task-workspace-assignment.service';
+import { ImportQuickbooksBatchDto } from '../dto/import-quickbooks-batch.dto';
+import { ImportQuickbooksProjectDto } from '../dto/import-quickbooks-project.dto';
 import {
   diagnoseImportJobs,
   normalizeProjectNumber,
@@ -37,19 +38,6 @@ type QboJob = {
   ParentRef?: { value?: string; name?: string };
 };
 
-export type ImportQuickbooksProjectDto = {
-  qboCustomerId: string;
-  projectNumber: string;
-  name?: string;
-  location?: string;
-  leadId?: number;
-  projectId?: number;
-};
-
-export type ImportQuickbooksBatchDto = {
-  decisions: ImportQuickbooksProjectDto[];
-};
-
 /**
  * `created` opened a new CRM lead + project, `linked` attached the job to a CRM
  * record that already existed, `already_imported` found the link in place.
@@ -64,7 +52,6 @@ export type ImportQuickbooksBatchResult = {
   leadId: number | null;
   reason: string | null;
   httpStatus: number | null;
-  errorCode: string | null;
 };
 
 @Injectable()
@@ -210,7 +197,6 @@ export class QuickbooksProjectImportService {
             leadId: result.project.lead.id,
             reason: null,
             httpStatus: null,
-            errorCode: null,
           });
         } catch (error) {
           applied.push({
@@ -266,6 +252,14 @@ export class QuickbooksProjectImportService {
       project.quickbooks = false;
       return { project: await projectRepo.save(project), previousQboCustomerId };
     });
+
+    // Romper un vinculo no deja rastro en ninguna tabla: el log es lo unico que
+    // permite reconstruir despues que job estaba enganchado a que proyecto.
+    if (result.previousQboCustomerId) {
+      this.logger.log(
+        `QuickBooks link cleared for project ${result.project.id} (lead number ${result.project.lead?.leadNumber ?? '(none)'}), previous QuickBooks job ${result.previousQboCustomerId}`,
+      );
+    }
 
     return {
       projectId: result.project.id,
@@ -361,8 +355,16 @@ export class QuickbooksProjectImportService {
         throw new ConflictException('This project is already linked to a different QuickBooks job.');
       }
     } else {
-      const duplicate = (await leadRepo.find()).find(
-        (candidate) => normalizeProjectNumber(candidate.leadNumber) === normalizeProjectNumber(projectNumber),
+      // Solo las filas que empiezan por el mismo bloque inicial, no la tabla
+      // entera una vez por decision: normalizeProjectNumber solo cambia
+      // mayusculas, espacios y el sufijo CO, asi que un duplicado real comparte
+      // ese prefijo, que es el que cubre el indice de lead_number.
+      const key = normalizeProjectNumber(projectNumber);
+      const candidates = await leadRepo.find({
+        where: { leadNumber: ILike(`${key.split(/[\s-]/)[0]}%`) },
+      });
+      const duplicate = candidates.find(
+        (candidate) => normalizeProjectNumber(candidate.leadNumber) === key,
       );
       if (duplicate) {
         throw new ConflictException('A CRM lead already uses this project number. Select it from the matching records instead.');
@@ -425,19 +427,13 @@ export class QuickbooksProjectImportService {
   private describeFailure(error: unknown): {
     reason: string;
     httpStatus: number | null;
-    errorCode: string | null;
   } {
     if (error instanceof HttpException) {
-      return {
-        reason: error.message,
-        httpStatus: error.getStatus(),
-        errorCode: error instanceof BaseException ? (error.code ?? null) : null,
-      };
+      return { reason: error.message, httpStatus: error.getStatus() };
     }
     return {
       reason: error instanceof Error ? error.message : 'Unexpected error.',
       httpStatus: null,
-      errorCode: null,
     };
   }
 

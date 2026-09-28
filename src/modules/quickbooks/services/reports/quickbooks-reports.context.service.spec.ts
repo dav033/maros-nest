@@ -13,10 +13,13 @@ describe('QuickbooksReportsContextService.buildJobIndex', () => {
   let service: QuickbooksReportsContextService;
   let projectRows: Array<{ leadNumber: string; qboCustomerId: string | null }>;
   let customers: Array<{ Id: string; DisplayName: string }>;
+  let apiService: { queryAll: jest.Mock };
+  let cacheEntries: Map<string, unknown>;
 
   beforeEach(() => {
     projectRows = [];
     customers = [];
+    cacheEntries = new Map();
 
     const queryBuilder: Record<string, jest.Mock> = {
       innerJoin: jest.fn(() => queryBuilder),
@@ -27,10 +30,13 @@ describe('QuickbooksReportsContextService.buildJobIndex', () => {
       getRawMany: jest.fn(() => Promise.resolve(projectRows)),
     };
     const leadRepo = { createQueryBuilder: jest.fn(() => queryBuilder) };
-    const apiService = { queryAll: jest.fn(() => Promise.resolve(customers)) };
+    apiService = { queryAll: jest.fn(() => Promise.resolve(customers)) };
     const cacheManager = {
-      get: jest.fn(() => Promise.resolve(undefined)),
-      set: jest.fn(() => Promise.resolve()),
+      get: jest.fn((key: string) => Promise.resolve(cacheEntries.get(key))),
+      set: jest.fn((key: string, value: unknown) => {
+        cacheEntries.set(key, value);
+        return Promise.resolve();
+      }),
     };
 
     service = new QuickbooksReportsContextService(
@@ -59,5 +65,34 @@ describe('QuickbooksReportsContextService.buildJobIndex', () => {
     const index = await service.buildJobIndex('realm-1');
 
     expect(index.projectNumberById['387']).toBe('001R-0625');
+  });
+
+  it('falls back to name matching when the stored job is no longer in QuickBooks', async () => {
+    // El job vinculado se borro o se desactivo en QBO: quedarse sin numero seria
+    // perder el dato que el match por nombre todavia puede dar.
+    customers = [BASE_JOB];
+    projectRows = [{ leadNumber: '001R-0625', qboCustomerId: '999' }];
+
+    const index = await service.buildJobIndex('realm-1');
+
+    expect(index.projectNumberById['387']).toBe('001R-0625');
+  });
+
+  it('reuses the cached index until a link changes, and rebuilds it right after', async () => {
+    customers = [BASE_JOB, CHANGE_ORDER_JOB];
+    projectRows = [{ leadNumber: '001R-0625', qboCustomerId: '283' }];
+
+    await service.buildJobIndex('realm-1');
+    await service.buildJobIndex('realm-1');
+    expect(apiService.queryAll).toHaveBeenCalledTimes(1);
+
+    // Un unlink cambia la huella de vinculos: el informe siguiente lo ve en vez
+    // de esperar a que caduquen los 5 minutos de TTL.
+    projectRows = [{ leadNumber: '001R-0625', qboCustomerId: null }];
+    const index = await service.buildJobIndex('realm-1');
+
+    expect(apiService.queryAll).toHaveBeenCalledTimes(2);
+    expect(index.projectNumberById['387']).toBe('001R-0625');
+    expect(index.projectNumberById['283']).toBeNull();
   });
 });

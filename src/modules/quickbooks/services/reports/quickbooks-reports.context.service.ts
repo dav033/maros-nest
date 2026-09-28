@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
+import { createHash } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { QboConnection } from '../../entities/qbo-connection.entity';
@@ -36,7 +37,20 @@ export class QuickbooksReportsContextService {
   }
 
   async buildJobIndex(realmId: string): Promise<JobIndex> {
-    const cacheKey = `qbo:job-index:${realmId}`;
+    const projectRows = await this.leadRepo
+      .createQueryBuilder('lead')
+      .innerJoin('lead.project', 'project')
+      .select('lead.leadNumber', 'leadNumber')
+      .addSelect('project.qboCustomerId', 'qboCustomerId')
+      .where('lead.leadNumber IS NOT NULL')
+      .andWhere("lead.leadNumber <> ''")
+      .getRawMany<{ leadNumber: string; qboCustomerId: string | null }>();
+
+    // El indice se deriva de projects.qbo_customer_id, asi que la huella de los
+    // vinculos entra en la clave: tras un import, un import-batch o un unlink la
+    // clave cambia y el informe siguiente reconstruye el indice en vez de servir
+    // hasta cinco minutos de cache rancia.
+    const cacheKey = `qbo:job-index:${realmId}:${this.linkFingerprint(projectRows)}`;
     const cached = await this.cacheManager.get<JobIndex>(cacheKey);
     if (cached) {
       return cached;
@@ -47,14 +61,6 @@ export class QuickbooksReportsContextService {
       select: 'Id, DisplayName, FullyQualifiedName',
     })) as QboCustomer[];
 
-    const projectRows = await this.leadRepo
-      .createQueryBuilder('lead')
-      .innerJoin('lead.project', 'project')
-      .select('lead.leadNumber', 'leadNumber')
-      .addSelect('project.qboCustomerId', 'qboCustomerId')
-      .where('lead.leadNumber IS NOT NULL')
-      .andWhere("lead.leadNumber <> ''")
-      .getRawMany<{ leadNumber: string; qboCustomerId: string | null }>();
     const projectNumbers = projectRows
       .map((row) => row.leadNumber)
       .filter(Boolean);
@@ -65,9 +71,17 @@ export class QuickbooksReportsContextService {
     // base contract, so matching on the job name alone can report one job under
     // the other's project number.
     // Keyed on the trimmed number, the same form mapQboCustomersToProjects uses.
+    // Solo cuenta el vinculo guardado si ese job sigue estando entre los
+    // customers que devolvio QBO: si lo borraron o lo desactivaron alla, el
+    // proyecto vuelve al match por nombre en vez de quedarse sin numero.
+    const receivedCustomerIds = new Set(customers.map((c) => String(c.Id)));
     const linkedCustomerIdByNumber = new Map<string, string>();
     for (const row of projectRows) {
-      if (row.leadNumber?.trim() && row.qboCustomerId) {
+      if (
+        row.leadNumber?.trim() &&
+        row.qboCustomerId &&
+        receivedCustomerIds.has(String(row.qboCustomerId))
+      ) {
         linkedCustomerIdByNumber.set(row.leadNumber.trim(), String(row.qboCustomerId));
       }
     }
@@ -93,6 +107,17 @@ export class QuickbooksReportsContextService {
     const index: JobIndex = { byId, projectNumberById };
     await this.cacheManager.set(cacheKey, index, JOB_INDEX_TTL_MS);
     return index;
+  }
+
+  /** Huella del estado de vinculos CRM ↔ QBO que alimenta el indice. */
+  private linkFingerprint(
+    rows: Array<{ leadNumber: string; qboCustomerId: string | null }>,
+  ): string {
+    const links = rows
+      .filter((row) => row.qboCustomerId)
+      .map((row) => `${row.leadNumber}=${row.qboCustomerId}`)
+      .sort();
+    return createHash('sha256').update(links.join('|')).digest('hex');
   }
 
   refId(ref: QboInvoice['CustomerRef'] | QboEstimate['CustomerRef']): string {

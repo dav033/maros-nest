@@ -23,6 +23,66 @@ describe('QuickBooks project matching', () => {
     expect(matchesProjectNumber('001-0726', '001-07260 Customer')).toBe(false);
   });
 
+  it('reads a change order in the spellings QBO jobs are typed with', () => {
+    expect(
+      matchesProjectNumber('001R-0625 CO01', '001R-0625 C01, 3324 NW 14th St'),
+    ).toBe(true);
+    expect(
+      matchesProjectNumber('020P-0725 CO01', '020P-0725 CO1 2100 NE 15th St'),
+    ).toBe(true);
+    expect(
+      matchesProjectNumber(
+        '020P-0725 CO01',
+        '020P-0725 CO-01, Customer address',
+      ),
+    ).toBe(true);
+    expect(
+      matchesProjectNumber(
+        '020P-0725 CO01',
+        '[020P-0725 CO 1] Customer address',
+      ),
+    ).toBe(true);
+  });
+
+  it('never resolves a base project number against its own change order', () => {
+    expect(
+      matchesProjectNumber('001R-0625', '001R-0625, 3324 NW 14th St'),
+    ).toBe(true);
+    expect(
+      matchesProjectNumber('001R-0625', '001R-0625 C01, 3324 NW 14th St'),
+    ).toBe(false);
+    expect(
+      matchesProjectNumber('001R-0625', '001R-0625 CO01, 3324 NW 14th St'),
+    ).toBe(false);
+    // A trailing letter is part of the number, not a change-order marker.
+    expect(
+      matchesProjectNumber('001C-0625', '001C-0625, 3324 NW 14th St'),
+    ).toBe(true);
+    // A street number is not a change order either — the same names
+    // quickbooks-import-diagnostics reads as base contracts, so a job whose
+    // address starts with a C must still resolve to its own project.
+    expect(
+      matchesProjectNumber('001R-0625', '001R-0625 C0123 Main St'),
+    ).toBe(true);
+    expect(
+      matchesProjectNumber('001R-0625', '001R-0625, C0123 Main St'),
+    ).toBe(true);
+    expect(matchesProjectNumber('020P-0725', '020P-0725 C12 Ave')).toBe(true);
+  });
+
+  it('keeps a base contract and its change order on separate QBO jobs', () => {
+    const matches = mapQboCustomersToProjects(
+      ['001R-0625', '001R-0625 CO01'],
+      [
+        { Id: '283', DisplayName: '001R-0625 C01, 3324 NW 14th St, Miami, FL' },
+        { Id: '387', DisplayName: '001R-0625, 3324 NW 14th St, Miami, FL' },
+      ],
+    );
+
+    expect(matches.get('001R-0625')?.Id).toBe('387');
+    expect(matches.get('001R-0625 CO01')?.Id).toBe('283');
+  });
+
   it('escapes project-number punctuation and prefers a leading match', () => {
     const customers = [
       { Id: 'nested', DisplayName: 'Customer note 020P-0725 CO01' },
