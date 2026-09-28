@@ -38,11 +38,20 @@ function makeService(
   usersRepo: Record<string, jest.Mock>,
   rolesRepo: Record<string, jest.Mock> = {},
   configValues: Record<string, string | undefined> = {},
+  invitationsRepo: Record<string, jest.Mock> = {
+    findPendingByUserId: jest.fn().mockResolvedValue(null),
+    markAccepted: jest.fn(),
+  },
 ) {
   const configService = {
     get: jest.fn((key: string) => configValues[key]),
   };
-  return new UsersService(usersRepo as never, rolesRepo as never, configService as never);
+  return new UsersService(
+    usersRepo as never,
+    rolesRepo as never,
+    invitationsRepo as never,
+    configService as never,
+  );
 }
 
 describe('UsersService.resolveForRequest', () => {

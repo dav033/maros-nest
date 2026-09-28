@@ -19,11 +19,13 @@ import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { SendEstimateEmailDto } from './dto/send-estimate-email.dto';
 import { UpdateEstimateDto } from './dto/update-estimate.dto';
+import { QboReportQueryDto } from './dto/qbo-report-query.dto';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
 import { QuickbooksProjectImportService } from './services/quickbooks-project-import.service';
 import type { ImportQuickbooksProjectDto } from './services/quickbooks-project-import.service';
+import { ProjectQboReportService } from './services/project-qbo-report.service';
 
 @ApiTags('projects')
 @Controller('projects')
@@ -33,6 +35,7 @@ export class ProjectsController {
   constructor(
     private readonly projectsService: ProjectsService,
     private readonly quickbooksProjectImport: QuickbooksProjectImportService,
+    private readonly projectQboReport: ProjectQboReportService,
   ) {}
 
   @Get('quickbooks-import/jobs')
@@ -135,6 +138,22 @@ export class ProjectsController {
     @Body() dto: UpdateEstimateDto,
   ) {
     return this.projectsService.updateProjectEstimate(id, dto.amount);
+  }
+
+  @Get(':id/qbo-report')
+  @RequirePermissions('finance:read')
+  @ApiOperation({
+    summary:
+      'Get a QuickBooks report scoped to the project customer, returned verbatim (no parsing, no date chunking)',
+  })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({ status: 200, description: 'Returns the raw QuickBooks report payload' })
+  @ApiResponse({ status: 409, description: 'Project is not linked to a QuickBooks customer' })
+  async getProjectQboReport(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: QboReportQueryDto,
+  ) {
+    return this.projectQboReport.getProjectReport(id, query);
   }
 
   @Get(':id')

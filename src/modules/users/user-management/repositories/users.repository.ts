@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Not, Repository } from 'typeorm';
-import { User, NotificationPreferences } from '../../../../entities/user.entity';
+import {
+  User,
+  NotificationPreferences,
+  UserStatus,
+} from '../../../../entities/user.entity';
 
 @Injectable()
 export class UsersRepository {
@@ -10,15 +14,19 @@ export class UsersRepository {
     private readonly repo: Repository<User>,
   ) {}
 
+  /** Invitations come along so the list can show when a pending one runs out. */
   async findAll(): Promise<User[]> {
     return this.repo.find({
-      relations: { role: true },
+      relations: { role: true, invitations: true },
       order: { email: 'ASC' },
     });
   }
 
   async findById(id: number): Promise<User | null> {
-    return this.repo.findOne({ where: { id }, relations: { role: true } });
+    return this.repo.findOne({
+      where: { id },
+      relations: { role: true, invitations: true },
+    });
   }
 
   /**
@@ -76,6 +84,10 @@ export class UsersRepository {
 
   async touchLastLogin(id: number, at: Date): Promise<void> {
     await this.repo.update(id, { lastLoginAt: at });
+  }
+
+  async updateStatus(id: number, status: UserStatus): Promise<void> {
+    await this.repo.update(id, { status });
   }
 
   async findNotificationPreferences(id: number): Promise<NotificationPreferences> {

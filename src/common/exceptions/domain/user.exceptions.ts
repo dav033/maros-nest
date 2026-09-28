@@ -74,6 +74,26 @@ export class LastAdminException extends BusinessException {
   }
 }
 
+export class UserAlreadyExistsException extends BaseException {
+  constructor(email: string) {
+    super(
+      `A user with the email ${email} already exists`,
+      HttpStatus.CONFLICT,
+      'USER_ALREADY_EXISTS',
+    );
+  }
+}
+
+/** Resending only makes sense while the invitation is still outstanding. */
+export class UserNotInvitedException extends BusinessException {
+  constructor(email: string) {
+    super(
+      `${email} has no pending invitation`,
+      'USER_NOT_INVITED',
+    );
+  }
+}
+
 export class UserInactiveException extends BaseException {
   constructor(email: string) {
     super(
@@ -93,5 +113,7 @@ export const UserExceptions = {
   UnknownPermissionException,
   SelfModificationException,
   LastAdminException,
+  UserAlreadyExistsException,
+  UserNotInvitedException,
   UserInactiveException,
 };

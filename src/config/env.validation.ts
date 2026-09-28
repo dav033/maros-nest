@@ -196,6 +196,16 @@ export class EnvironmentVariables {
   @IsOptional()
   AUTH_DEFAULT_ROLE: string = 'Solo task';
 
+  /**
+   * Shared secret for POST /auth/invitations/check, called server-side by the Next.js
+   * Google callback before any session exists. Must match INVITATION_CHECK_TOKEN in
+   * maros-next. Optional at startup, like the other integration secrets; the guard
+   * refuses every request while it is unset. Generate with: openssl rand -hex 32
+   */
+  @IsString()
+  @IsOptional()
+  AUTH_INVITATION_CHECK_TOKEN: string;
+
   // Public note share links
   /**
    * Origin the /p/<token> reader is served from, used to build the URL handed back when

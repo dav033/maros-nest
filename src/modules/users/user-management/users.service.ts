@@ -20,6 +20,7 @@ import {
 import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
 import { UsersRepository } from './repositories/users.repository';
 import { RolesRepository } from './repositories/roles.repository';
+import { UserInvitationsRepository } from './repositories/user-invitations.repository';
 
 /** Identity proven by the session JWT, before it is matched to a user row. */
 export interface VerifiedIdentity {
@@ -38,6 +39,7 @@ export class UsersService {
   constructor(
     private readonly usersRepo: UsersRepository,
     private readonly rolesRepo: RolesRepository,
+    private readonly invitationsRepo: UserInvitationsRepository,
     private readonly configService: ConfigService,
   ) {}
 
@@ -61,6 +63,7 @@ export class UsersService {
       throw new UserInactiveException(user.email);
     }
 
+    await this.acceptInvitationIfPending(user);
     await this.touchLastLoginIfStale(user);
 
     return this.toAuthenticatedUser(user);
@@ -156,6 +159,10 @@ export class UsersService {
 
     if (changesActive) {
       user.isActive = changes.isActive!;
+      // Status is what the admin list shows; letting it say "active" for an account
+      // somebody just switched off would be a lie about who can sign in.
+      if (!user.isActive) user.status = 'disabled';
+      else if (user.status === 'disabled') user.status = 'active';
     }
 
     return this.usersRepo.save(user);
@@ -183,6 +190,9 @@ export class UsersService {
     user.picture = identity.picture ?? undefined;
     user.role = role;
     user.isActive = true;
+    // Self-provisioned through Google: staff, already through the door.
+    user.userType = 'internal';
+    user.status = 'active';
 
     try {
       const created = await this.usersRepo.save(user);
@@ -225,6 +235,26 @@ export class UsersService {
       .split(',')
       .map((entry) => this.normalizeEmail(entry))
       .filter(Boolean);
+  }
+
+  /**
+   * The first arrival closes the invitation.
+   *
+   * Whether they were allowed in at all was already settled by
+   * POST /auth/invitations/check before the session was minted; this only records that
+   * the person actually showed up, so the admin list stops offering to resend.
+   */
+  private async acceptInvitationIfPending(user: User): Promise<void> {
+    if (user.status !== 'invited') return;
+
+    const pending = await this.invitationsRepo.findPendingByUserId(user.id);
+    if (pending) {
+      await this.invitationsRepo.markAccepted(pending.id, new Date());
+    }
+
+    user.status = 'active';
+    await this.usersRepo.updateStatus(user.id, 'active');
+    this.logger.log(`User ${user.email} accepted their invitation`);
   }
 
   private async touchLastLoginIfStale(user: User): Promise<void> {

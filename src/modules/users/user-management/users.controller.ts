@@ -22,8 +22,10 @@ import {
 import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
 import { UsersService } from './users.service';
 import { RolesService } from './services/roles.service';
+import { UserInvitationsService } from './services/user-invitations.service';
 import { UserMapper } from './mappers/user.mapper';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { InviteUserDto } from './dto/invite-user.dto';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { UpdateNotificationPreferencesDto } from './dto/update-notification-preferences.dto';
@@ -34,6 +36,7 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly rolesService: RolesService,
+    private readonly invitationsService: UserInvitationsService,
     private readonly mapper: UserMapper,
   ) {}
 
@@ -108,6 +111,48 @@ export class UsersController {
     if (!actor) throw new UnauthorizedException();
     const user = await this.usersService.update(id, dto, actor.id);
     return this.mapper.toUserDto(user);
+  }
+
+  // --- Invitations ---
+
+  @Post('users/invite')
+  @RequirePermissions('users:write')
+  @ApiOperation({ summary: 'Create an account and email its invitation' })
+  @ApiResponse({ status: 201, description: 'The user and its invitation' })
+  @ApiResponse({
+    status: 409,
+    description: 'USER_ALREADY_EXISTS — that email already has an account',
+  })
+  async inviteUser(
+    @Body() dto: InviteUserDto,
+    @CurrentUser() actor: AuthenticatedUser | undefined,
+  ) {
+    if (!actor) throw new UnauthorizedException();
+    const { user, invitation } = await this.invitationsService.invite(dto, actor);
+    return { user: this.mapper.toUserDto(user), invitation };
+  }
+
+  @Post('users/:id/invite/resend')
+  @RequirePermissions('users:write')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Send a fresh invitation, invalidating the previous one' })
+  @ApiResponse({ status: 422, description: 'The user has no pending invitation' })
+  async resendInvitation(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() actor: AuthenticatedUser | undefined,
+  ) {
+    if (!actor) throw new UnauthorizedException();
+    return { invitation: await this.invitationsService.resend(id, actor) };
+  }
+
+  @Delete('users/:id/invite')
+  @RequirePermissions('users:write')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Cancel an invitation, which also deactivates the account',
+  })
+  async cancelInvitation(@Param('id', ParseIntPipe) id: number) {
+    await this.invitationsService.revoke(id);
   }
 
   // --- Roles ---

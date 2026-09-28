@@ -3,11 +3,19 @@ import {
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
+  OneToMany,
   JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { Role } from './role.entity';
+import { UserInvitation } from './user-invitation.entity';
+
+/** 'client' is someone outside the company, invited to see their own work. */
+export type UserType = 'internal' | 'client';
+
+/** Lifecycle, not access: `isActive` is the flag the session guard enforces. */
+export type UserStatus = 'invited' | 'active' | 'disabled';
 
 export type NotificationChannel = 'in_app' | 'email' | 'none';
 export type NotificationPreferences = {
@@ -58,6 +66,34 @@ export class User {
    */
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
+
+  @Column({ name: 'user_type', type: 'text', default: 'internal' })
+  userType: UserType;
+
+  /**
+   * 'invited' until the person completes their first Google sign-in, which is where
+   * resolveForRequest() flips it. Revoking access is still `isActive`, not this.
+   */
+  @Column({ name: 'status', type: 'text', default: 'active' })
+  status: UserStatus;
+
+  /**
+   * Which company/contact this account belongs to, for client users.
+   *
+   * Persisted and exposed, NOT yet enforced: filtering projects and leads by these is
+   * a follow-up. Setting one today scopes nothing on its own.
+   */
+  @Column({ name: 'scoped_company_id', type: 'int', nullable: true })
+  scopedCompanyId?: number | null;
+
+  @Column({ name: 'scoped_contact_id', type: 'int', nullable: true })
+  scopedContactId?: number | null;
+
+  @Column({ name: 'invited_by_id', type: 'int', nullable: true })
+  invitedById?: number | null;
+
+  @OneToMany(() => UserInvitation, (invitation) => invitation.user)
+  invitations?: UserInvitation[];
 
   @Column({ name: 'last_login_at', type: 'timestamp', nullable: true })
   lastLoginAt?: Date | null;
