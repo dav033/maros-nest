@@ -38,6 +38,7 @@ function makeService(user: User | null, invitation: UserInvitation | null = null
     undefined as never,
     invitationsRepo as never,
     undefined as never,
+    undefined as never,
   );
   return { service, usersRepo, invitationsRepo };
 }
@@ -134,5 +135,58 @@ describe('UserInvitationsService.checkAccess', () => {
       reason: 'not_invited',
     });
     expect(usersRepo.findByEmail).toHaveBeenCalledWith('stranger@example.com');
+  });
+});
+
+/** Solo se arman el repositorio de roles y el cálculo de permisos efectivos. */
+function makeInviteService(role: { id: number; name: string } | null, permissions: string[]) {
+  const usersRepo = { findByEmail: jest.fn().mockResolvedValue(null) };
+  const rolesRepo = { findById: jest.fn().mockResolvedValue(role) };
+  const users = { effectivePermissions: jest.fn().mockReturnValue(permissions) };
+  const dataSource = {
+    transaction: jest.fn(async (run: (m: unknown) => unknown) => run({})),
+  };
+  const service = new UserInvitationsService(
+    dataSource as never,
+    usersRepo as never,
+    rolesRepo as never,
+    undefined as never,
+    undefined as never,
+    users as never,
+  );
+  return { service, dataSource };
+}
+
+/**
+ * El tipo de usuario y el rol son dos campos sueltos del formulario, así que nada
+ * impedía invitar a alguien de fuera de Maros como admin. Los permisos se miran
+ * resueltos: admin no tiene filas en role_permissions y aun así puede todo.
+ */
+describe('UserInvitationsService.invite — rol de un externo', () => {
+  const actor = { id: 1, email: 'admin@marosconstruction.com' } as never;
+
+  it('rechaza un externo con un rol que da permisos, antes de tocar la base', async () => {
+    const { service, dataSource } = makeInviteService({ id: 1, name: 'admin' }, ['users:write']);
+
+    await expect(
+      service.invite(
+        { email: 'fuera@example.com', roleId: 1, userType: 'external' } as never,
+        actor,
+      ),
+    ).rejects.toMatchObject({ code: 'EXTERNAL_USER_ROLE_NOT_ALLOWED' });
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+  });
+
+  it('deja pasar a un interno con ese mismo rol', async () => {
+    const { service, dataSource } = makeInviteService({ id: 1, name: 'admin' }, ['users:write']);
+
+    await service
+      .invite(
+        { email: 'dentro@marosconstruction.com', roleId: 1, userType: 'internal' } as never,
+        actor,
+      )
+      .catch(() => undefined);
+
+    expect(dataSource.transaction).toHaveBeenCalled();
   });
 });

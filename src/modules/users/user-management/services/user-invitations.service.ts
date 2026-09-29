@@ -3,6 +3,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { User, UserStatus } from '../../../../entities/user.entity';
 import { UserInvitation } from '../../../../entities/user-invitation.entity';
 import {
+  ExternalUserRoleException,
   RoleNotFoundException,
   UserAlreadyExistsException,
   UserNotFoundException,
@@ -17,6 +18,7 @@ import {
   UserInvitationsRepository,
 } from '../repositories/user-invitations.repository';
 import { UserInvitationNotificationsService } from './user-invitation-notifications.service';
+import { UsersService } from '../users.service';
 
 const DEFAULT_EXPIRES_IN_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -55,6 +57,7 @@ export class UserInvitationsService {
     private readonly rolesRepo: RolesRepository,
     private readonly invitationsRepo: UserInvitationsRepository,
     private readonly notifications: UserInvitationNotificationsService,
+    private readonly users: UsersService,
   ) {}
 
   /**
@@ -77,6 +80,19 @@ export class UserInvitationsService {
 
     const role = await this.rolesRepo.findById(dto.roleId);
     if (!role) throw new RoleNotFoundException(dto.roleId);
+
+    // El tipo de usuario y el rol son dos campos sueltos del formulario, así que sin
+    // esto se puede invitar a alguien de fuera de Maros con el rol admin. Un externo
+    // sólo entra con un rol sin permisos; el alcance por fila todavía no existe.
+    // Se miran los permisos efectivos, no las filas guardadas: los roles de sistema
+    // (admin, member) no tienen filas en role_permissions y se resuelven al catálogo
+    // entero, así que contar filas daría cero justo para el rol más peligroso.
+    if (
+      dto.userType === 'external' &&
+      this.users.effectivePermissions(role).length > 0
+    ) {
+      throw new ExternalUserRoleException(role.name);
+    }
 
     return this.dataSource.transaction(async (manager) => {
       const user = new User();

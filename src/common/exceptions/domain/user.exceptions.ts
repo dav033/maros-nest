@@ -104,6 +104,21 @@ export class UserInactiveException extends BaseException {
   }
 }
 
+/**
+ * Un usuario externo es alguien de fuera de Maros: sólo puede entrar con un rol sin
+ * permisos. El formulario ofrece los dos campos por separado, así que nada impedía
+ * invitar a alguien de fuera como admin; esta regla lo corta en el servidor.
+ */
+export class ExternalUserRoleException extends BaseException {
+  constructor(roleName: string) {
+    super(
+      `An external user cannot be invited with the role "${roleName}": it grants permissions inside the CRM`,
+      HttpStatus.BAD_REQUEST,
+      'EXTERNAL_USER_ROLE_NOT_ALLOWED',
+    );
+  }
+}
+
 export const UserExceptions = {
   UserNotFoundException,
   RoleNotFoundException,
@@ -116,4 +131,5 @@ export const UserExceptions = {
   UserAlreadyExistsException,
   UserNotInvitedException,
   UserInactiveException,
+  ExternalUserRoleException,
 };
