@@ -24,8 +24,9 @@ function makeRole(overrides: Partial<Role> = {}): Role {
 function makeService(
   rolesRepo: Record<string, jest.Mock>,
   usersRepo: Record<string, jest.Mock> = {},
+  users: Record<string, jest.Mock> = { invalidateAllResolvedUsers: jest.fn() },
 ) {
-  return new RolesService(rolesRepo as never, usersRepo as never);
+  return new RolesService(rolesRepo as never, usersRepo as never, users as never);
 }
 
 describe('RolesService.create', () => {

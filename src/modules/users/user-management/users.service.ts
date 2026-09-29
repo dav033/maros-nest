@@ -32,9 +32,30 @@ export interface VerifiedIdentity {
 /** Avoids a write on every single request just to bump last_login_at. */
 const LAST_LOGIN_THROTTLE_MS = 5 * 60 * 1000;
 
+/**
+ * How long a resolved identity may be reused without going back to the database.
+ *
+ * Deliberately short. Resolving permissions per request is what makes a role
+ * change or a deactivation take effect at once instead of waiting out the
+ * token's 30-day life, and that property is not for sale — but the database is
+ * 130 ms away, so doing it literally every request taxed every endpoint in the
+ * app. The bound on staleness is therefore this TTL *and* explicit
+ * invalidation: anything that changes who a user is or what they may do calls
+ * invalidateResolvedUser / invalidateAllResolvedUsers, which makes the change
+ * visible on the very next request. The TTL is only the backstop for a path
+ * that forgets to.
+ */
+const RESOLVED_USER_TTL_MS = 30 * 1000;
+
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
+
+  /** Resolved identities by normalized email — see RESOLVED_USER_TTL_MS. */
+  private readonly resolvedUsers = new Map<
+    string,
+    { value: AuthenticatedUser; expiresAt: number }
+  >();
 
   constructor(
     private readonly usersRepo: UsersRepository,
@@ -47,26 +68,57 @@ export class UsersService {
    * Resolves the JWT identity into a full user with effective permissions,
    * provisioning the account on first sight.
    *
-   * Called on every authenticated request, which is what makes role changes
-   * and deactivations take effect immediately instead of waiting out the
-   * 30-day token lifetime.
+   * Called on every authenticated request. The result is cached for
+   * RESOLVED_USER_TTL_MS and dropped explicitly whenever the user or their role
+   * changes, so role changes and deactivations still take effect immediately
+   * instead of waiting out the 30-day token lifetime.
    */
   async resolveForRequest(identity: VerifiedIdentity): Promise<AuthenticatedUser> {
     const email = this.normalizeEmail(identity.email);
+
+    const cached = this.resolvedUsers.get(email);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+
     let user = await this.usersRepo.findByEmail(email);
 
     if (!user) {
       user = await this.provision(email, identity);
     }
 
+    // Never cached: a deactivated account throws before reaching the cache
+    // write, so it can never be served from memory.
     if (!user.isActive) {
+      this.resolvedUsers.delete(email);
       throw new UserInactiveException(user.email);
     }
 
     await this.acceptInvitationIfPending(user);
     await this.touchLastLoginIfStale(user);
 
-    return this.toAuthenticatedUser(user);
+    const resolved = this.toAuthenticatedUser(user);
+    this.resolvedUsers.set(email, {
+      value: resolved,
+      expiresAt: Date.now() + RESOLVED_USER_TTL_MS,
+    });
+    return resolved;
+  }
+
+  /**
+   * Drops one cached identity. Call after anything that changes who a user is
+   * or what they are allowed to do, so the next request re-reads them.
+   */
+  invalidateResolvedUser(email: string): void {
+    this.resolvedUsers.delete(this.normalizeEmail(email));
+  }
+
+  /**
+   * Drops every cached identity — for changes that can affect many users at
+   * once, such as editing or deleting a role.
+   */
+  invalidateAllResolvedUsers(): void {
+    this.resolvedUsers.clear();
   }
 
   /** Returns an existing user ID for local development without provisioning or touching it. */
@@ -169,7 +221,11 @@ export class UsersService {
       }
     }
 
-    return this.usersRepo.save(user);
+    const saved = await this.usersRepo.save(user);
+    // A new role or a flipped isActive must bite on the very next request, not
+    // when the 30 s cache entry happens to lapse.
+    this.invalidateResolvedUser(saved.email);
+    return saved;
   }
 
   private async assertNotLastAdmin(userId: number): Promise<void> {

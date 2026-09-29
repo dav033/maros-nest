@@ -104,9 +104,6 @@ export class ProjectQboReportService {
     }
 
     const leadNumber = project.lead?.leadNumber ?? null;
-    if (!project.qboCustomerId) {
-      throw new ProjectNotLinkedToQboException(leadNumber ?? `#${projectId}`);
-    }
 
     const report = query.report ?? QboReportName.ProfitAndLossDetail;
     const accountingMethod = query.accountingMethod ?? QboAccountingMethod.Accrual;
@@ -121,9 +118,16 @@ export class ProjectQboReportService {
     const realmId = await resolveRealmIdOrDefault(query.realmId, () =>
       this.financials.getDefaultRealmId(),
     );
+
+    const { qboCustomerId, linkSource } = await this.resolveQboCustomerId(
+      project,
+      leadNumber,
+      realmId,
+    );
+
     const raw = await this.api.report(realmId, qboName, {
       accounting_method: accountingMethod,
-      customer: project.qboCustomerId,
+      customer: qboCustomerId,
       ...(pointInTime
         ? { report_date: query.endDate }
         : { start_date: query.startDate, end_date: query.endDate }),
@@ -132,7 +136,8 @@ export class ProjectQboReportService {
     return {
       projectId: project.id,
       leadNumber,
-      qboCustomerId: project.qboCustomerId,
+      qboCustomerId,
+      linkSource,
       report,
       accountingMethod,
       scope,
@@ -140,5 +145,40 @@ export class ProjectQboReportService {
       endDate: query.endDate ?? null,
       raw,
     };
+  }
+
+  /**
+   * El enlace guardado (`qbo_customer_id`) manda siempre. Cuando no lo hay se
+   * resuelve el job por numero de proyecto, que es EXACTAMENTE lo que ya hacia
+   * el resto de la ficha (QuickbooksFinancialsService -> resolveJobs): de ahi
+   * venia la queja de que el reporte decia "no enlazado" mientras la misma
+   * pantalla mostraba facturas y pagos de QuickBooks.
+   *
+   * La coincidencia por nombre NO se persiste aqui. El indice de jobs es un
+   * heuristico sobre nombres escritos a mano (la propia pantalla de importacion
+   * existe porque hay colisiones y ordenes de cambio), y un backfill silencioso
+   * en produccion dejaria 109 enlaces que nadie decidio y que ademas ocuparian
+   * el indice unico parcial, bloqueando la importacion correcta. Persistir es
+   * un acto explicito: PUT /projects/:id/qbo-link desde la ficha, o la pantalla
+   * de importacion. `linkSource` deja ver de donde salio el id de este reporte.
+   */
+  private async resolveQboCustomerId(
+    project: Project,
+    leadNumber: string | null,
+    realmId: string,
+  ): Promise<{ qboCustomerId: string; linkSource: 'stored' | 'project-number' }> {
+    if (project.qboCustomerId) {
+      return { qboCustomerId: project.qboCustomerId, linkSource: 'stored' };
+    }
+
+    if (leadNumber) {
+      const jobMap = await this.financials.getProjectJobIds([leadNumber], realmId);
+      const matched = jobMap[leadNumber];
+      if (matched) {
+        return { qboCustomerId: matched, linkSource: 'project-number' };
+      }
+    }
+
+    throw new ProjectNotLinkedToQboException(leadNumber ?? `#${project.id}`);
   }
 }

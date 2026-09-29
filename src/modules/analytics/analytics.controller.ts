@@ -17,6 +17,7 @@ import { AnalyticsOverviewService } from './services/analytics-overview.service'
 import { AnalyticsPipelineService } from './services/analytics-pipeline.service';
 import { AnalyticsProjectsService } from './services/analytics-projects.service';
 import { QuickbooksApiService } from '../quickbooks/services/core/quickbooks-api.service';
+import { ProjectsService } from '../projects/project-management/services/projects.service';
 import { DateRangeQueryDto } from './dto/queries/date-range-query.dto';
 import { RevenueTrendQueryDto } from './dto/queries/revenue-trend-query.dto';
 import { TopClientsQueryDto } from './dto/queries/top-clients-query.dto';
@@ -52,6 +53,7 @@ export class AnalyticsController {
     private readonly projectsService: AnalyticsProjectsService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
     private readonly quickbooksApiService: QuickbooksApiService,
+    private readonly crmProjectsService: ProjectsService,
   ) {}
 
   /**
@@ -253,6 +255,8 @@ export class AnalyticsController {
    * - QuickBooks API read cache.
    * - In-memory aggregation cache (per-project P&L).
    * - HTTP-level cache-manager cache.
+   * - Cached GET /projects/financials payload (its own module's cache-manager
+   *   instance is separate, so it has to be cleared explicitly).
    *
    * @returns { ok: true } on success.
    */
@@ -260,6 +264,7 @@ export class AnalyticsController {
   async refresh() {
     this.quickbooksApiService.clearReadCache();
     this.financialService.clearAggregationCache();
+    this.crmProjectsService.clearFinancialsCache();
     await this.cacheManager.clear();
     return { ok: true };
   }

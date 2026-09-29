@@ -1,6 +1,7 @@
 import { LeadStatus } from '../../../../common/enums/lead-status.enum';
 import { Lead } from '../../../../entities/lead.entity';
 import { Project } from '../../../../entities/project.entity';
+import { ProjectQboLinkEvent } from '../entities/project-qbo-link-event.entity';
 import { QuickbooksProjectImportService } from './quickbooks-project-import.service';
 
 const JOB_387 = '001R-0625, 3324 NW 14th St Fl 33, Miami, FL 33125, USA Roofing Leaking';
@@ -11,6 +12,7 @@ describe('QuickbooksProjectImportService', () => {
   let leads: Map<number, Lead>;
   let projects: Map<number, Project>;
   let projectRepo: { findOne: jest.Mock; create: jest.Mock; save: jest.Mock };
+  let linkEvents: ProjectQboLinkEvent[];
   let nextLeadId: number;
   let nextProjectId: number;
   let savepointsOpened: number;
@@ -21,6 +23,7 @@ describe('QuickbooksProjectImportService', () => {
   beforeEach(() => {
     leads = new Map();
     projects = new Map();
+    linkEvents = [];
     nextLeadId = 100;
     nextProjectId = 200;
     savepointsOpened = 0;
@@ -106,10 +109,23 @@ describe('QuickbooksProjectImportService', () => {
       nextProjectId = saved.nextProjectId;
     };
 
+    // La bitacora de vinculos se escribe en la misma transaccion que el
+    // cambio, asi que el doble tiene que existir para que el camino se ejecute.
+    const linkEventRepo = {
+      create: jest.fn((data: Partial<ProjectQboLinkEvent>) =>
+        Object.assign(new ProjectQboLinkEvent(), data),
+      ),
+      save: jest.fn((event: ProjectQboLinkEvent) => {
+        linkEvents.push(event);
+        return Promise.resolve(event);
+      }),
+    };
+
     const manager = {
       getRepository: jest.fn((entity) => {
         if (entity === Lead) return leadRepo;
         if (entity === Project) return projectRepo;
+        if (entity === ProjectQboLinkEvent) return linkEventRepo;
         throw new Error(`Unexpected repository: ${entity?.name}`);
       }),
       // Nested transactions are SAVEPOINTs on Postgres — one per decision.
@@ -139,6 +155,7 @@ describe('QuickbooksProjectImportService', () => {
           { Id: '501', DisplayName: '002R-0725, 10 SW 1st Ave, Miami, FL', Active: true },
         ]),
       ),
+      clearReadCache: jest.fn(),
     };
     const connectionRepo = {
       find: jest.fn(() => Promise.resolve([{ realmId: 'realm-1' }])),
@@ -311,6 +328,107 @@ describe('QuickbooksProjectImportService', () => {
       const result = await service.unlinkProject(70);
 
       expect(result).toMatchObject({ unlinked: false, previousQboCustomerId: null });
+    });
+  });
+
+  describe('linkProject', () => {
+    it('links an existing project to a job whose name does not carry the project number', async () => {
+      const result = await service.linkProject(70, '501', 'admin@maros.test');
+
+      expect(result).toMatchObject({
+        projectId: 70,
+        leadId: 50,
+        projectNumber: '001R-0625',
+        qboCustomerId: '501',
+        previousQboCustomerId: null,
+        linked: true,
+        alreadyLinked: false,
+        // El job 501 se llama 002R-0725...: no coincide, y aun asi se enlaza.
+        projectNumberMatchesJob: false,
+      });
+      expect(projects.get(70)!.qboCustomerId).toBe('501');
+      expect(projects.get(70)!.quickbooks).toBe(true);
+      expect(linkEvents).toHaveLength(1);
+      expect(linkEvents[0]).toMatchObject({
+        action: 'link',
+        projectId: 70,
+        previousQboCustomerId: null,
+        newQboCustomerId: '501',
+        projectNumber: '001R-0625',
+        actorEmail: 'admin@maros.test',
+      });
+    });
+
+    it('reports a matching project number without requiring it', async () => {
+      const result = await service.linkProject(70, '387');
+      expect(result).toMatchObject({ linked: true, projectNumberMatchesJob: true });
+    });
+
+    it('is idempotent: linking the same job twice does not write a second event', async () => {
+      await service.linkProject(70, '387');
+      const again = await service.linkProject(70, '387');
+
+      expect(again).toMatchObject({ linked: false, alreadyLinked: true });
+      expect(linkEvents).toHaveLength(1);
+    });
+
+    it('replaces an existing link and keeps the previous job in the log', async () => {
+      await service.linkProject(70, '387');
+      const result = await service.linkProject(70, '501');
+
+      expect(result).toMatchObject({
+        qboCustomerId: '501',
+        previousQboCustomerId: '387',
+        linked: true,
+      });
+      expect(linkEvents).toHaveLength(2);
+      expect(linkEvents[1]).toMatchObject({
+        action: 'link',
+        previousQboCustomerId: '387',
+        newQboCustomerId: '501',
+      });
+    });
+
+    it('refuses a job that already belongs to another project', async () => {
+      const otherLead = Object.assign(new Lead(), {
+        id: 51,
+        leadNumber: '002R-0725',
+        name: 'Other',
+        status: LeadStatus.WON,
+      });
+      leads.set(51, otherLead);
+      projects.set(
+        71,
+        Object.assign(new Project(), { id: 71, lead: otherLead, qboCustomerId: '501' }),
+      );
+
+      await expect(service.linkProject(70, '501')).rejects.toThrow(
+        /already linked to project #71/,
+      );
+      expect(projects.get(70)!.qboCustomerId).toBeUndefined();
+      expect(linkEvents).toHaveLength(0);
+    });
+
+    it('rejects an unknown or inactive QuickBooks job', async () => {
+      await expect(service.linkProject(70, '999')).rejects.toThrow(
+        /active QuickBooks job could not be found/,
+      );
+      expect(linkEvents).toHaveLength(0);
+    });
+
+    it('logs the unlink that undoes a manual link', async () => {
+      await service.linkProject(70, '387', 'admin@maros.test');
+      const result = await service.unlinkProject(70, 'admin@maros.test');
+
+      expect(result).toMatchObject({ unlinked: true, previousQboCustomerId: '387' });
+      expect(projects.get(70)!.qboCustomerId).toBeNull();
+      expect(linkEvents).toHaveLength(2);
+      expect(linkEvents[1]).toMatchObject({
+        action: 'unlink',
+        previousQboCustomerId: '387',
+        newQboCustomerId: null,
+        actorEmail: 'admin@maros.test',
+      });
     });
   });
 });

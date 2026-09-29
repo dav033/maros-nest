@@ -295,3 +295,140 @@ describe('UsersService.effectivePermissions', () => {
     expect(service.effectivePermissions(null)).toEqual([]);
   });
 });
+
+describe('UsersService.resolveForRequest — identity cache', () => {
+  const identity = { email: 'user@marosconstruction.com' };
+
+  it('serves a second request from memory instead of hitting the database', async () => {
+    const usersRepo = {
+      findByEmail: jest.fn().mockResolvedValue(makeUser()),
+      touchLastLogin: jest.fn(),
+      save: jest.fn(),
+    };
+    const service = makeService(usersRepo);
+
+    const first = await service.resolveForRequest(identity);
+    const second = await service.resolveForRequest(identity);
+
+    expect(second).toEqual(first);
+    expect(usersRepo.findByEmail.mock.calls).toHaveLength(1);
+  });
+
+  it('re-reads the user after invalidateResolvedUser', async () => {
+    const usersRepo = {
+      findByEmail: jest.fn().mockResolvedValue(makeUser()),
+      touchLastLogin: jest.fn(),
+      save: jest.fn(),
+    };
+    const service = makeService(usersRepo);
+
+    await service.resolveForRequest(identity);
+    service.invalidateResolvedUser(identity.email);
+    await service.resolveForRequest(identity);
+
+    expect(usersRepo.findByEmail.mock.calls).toHaveLength(2);
+  });
+
+  it('matches the cache key case-insensitively, like the lookup itself', async () => {
+    const usersRepo = {
+      findByEmail: jest.fn().mockResolvedValue(makeUser()),
+      touchLastLogin: jest.fn(),
+      save: jest.fn(),
+    };
+    const service = makeService(usersRepo);
+
+    await service.resolveForRequest(identity);
+    service.invalidateResolvedUser('USER@MarosConstruction.com');
+    await service.resolveForRequest(identity);
+
+    expect(usersRepo.findByEmail.mock.calls).toHaveLength(2);
+  });
+
+  it('invalidateAllResolvedUsers drops every entry', async () => {
+    const usersRepo = {
+      findByEmail: jest
+        .fn()
+        .mockImplementation((email: string) =>
+          Promise.resolve(makeUser({ email })),
+        ),
+      touchLastLogin: jest.fn(),
+      save: jest.fn(),
+    };
+    const service = makeService(usersRepo);
+
+    await service.resolveForRequest({ email: 'a@marosconstruction.com' });
+    await service.resolveForRequest({ email: 'b@marosconstruction.com' });
+    expect(usersRepo.findByEmail.mock.calls).toHaveLength(2);
+
+    service.invalidateAllResolvedUsers();
+
+    await service.resolveForRequest({ email: 'a@marosconstruction.com' });
+    await service.resolveForRequest({ email: 'b@marosconstruction.com' });
+    expect(usersRepo.findByEmail.mock.calls).toHaveLength(4);
+  });
+
+  it('a role change through update() is visible on the very next request', async () => {
+    const memberRole = makeRole({ id: 1, name: SYSTEM_ROLE_MEMBER });
+    const adminRole = makeRole({ id: 2, name: SYSTEM_ROLE_ADMIN });
+    const user = makeUser({ id: 7, role: memberRole });
+
+    const usersRepo = {
+      findByEmail: jest.fn().mockResolvedValue(user),
+      findById: jest.fn().mockResolvedValue(user),
+      touchLastLogin: jest.fn(),
+      save: jest.fn().mockImplementation((u: User) => Promise.resolve(u)),
+      countActiveByRoleNameExcluding: jest.fn().mockResolvedValue(1),
+    };
+    const rolesRepo = { findById: jest.fn().mockResolvedValue(adminRole) };
+    const service = makeService(usersRepo, rolesRepo);
+
+    const before = await service.resolveForRequest(identity);
+    expect(before.role?.name).toBe(SYSTEM_ROLE_MEMBER);
+
+    // Another admin promotes them.
+    await service.update(7, { roleId: 2 }, 99);
+
+    const after = await service.resolveForRequest(identity);
+    expect(after.role?.name).toBe(SYSTEM_ROLE_ADMIN);
+  });
+
+  it('a deactivation through update() is rejected on the very next request', async () => {
+    const user = makeUser({ id: 7, isActive: true });
+
+    const usersRepo = {
+      findByEmail: jest.fn().mockResolvedValue(user),
+      findById: jest.fn().mockResolvedValue(user),
+      touchLastLogin: jest.fn(),
+      save: jest.fn().mockImplementation((u: User) => Promise.resolve(u)),
+      countActiveByRoleNameExcluding: jest.fn().mockResolvedValue(1),
+    };
+    const service = makeService(usersRepo);
+
+    await service.resolveForRequest(identity);
+
+    await service.update(7, { isActive: false }, 99);
+
+    await expect(service.resolveForRequest(identity)).rejects.toBeInstanceOf(
+      UserInactiveException,
+    );
+  });
+
+  it('never caches a deactivated account', async () => {
+    const usersRepo = {
+      findByEmail: jest.fn().mockResolvedValue(makeUser({ isActive: false })),
+      touchLastLogin: jest.fn(),
+      save: jest.fn(),
+    };
+    const service = makeService(usersRepo);
+
+    await expect(service.resolveForRequest(identity)).rejects.toBeInstanceOf(
+      UserInactiveException,
+    );
+    await expect(service.resolveForRequest(identity)).rejects.toBeInstanceOf(
+      UserInactiveException,
+    );
+
+    // Each attempt went back to the database rather than short-circuiting.
+    expect(usersRepo.findByEmail.mock.calls).toHaveLength(2);
+  });
+});

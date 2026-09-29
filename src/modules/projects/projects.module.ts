@@ -21,10 +21,17 @@ import { TaskWorkspacesModule } from '../task-workspaces/task-workspaces.module'
 import { QuickbooksProjectImportService } from './project-management/services/quickbooks-project-import.service';
 import { ProjectQboReportService } from './project-management/services/project-qbo-report.service';
 import { QboConnection } from '../quickbooks/entities/qbo-connection.entity';
+import { ProjectQboLinkEvent } from './project-management/entities/project-qbo-link-event.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Project, Lead, ProjectType, QboConnection]),
+    TypeOrmModule.forFeature([
+      Project,
+      Lead,
+      ProjectType,
+      QboConnection,
+      ProjectQboLinkEvent,
+    ]),
     QuickbooksModule,
     S3Module,
     MailModule,

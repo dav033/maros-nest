@@ -159,3 +159,92 @@ describe('ProjectsService.getProjectPayments', () => {
     ]);
   });
 });
+
+describe('ProjectsService.findAllFinancials caching', () => {
+  const buildService = () => {
+    const projectRepo = {
+      find: jest.fn().mockResolvedValue([
+        Object.assign(new Project(), { id: 1, lead: { leadNumber: '001-0726' } }),
+      ]),
+    };
+    const qboEnrichment = {
+      enrichProjectsSummary: jest.fn().mockImplementation((shims: any[]) => {
+        for (const shim of shims) {
+          shim.financial = { projectNumber: '001-0726', total: 100 };
+          shim.qbo = { data: {} };
+        }
+        return Promise.resolve(shims);
+      }),
+    };
+    const service = new ProjectsService(
+      {} as never,
+      projectRepo as never,
+      {} as never,
+      {} as never,
+      qboEnrichment as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    return { service, projectRepo, qboEnrichment };
+  };
+
+  const financeUser = { permissions: ['finance:read'] } as never;
+  const taskOnlyUser = { permissions: ['tasks:read'] } as never;
+
+  it('serves repeat calls from cache instead of re-querying QuickBooks', async () => {
+    const { service, qboEnrichment } = buildService();
+
+    const first = await service.findAllFinancials(financeUser);
+    const second = await service.findAllFinancials(financeUser);
+
+    expect(first).toHaveLength(1);
+    expect(second).toEqual(first);
+    expect(qboEnrichment.enrichProjectsSummary.mock.calls).toHaveLength(1);
+  });
+
+  it('never serves the cached payload to a user without finance:read', async () => {
+    const { service } = buildService();
+
+    // Warm the cache with a privileged caller first.
+    const privileged = await service.findAllFinancials(financeUser);
+    expect(privileged).toHaveLength(1);
+
+    const denied = await service.findAllFinancials(taskOnlyUser);
+    expect(denied).toEqual([]);
+  });
+
+  it('does not populate the cache from an unprivileged caller', async () => {
+    const { service, qboEnrichment } = buildService();
+
+    expect(await service.findAllFinancials(taskOnlyUser)).toEqual([]);
+    expect(qboEnrichment.enrichProjectsSummary).not.toHaveBeenCalled();
+
+    expect(await service.findAllFinancials(financeUser)).toHaveLength(1);
+    expect(qboEnrichment.enrichProjectsSummary.mock.calls).toHaveLength(1);
+  });
+
+  it('collapses concurrent cold requests into a single QuickBooks pass', async () => {
+    const { service, qboEnrichment } = buildService();
+
+    const results = await Promise.all([
+      service.findAllFinancials(financeUser),
+      service.findAllFinancials(financeUser),
+      service.findAllFinancials(financeUser),
+    ]);
+
+    expect(results.every((r) => r.length === 1)).toBe(true);
+    expect(qboEnrichment.enrichProjectsSummary.mock.calls).toHaveLength(1);
+  });
+
+  it('clearFinancialsCache forces the next call to recompute', async () => {
+    const { service, qboEnrichment } = buildService();
+
+    await service.findAllFinancials(financeUser);
+    service.clearFinancialsCache();
+    await service.findAllFinancials(financeUser);
+
+    expect(qboEnrichment.enrichProjectsSummary.mock.calls).toHaveLength(2);
+  });
+});

@@ -21,6 +21,10 @@ import { TaskWorkspaceAssignmentService } from '../../../task-workspaces/service
 import { ImportQuickbooksBatchDto } from '../dto/import-quickbooks-batch.dto';
 import { ImportQuickbooksProjectDto } from '../dto/import-quickbooks-project.dto';
 import {
+  ProjectQboLinkAction,
+  ProjectQboLinkEvent,
+} from '../entities/project-qbo-link-event.entity';
+import {
   diagnoseImportJobs,
   normalizeProjectNumber,
   detectChangeOrder,
@@ -150,6 +154,10 @@ export class QuickbooksProjectImportService {
       await this.taskWorkspaceAssignment?.ensureCanonicalLead(result.project.lead.id);
     }
     this.financials.invalidateJobIndex();
+    // Changing a project<->job link changes what every cached QuickBooks
+    // read means for this project, and the read cache now lives for five
+    // minutes instead of five seconds, so purge it explicitly.
+    this.api.clearReadCache();
     return {
       projectId: result.project.id,
       leadId: result.project.lead.id,
@@ -216,6 +224,10 @@ export class QuickbooksProjectImportService {
     });
 
     this.financials.invalidateJobIndex();
+    // Changing a project<->job link changes what every cached QuickBooks
+    // read means for this project, and the read cache now lives for five
+    // minutes instead of five seconds, so purge it explicitly.
+    this.api.clearReadCache();
 
     // After commit: a task-workspace hiccup must not discard accepted decisions.
     for (const leadId of touchedLeadIds) {
@@ -239,12 +251,114 @@ export class QuickbooksProjectImportService {
   }
 
   /**
+   * Enlaza a mano un proyecto del CRM que YA existe con un job de QuickBooks.
+   * Es el contrario de `unlinkProject` y el complemento de la importacion: la
+   * importacion parte del job (y crea o busca el proyecto), esto parte del
+   * proyecto abierto en pantalla y le dice cual es su job.
+   *
+   * A diferencia de `linkJob` aqui NO se exige que el nombre del job lleve el
+   * numero de proyecto: ese requisito es justo lo que deja fuera de la
+   * importacion a los jobs "sin numero", que son los que hay que enlazar a
+   * mano. La coincidencia se informa en `projectNumberMatchesJob` para que la
+   * pantalla pueda avisar, pero no bloquea.
+   *
+   * Si el proyecto ya apuntaba a otro job se reemplaza el vinculo — es una
+   * correccion explicita pedida desde la ficha — y queda en la bitacora con el
+   * id anterior. Lo que si es un 409 es robarle el job a otro proyecto: el
+   * indice unico parcial lo impide de todos modos, y el mensaje explica cual.
+   */
+  async linkProject(
+    projectId: number,
+    rawQboCustomerId: string,
+    actorEmail?: string | null,
+  ) {
+    const qboCustomerId = String(rawQboCustomerId ?? '').trim();
+    if (!qboCustomerId) {
+      throw new BadRequestException('A QuickBooks job is required.');
+    }
+    if (qboCustomerId.length > 50) {
+      throw new BadRequestException('QuickBooks job id cannot exceed 50 characters.');
+    }
+
+    const job = this.requireActiveJob(await this.fetchJobs(), qboCustomerId);
+    const jobDisplayName = String(job.DisplayName ?? '');
+
+    const result = await this.dataSource.transaction(async (manager) => {
+      const projectRepo = manager.getRepository(Project);
+      const project = await this.lockProject(manager, { id: projectId });
+      if (!project) throw new NotFoundException('CRM project not found.');
+
+      const previousQboCustomerId = project.qboCustomerId ?? null;
+      if (previousQboCustomerId === qboCustomerId) {
+        return { project, previousQboCustomerId, changed: false };
+      }
+
+      const owner = await projectRepo.findOne({
+        where: { qboCustomerId },
+        relations: ['lead'],
+      });
+      if (owner && owner.id !== project.id) {
+        const ownerNumber = owner.lead?.leadNumber ? ` (${owner.lead.leadNumber})` : '';
+        throw new ConflictException(
+          `This QuickBooks job is already linked to project #${owner.id}${ownerNumber}. Unlink it there first.`,
+        );
+      }
+
+      project.qboCustomerId = qboCustomerId;
+      project.quickbooks = true;
+      const saved = await projectRepo.save(project);
+      await this.recordLinkEvent(manager, {
+        action: 'link',
+        projectId: saved.id,
+        previousQboCustomerId,
+        newQboCustomerId: qboCustomerId,
+        projectNumber: saved.lead?.leadNumber ?? null,
+        jobDisplayName,
+        actorEmail: actorEmail ?? null,
+      });
+      return { project: saved, previousQboCustomerId, changed: true };
+    });
+
+    const projectNumber = result.project.lead?.leadNumber ?? null;
+    if (result.changed) {
+      const replaced = result.previousQboCustomerId
+        ? `, replacing job ${result.previousQboCustomerId}`
+        : '';
+      const by = actorEmail ? ` by ${actorEmail}` : '';
+      this.logger.log(
+        `QuickBooks link set for project ${result.project.id} (lead number ${projectNumber ?? '(none)'}) to job ${qboCustomerId} "${jobDisplayName}"${replaced}${by}`,
+      );
+      this.financials.invalidateJobIndex();
+      // Changing a project<->job link changes what every cached QuickBooks
+      // read means for this project, and the read cache now lives for five
+      // minutes instead of five seconds, so purge it explicitly.
+      this.api.clearReadCache();
+    }
+
+    const nameNumber = projectNumberFromName(jobDisplayName);
+    return {
+      projectId: result.project.id,
+      leadId: result.project.lead?.id ?? null,
+      projectNumber,
+      qboCustomerId,
+      jobDisplayName,
+      previousQboCustomerId: result.previousQboCustomerId,
+      linked: result.changed,
+      alreadyLinked: !result.changed,
+      projectNumberMatchesJob:
+        !!projectNumber &&
+        !!nameNumber &&
+        normalizeProjectNumber(nameNumber) === normalizeProjectNumber(projectNumber),
+    };
+  }
+
+  /**
    * Breaks the QuickBooks link so a mislinked job can be fixed from the UI
    * instead of by hand in SQL. The lead and the project stay exactly as they
    * are — only `qbo_customer_id` and `quickbooks` are cleared, which frees the
    * partial unique index for the job that should have been linked.
    */
-  async unlinkProject(projectId: number) {
+  async unlinkProject(projectId: number, actorEmail?: string | null) {
     const result = await this.dataSource.transaction(async (manager) => {
       const projectRepo = manager.getRepository(Project);
       const project = await this.lockProject(manager, { id: projectId });
@@ -255,7 +369,17 @@ export class QuickbooksProjectImportService {
 
       project.qboCustomerId = null;
       project.quickbooks = false;
-      return { project: await projectRepo.save(project), previousQboCustomerId };
+      const saved = await projectRepo.save(project);
+      await this.recordLinkEvent(manager, {
+        action: 'unlink',
+        projectId: saved.id,
+        previousQboCustomerId,
+        newQboCustomerId: null,
+        projectNumber: saved.lead?.leadNumber ?? null,
+        jobDisplayName: null,
+        actorEmail: actorEmail ?? null,
+      });
+      return { project: saved, previousQboCustomerId };
     });
 
     // Romper un vinculo no deja rastro en ninguna tabla: el log es lo unico que
@@ -267,12 +391,44 @@ export class QuickbooksProjectImportService {
     }
 
     this.financials.invalidateJobIndex();
+    // Changing a project<->job link changes what every cached QuickBooks
+    // read means for this project, and the read cache now lives for five
+    // minutes instead of five seconds, so purge it explicitly.
+    this.api.clearReadCache();
     return {
       projectId: result.project.id,
       leadId: result.project.lead?.id ?? null,
       previousQboCustomerId: result.previousQboCustomerId,
       unlinked: result.previousQboCustomerId != null,
     };
+  }
+
+  /** Una fila de bitacora por cada cambio de vinculo, dentro de la misma
+   * transaccion que el cambio: o quedan las dos cosas o no queda ninguna. */
+  private async recordLinkEvent(
+    manager: EntityManager,
+    event: {
+      action: ProjectQboLinkAction;
+      projectId: number;
+      previousQboCustomerId: string | null;
+      newQboCustomerId: string | null;
+      projectNumber: string | null;
+      jobDisplayName: string | null;
+      actorEmail: string | null;
+    },
+  ): Promise<void> {
+    const repo = manager.getRepository(ProjectQboLinkEvent);
+    await repo.save(
+      repo.create({
+        projectId: event.projectId,
+        action: event.action,
+        previousQboCustomerId: event.previousQboCustomerId,
+        newQboCustomerId: event.newQboCustomerId,
+        projectNumber: event.projectNumber?.slice(0, 50) ?? null,
+        jobDisplayName: event.jobDisplayName?.slice(0, 255) ?? null,
+        actorEmail: event.actorEmail?.slice(0, 255) ?? null,
+      }),
+    );
   }
 
   /**

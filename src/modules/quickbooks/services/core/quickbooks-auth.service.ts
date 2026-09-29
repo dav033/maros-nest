@@ -33,6 +33,23 @@ export class QuickbooksAuthService {
   private readonly basicAuthHeader: string;
   /** Dedup in-flight token refresh requests per realmId to avoid race conditions. */
   private readonly refreshInFlight = new Map<string, Promise<void>>();
+  /**
+   * Decrypted access tokens by realmId. Access tokens live one hour, but a
+   * single request can make dozens of QBO calls and each one used to re-read
+   * the same `qbo_connections` row — ~130 ms of network latency per read.
+   * Entries are written by persistTokens() and dropped by
+   * invalidateAccessToken(); a stale entry can only ever cost one 401, which
+   * withRetry() already recovers from.
+   */
+  private readonly accessTokenCache = new Map<
+    string,
+    { token: string; expiresAtMs: number }
+  >();
+  /**
+   * Dedup concurrent cache misses per realmId so a burst of parallel QBO calls
+   * triggers one database read (and at most one refresh), not one per call.
+   */
+  private readonly tokenLoadInFlight = new Map<string, Promise<string>>();
 
   constructor(
     @InjectRepository(QboConnection)
@@ -165,24 +182,78 @@ export class QuickbooksAuthService {
   /**
    * Returns a valid (non-expired) access token, refreshing transparently if
    * the stored token expires within EXPIRY_BUFFER_SECONDS.
+   *
+   * Served from an in-memory cache while the token has more than
+   * EXPIRY_BUFFER_SECONDS of life left, so repeated QBO calls do not re-read
+   * the same row from a database that is 130 ms away.
    */
   async getValidAccessToken(realmId: string): Promise<string> {
+    const cached = this.accessTokenCache.get(realmId);
+    if (cached && this.hasUsableLifetime(cached.expiresAtMs)) {
+      return cached.token;
+    }
+
+    const inFlight = this.tokenLoadInFlight.get(realmId);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const promise = this.loadAccessToken(realmId).finally(() => {
+      this.tokenLoadInFlight.delete(realmId);
+    });
+    this.tokenLoadInFlight.set(realmId, promise);
+    return promise;
+  }
+
+  /** Drops the cached access token — call when QBO rejects it with a 401. */
+  invalidateAccessToken(realmId: string): void {
+    this.accessTokenCache.delete(realmId);
+  }
+
+  private async loadAccessToken(realmId: string): Promise<string> {
     const connection = await this.connectionRepo.findOneBy({ realmId });
     if (!connection) {
       throw new QboReauthorizationRequiredException(realmId);
     }
 
-    const bufferMs = EXPIRY_BUFFER_SECONDS * 1000;
-    const isExpiringSoon =
-      connection.expiresAt.getTime() - Date.now() < bufferMs;
-
-    if (isExpiringSoon) {
-      await this.refreshTokens(realmId);
-      const refreshed = await this.connectionRepo.findOneBy({ realmId });
-      return this.tokenCrypto.decrypt(refreshed!.accessToken);
+    if (this.hasUsableLifetime(connection.expiresAt.getTime())) {
+      return this.cacheAccessToken(
+        realmId,
+        this.tokenCrypto.decrypt(connection.accessToken),
+        connection.expiresAt.getTime(),
+      );
     }
 
-    return this.tokenCrypto.decrypt(connection.accessToken);
+    // Expiring soon: refreshTokens() persists the new pair, and persistTokens()
+    // populates the cache with the plaintext token it already holds.
+    await this.refreshTokens(realmId);
+    const refreshedFromCache = this.accessTokenCache.get(realmId);
+    if (refreshedFromCache) {
+      return refreshedFromCache.token;
+    }
+
+    const refreshed = await this.connectionRepo.findOneBy({ realmId });
+    if (!refreshed) {
+      throw new QboReauthorizationRequiredException(realmId);
+    }
+    return this.cacheAccessToken(
+      realmId,
+      this.tokenCrypto.decrypt(refreshed.accessToken),
+      refreshed.expiresAt.getTime(),
+    );
+  }
+
+  private hasUsableLifetime(expiresAtMs: number): boolean {
+    return expiresAtMs - Date.now() >= EXPIRY_BUFFER_SECONDS * 1000;
+  }
+
+  private cacheAccessToken(
+    realmId: string,
+    token: string,
+    expiresAtMs: number,
+  ): string {
+    this.accessTokenCache.set(realmId, { token, expiresAtMs });
+    return token;
   }
 
   // ---------------------------------------------------------------------------
@@ -202,6 +273,9 @@ export class QuickbooksAuthService {
       },
       ['realmId'],
     );
+
+    // Covers both paths that mint tokens: a fresh OAuth connect and a refresh.
+    this.cacheAccessToken(realmId, tokens.access_token, expiresAt.getTime());
   }
 
   private tokenRequestHeaders(): Record<string, string> {

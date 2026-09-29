@@ -24,9 +24,24 @@ import { MailService } from '../../../mail/services/mail.service';
 import { TaskWorkspaceAssignmentService } from '../../../task-workspaces/services/task-workspace-assignment.service';
 import { Optional } from '@nestjs/common';
 
+/** Same window the analytics dashboard uses (ANALYTICS_CACHE_TTL_MS). */
+const FINANCIALS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+type ProjectFinancialsEntry = { id: number; financial: unknown; qbo: unknown };
+
 @Injectable()
 export class ProjectsService extends BaseService<any, number, Project> {
   private readonly logger = new Logger(ProjectsService.name);
+
+  /**
+   * Cached GET /projects/financials payload. Holds only the finance:read view —
+   * see the comment in findAllFinancials for why that is leak-free.
+   */
+  private financialsCache: {
+    value: ProjectFinancialsEntry[];
+    expiresAt: number;
+  } | null = null;
+  private financialsInFlight: Promise<ProjectFinancialsEntry[]> | null = null;
 
   constructor(
     private readonly projectsRepository: ProjectsRepository,
@@ -238,6 +253,36 @@ export class ProjectsService extends BaseService<any, number, Project> {
     const canReadFinance = !user || user.permissions.includes('finance:read');
     if (!canReadFinance) return [];
 
+    // The permission check above is deliberately *outside* the cache: the only
+    // thing ever stored is the finance:read view, and a caller without the
+    // permission has already returned. There is no cache key that could hand
+    // one user's payload to a user with different permissions.
+    const now = Date.now();
+    if (this.financialsCache && this.financialsCache.expiresAt > now) {
+      return this.financialsCache.value;
+    }
+
+    // Collapse concurrent cold requests: the work below can take up to 25 s.
+    if (this.financialsInFlight) {
+      return this.financialsInFlight;
+    }
+
+    const promise = this.loadAllFinancials().finally(() => {
+      this.financialsInFlight = null;
+    });
+    this.financialsInFlight = promise;
+    return promise;
+  }
+
+  /** Drops the cached financials payload — wired to POST /analytics/refresh. */
+  clearFinancialsCache(): void {
+    this.financialsCache = null;
+    this.financialsInFlight = null;
+  }
+
+  private async loadAllFinancials(): Promise<
+    Array<{ id: number; financial: unknown; qbo: unknown }>
+  > {
     const startTime = Date.now();
 
     const entities = await this.projectRepo.find({ relations: ['lead'] });
@@ -283,6 +328,15 @@ export class ProjectsService extends BaseService<any, number, Project> {
     this.logger.log(
       `Projects findAllFinancials completed in ${duration}ms (${enrichedCount}/${entries.length} enriched, ${scheduleCount} schedules, ${errorCount} errors; sample ${enrichedProjectNumbers.slice(0, 8).join(', ')})`,
     );
+
+    // A timed-out run is a degraded payload; caching it for five minutes would
+    // pin the whole screen to an error state, so only a complete run is kept.
+    if (!timedOut) {
+      this.financialsCache = {
+        value: entries,
+        expiresAt: Date.now() + FINANCIALS_CACHE_TTL_MS,
+      };
+    }
 
     return entries;
   }

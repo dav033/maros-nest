@@ -154,6 +154,10 @@ export class UserInvitationsService {
       }
     });
 
+    // Revoking a pending invitation switches the account off; the next request
+    // must be rejected instead of riding a cached identity.
+    this.users.invalidateResolvedUser(user.email);
+
     this.logger.log(`Invitation for user ${user.email} revoked`);
   }
 

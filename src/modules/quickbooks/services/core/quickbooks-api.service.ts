@@ -34,11 +34,16 @@ export interface QueryAllOptions {
 export class QuickbooksApiService {
   private readonly logger = new Logger(QuickbooksApiService.name);
   private readonly environment: string;
-  // Keep external QuickBooks edits visible quickly while still coalescing
-  // duplicate reads from the projects table and the payment dialog.
-  private readonly readCacheTtlMs = 5_000;
+  // Five minutes, matching ANALYTICS_CACHE_TTL_MS and the rest of the dashboard.
+  // These used to be 5 s / 10 s so that edits made *inside* QuickBooks showed up
+  // almost at once, but the window was so short it practically never hit: any
+  // user who took more than five seconds between two clicks paid the full price
+  // again (measured: 3.2 s vs 0.27 s on project attachments). Writes we make
+  // ourselves purge the cache explicitly (see clearReadCache callers), and
+  // POST /analytics/refresh is the escape hatch for edits made in QuickBooks.
+  private readonly readCacheTtlMs = 5 * 60 * 1000;
   private readonly readCacheMaxEntries = 1_500;
-  private readonly queryAllCacheTtlMs = 10_000;
+  private readonly queryAllCacheTtlMs = 5 * 60 * 1000;
   private readonly readCache = new Map<
     string,
     {
@@ -78,14 +83,21 @@ export class QuickbooksApiService {
     );
   }
 
-  /** Creates an Invoice. invoiceData must follow the QBO Invoice object schema. */
+  /**
+   * Creates an Invoice. invoiceData must follow the QBO Invoice object schema.
+   *
+   * Clears the read cache afterwards for the same reason mutateEntity does:
+   * the new invoice has to show up in the next read, not five minutes later.
+   */
   async createInvoice(
     realmId: string,
     invoiceData: Record<string, unknown>,
   ): Promise<unknown> {
-    return this.withRetry(realmId, (client) =>
+    const result = await this.withRetry(realmId, (client) =>
       client.post<unknown>('/invoice', invoiceData).then((r) => r.data),
     );
+    this.clearReadCache();
+    return result;
   }
 
   /**
@@ -496,6 +508,7 @@ export class QuickbooksApiService {
           this.logger.warn(
             `QBO 401 for realm ${realmId} — refreshing token and retrying`,
           );
+          this.authService.invalidateAccessToken(realmId);
           await this.authService.refreshTokens(realmId);
           client = await this.buildClient(realmId);
           continue;
@@ -540,6 +553,20 @@ export class QuickbooksApiService {
   clearReadCache(): void {
     this.readCache.clear();
     this.inFlightReadRequests.clear();
+  }
+
+  /**
+   * Caches a derived result (one built from several QBO reads) in the same
+   * read cache as the raw reads it came from, so every existing purge path —
+   * writes, link changes and POST /analytics/refresh — clears it too, and
+   * concurrent callers are deduplicated.
+   */
+  async cacheDerivedRead<T>(key: string, load: () => Promise<T>): Promise<T> {
+    return this.getOrSetReadCacheWithTtl(
+      this.buildReadCacheKey('derived', key),
+      load,
+      this.readCacheTtlMs,
+    );
   }
 
   private buildReadCacheKey(...parts: Array<string>): string {

@@ -23,6 +23,17 @@ const SESSION_COOKIE = 'maros_session';
  * not travel in the token. Resolving them per request is what makes a role
  * change or a deactivation take effect immediately instead of waiting out the
  * token's 30-day lifetime.
+ *
+ * That resolution is now served from a short-lived in-memory cache
+ * (RESOLVED_USER_TTL_MS, 30 s) because it cost a full round trip to a database
+ * 130 ms away on *every* authenticated request — roughly 4.6 of them per page
+ * render. The immediacy above is preserved, and is not merely traded for the
+ * TTL: UsersService.update (role, isActive), RolesService.update (a role's
+ * permission set) and UserInvitationsService.revoke all drop the affected
+ * entries explicitly, so those changes still bite on the very next request.
+ * The 30 s window is the backstop for a mutation path that forgets to
+ * invalidate, not the intended mechanism — a new path that changes a user's
+ * permissions must call UsersService.invalidateResolvedUser.
  */
 @Injectable()
 export class SessionAuthGuard implements CanActivate {

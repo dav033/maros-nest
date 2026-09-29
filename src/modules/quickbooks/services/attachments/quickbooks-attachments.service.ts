@@ -145,7 +145,36 @@ export class QuickbooksAttachmentsService {
     };
   }
 
+  /**
+   * Collecting a project's attachments costs nine parallel QBO queries plus the
+   * Attachable lookups (measured: 2.3–3.4 s), and the project card asks for it
+   * on every open, so the assembled result is cached.
+   *
+   * Responses carrying temporary download URLs are deliberately NOT cached:
+   * QuickBooks rotates those URLs, so a cached one would hand the UI a dead
+   * link. Only the plain listing — what the card actually renders — is reused.
+   */
   async getProjectAttachments(
+    params: QboProjectAttachmentsParams,
+  ): Promise<QboProjectAttachmentsResult> {
+    if (params.includeTempDownloadUrl) {
+      return this.loadProjectAttachments(params);
+    }
+
+    const key = [
+      params.realmId ?? '',
+      params.projectNumber ?? '',
+      params.qboCustomerId ?? '',
+      params.startDate ?? '',
+      params.endDate ?? '',
+    ].join('|');
+
+    return this.apiService.cacheDerivedRead(`project-attachments::${key}`, () =>
+      this.loadProjectAttachments(params),
+    );
+  }
+
+  private async loadProjectAttachments(
     params: QboProjectAttachmentsParams,
   ): Promise<QboProjectAttachmentsResult> {
     const realmId = await this.resolveRealmId(params.realmId);

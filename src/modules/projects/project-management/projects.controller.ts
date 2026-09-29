@@ -26,6 +26,7 @@ import type { AuthenticatedUser } from '../../../common/auth/authenticated-user'
 import { QuickbooksProjectImportService } from './services/quickbooks-project-import.service';
 import { ImportQuickbooksBatchDto } from './dto/import-quickbooks-batch.dto';
 import { ImportQuickbooksProjectDto } from './dto/import-quickbooks-project.dto';
+import { LinkQuickbooksJobDto } from './dto/link-quickbooks-job.dto';
 import { ProjectQboReportService } from './services/project-qbo-report.service';
 
 @ApiTags('projects')
@@ -64,6 +65,28 @@ export class ProjectsController {
     return this.quickbooksProjectImport.importBatch(dto);
   }
 
+  @Put(':id/qbo-link')
+  @RequirePermissions('finance:read', 'projects:write')
+  @ApiOperation({
+    summary:
+      'Link an existing CRM project to a QuickBooks job (sets qboCustomerId). Counterpart of DELETE :id/qbo-link.',
+  })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Returns the linked job, the previous one when the link was replaced, and whether the job name carries the project number',
+  })
+  @ApiResponse({ status: 404, description: 'Project or active QuickBooks job not found' })
+  @ApiResponse({ status: 409, description: 'That QuickBooks job already belongs to another project' })
+  async linkProjectQboLink(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: LinkQuickbooksJobDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.quickbooksProjectImport.linkProject(id, dto.qboCustomerId, user?.email);
+  }
+
   @Delete(':id/qbo-link')
   @RequirePermissions('projects:write')
   @ApiOperation({
@@ -73,8 +96,11 @@ export class ProjectsController {
   @ApiParam({ name: 'id', type: Number })
   @ApiResponse({ status: 200, description: 'Returns the previous QuickBooks job id, or unlinked=false when there was nothing to clear' })
   @ApiResponse({ status: 404, description: 'Project not found' })
-  async unlinkProjectQboLink(@Param('id', ParseIntPipe) id: number) {
-    return this.quickbooksProjectImport.unlinkProject(id);
+  async unlinkProjectQboLink(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.quickbooksProjectImport.unlinkProject(id, user?.email);
   }
 
   @Get('all')

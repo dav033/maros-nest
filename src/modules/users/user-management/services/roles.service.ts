@@ -10,12 +10,14 @@ import {
 import { isPermission } from '../../../../common/auth/permissions';
 import { RolesRepository } from '../repositories/roles.repository';
 import { UsersRepository } from '../repositories/users.repository';
+import { UsersService } from '../users.service';
 
 @Injectable()
 export class RolesService {
   constructor(
     private readonly rolesRepo: RolesRepository,
     private readonly usersRepo: UsersRepository,
+    private readonly users: UsersService,
   ) {}
 
   async findAll(): Promise<Role[]> {
@@ -73,6 +75,11 @@ export class RolesService {
       this.assertKnownPermissions(changes.permissions);
       await this.rolesRepo.replacePermissions(id, changes.permissions);
     }
+
+    // Editing a role rewrites the permissions of everyone holding it, and the
+    // resolved-identity cache is keyed by user, not by role — so drop all of it
+    // rather than try to work out who was affected.
+    this.users.invalidateAllResolvedUsers();
 
     return this.findById(id);
   }
