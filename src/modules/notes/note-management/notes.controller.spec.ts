@@ -20,6 +20,7 @@ function stubCurrentUser(req: RequestWithUser, _res: Response, next: NextFunctio
   req.user = {
     id: TEST_USER_ID,
     email: 'test@marosconstruction.com',
+    userType: 'internal' as const,
     name: 'Test User',
     picture: null,
     role: { id: 1, name: 'admin' },

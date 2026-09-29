@@ -136,7 +136,8 @@ casos nuevos (el rol de un externo, y que la tabla traiga filas en el primer ren
    Invitar»).
 4. **Alcance por filas**: `scoped_company_id` y `scoped_contact_id` se guardan y se
    devuelven, pero ningún módulo filtra por ellos. Mientras siga así, un externo no tiene
-   nada que ver dentro del CRM.
+   nada que ver dentro del CRM. Lo que sí se cerró el 28‑sep es la puerta por defecto:
+   ver la sección 6.
 5. **El calendario** funciona, pero sus celdas siguen siendo altas; si lo quieres más
    apretado es un ajuste de altura, no un rediseño.
 
@@ -157,3 +158,48 @@ previa (4 usuarios, 4 roles, 22 permisos de rol, 0 invitaciones, 109 proyectos).
 el SMTP de Gmail, desde `info@marosconstruction.com` a `prueba-externo-5@example.com`. Ese
 dominio es de los reservados para pruebas y no hay nadie detrás, así que no le llegó a
 ninguna persona; lo único que queda es un rebote en la bandeja de `info@`.
+
+---
+
+## 6. Cierre de permisos para usuarios externos (28‑sep, después del recorrido)
+
+`PermissionsGuard` decía: *«No decorator: a valid session is enough.»* Esa era la raíz.
+Una ruta sin `@RequirePermissions` no es una ruta inofensiva, es una que nadie decoró — y
+cualquiera con sesión válida la leía, incluido un invitado de fuera. Así es como
+`/users/directory` entregaba nombre y correo de los cinco empleados de Maros a alguien con
+cero permisos.
+
+**El cambio invierte la regla por defecto para los externos**, en un solo sitio en vez de
+en siete controladores: si el usuario es `external` y la ruta no está marcada con
+`@AllowExternal`, se responde 403. El personal de Maros no cambia en nada.
+
+- `AuthenticatedUser` ahora lleva `userType`; en el bypass de desarrollo vale `internal`.
+- `@AllowExternal()` es la única forma de abrir una ruta a un externo, y sólo se puso
+  donde lo que se devuelve es del propio usuario: `GET /users/me`, sus preferencias de
+  notificación (lectura y escritura) y el controlador de notificaciones completo, donde
+  todas las rutas operan sobre las del que llama.
+
+**Medido antes y después**, con un usuario externo real y su sesión firmada, sobre las
+mismas 30 rutas:
+
+| | Antes | Después |
+|---|---|---|
+| Alcanzables por un externo | 9 | **4** |
+| Directorio del personal | 200, 5 empleados con su correo | **403** |
+| Tipos de proyecto | 200, 23 tipos | **403** |
+| Calendario, QuickBooks, resto | 200 | **403** |
+
+Las 4 que quedan son estrictamente suyas: su perfil, sus preferencias, sus notificaciones
+(0 registros) y el contador de no leídas.
+
+Comprobado además que el personal no perdió nada: admin, member y «Solo task» siguen
+respondiendo 200 en directorio, tipos de proyecto, notificaciones, perfil y calendario;
+«Solo task» sigue recibiendo 403 en `/projects/all`, que es lo que le corresponde por
+tener sólo dos permisos.
+
+Cuatro casos nuevos en `permissions.guard.spec.ts` fijan la regla, incluido el que
+comprueba que al personal no le cambia nada. Backend: 388 pruebas en verde.
+
+**Esto no sustituye al alcance por filas.** Cierra la puerta que estaba abierta por
+descuido; darle a un cliente algo útil que mirar sigue necesitando que cada consulta
+filtre por su empresa.

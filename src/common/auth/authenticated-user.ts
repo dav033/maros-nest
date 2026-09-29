@@ -1,4 +1,5 @@
 import type { Request } from 'express';
+import type { UserType } from '../../entities/user.entity';
 import type { Permission } from './permissions';
 
 /**
@@ -14,6 +15,11 @@ export interface AuthenticatedUser {
   picture: string | null;
   role: { id: number; name: string } | null;
   permissions: Permission[];
+  /**
+   * 'external' es alguien de fuera de Maros. PermissionsGuard le cierra todo lo
+   * que no esté marcado con @AllowExternal, incluidas las rutas sin permisos.
+   */
+  userType: UserType;
 }
 
 export type RequestWithUser = Request & { user?: AuthenticatedUser };

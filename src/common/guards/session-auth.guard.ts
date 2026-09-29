@@ -128,6 +128,7 @@ export class SessionAuthGuard implements CanActivate {
         picture: picture ?? null,
         role: { id: 0, name: 'development' },
         permissions: [...PERMISSIONS],
+        userType: 'internal',
       };
     } else {
       // Throws UserInactiveException (403) for deactivated accounts; provisions

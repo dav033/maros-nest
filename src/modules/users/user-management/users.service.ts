@@ -278,6 +278,7 @@ export class UsersService {
       picture: user.picture ?? null,
       role: user.role ? { id: user.role.id, name: user.role.name } : null,
       permissions: this.effectivePermissions(user.role),
+      userType: user.userType ?? 'internal',
     };
   }
 

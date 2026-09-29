@@ -13,6 +13,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { AllowExternal } from '../../../common/decorators/allow-external.decorator';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../../common/decorators/require-permissions.decorator';
 import {
@@ -43,6 +44,7 @@ export class UsersController {
   // --- Current user: any authenticated caller, no permission required. ---
 
   @Get('users/me')
+  @AllowExternal()
   @ApiOperation({ summary: 'Current user with their effective permissions' })
   @ApiResponse({ status: 200, description: 'The authenticated user' })
   getMe(@CurrentUser() user: AuthenticatedUser | undefined) {
@@ -51,6 +53,7 @@ export class UsersController {
   }
 
   @Get('users/me/notification-preferences')
+  @AllowExternal()
   @ApiOperation({ summary: 'Get my notification delivery preferences' })
   async getNotificationPreferences(@CurrentUser() user: AuthenticatedUser | undefined) {
     if (!user) throw new UnauthorizedException();
@@ -58,6 +61,7 @@ export class UsersController {
   }
 
   @Put('users/me/notification-preferences')
+  @AllowExternal()
   @ApiOperation({ summary: 'Update my notification delivery preferences' })
   async updateNotificationPreferences(
     @Body() dto: UpdateNotificationPreferencesDto,
@@ -76,6 +80,10 @@ export class UsersController {
    * status — which is the same information already visible on the byline of any note
    * they have opened. Widening `users:read` to make sharing work would have handed over
    * far more.
+   *
+   * Lo que sí queda fuera es un usuario externo: no tiene colegas dentro de Maros a
+   * quien nombrar, y sin @AllowExternal PermissionsGuard le responde 403. Antes de eso
+   * un invitado de fuera se llevaba el nombre y el correo de todo el personal.
    */
   @Get('users/directory')
   @ApiOperation({ summary: 'Active colleagues, for people pickers' })

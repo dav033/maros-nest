@@ -2,6 +2,7 @@ import { Controller, Get, Post, Param, Query, ParseIntPipe, UnauthorizedExceptio
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
 import { ListNotificationsDto } from './dto/list-notifications.dto';
+import { AllowExternal } from '../../common/decorators/allow-external.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/auth/authenticated-user';
 
@@ -10,9 +11,13 @@ import type { AuthenticatedUser } from '../../common/auth/authenticated-user';
  * whole check, same as GET /users/me. There is no `tasks:read`-style gate: whether you
  * get notified about a task is a property of being a watcher, resolved when the
  * notification was created, not of a permission checked when you read it back.
+ *
+ * Por eso mismo la marca @AllowExternal va sobre toda la clase: no hay una sola ruta
+ * aquí que devuelva algo que no sea del propio usuario.
  */
 @ApiTags('notifications')
 @Controller('notifications')
+@AllowExternal()
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 

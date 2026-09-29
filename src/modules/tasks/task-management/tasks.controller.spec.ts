@@ -7,6 +7,7 @@ function user(id: number): AuthenticatedUser {
   return {
     id,
     email: `user${id}@marosconstruction.com`,
+    userType: 'internal' as const,
     name: null,
     picture: null,
     role: null,
