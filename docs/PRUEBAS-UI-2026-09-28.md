@@ -122,10 +122,13 @@ casos nuevos (el rol de un externo, y que la tabla traiga filas en el primer ren
 ## 4. Lo que encontré y NO toqué
 
 1. **Cinco contactos completamente vacíos** (ids 115, 116, 145, 254, 270): sin nombre, sin
-   teléfono, sin correo y sin ningún lead. Salen primero en Contacts porque el orden por
-   nombre pone los vacíos arriba, y la lista parece rota. `CreateContactDto` tiene `name`
-   opcional, así que la API los sigue admitiendo. Son datos de producción: dime si los
-   borro y si quieres que el nombre pase a ser obligatorio.
+   teléfono, sin correo y sin ningún lead. Salían primero en Contacts porque el orden por
+   nombre pone los vacíos arriba, y la lista parecía rota. **Borrados el 28‑sep a petición
+   de David**, con respaldo previo de las cinco filas; quedan 260 contactos y ningún lead
+   huérfano. Dos traían algo suelto en el campo de dirección: el 145 decía «Meiret
+   QUintero» (un nombre escrito en la casilla equivocada) y el 254 «esd33». La causa sigue
+   abierta: `CreateContactDto` tiene `name` opcional, así que la API admite crear otro
+   contacto vacío mañana.
 2. **Customers lista los 265 contactos**, marcados casi todos como «Customer: No». Puede
    ser a propósito (desde ahí se marcan), pero el título dice «todos los clientes».
 3. **Idiomas mezclados**: la importación de QuickBooks y el reporte están en español; el
