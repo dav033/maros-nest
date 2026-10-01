@@ -13,6 +13,7 @@ import axios from 'axios';
 import { randomUUID } from 'crypto';
 import { IsNull, Not, Repository } from 'typeorm';
 import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
+import { AttachInvoiceScanFileDto } from '../dto/attach-invoice-scan-file.dto';
 import { CreateManualInvoiceTransactionDto } from '../dto/create-manual-invoice-transaction.dto';
 import { CreateInvoiceScanDto } from '../dto/create-invoice-scan.dto';
 import { UpdateInvoiceScanDto } from '../dto/update-invoice-scan.dto';
@@ -109,7 +110,13 @@ const INVOICE_SCHEMA = {
 } as const;
 
 type QboRecord = Record<string, unknown>;
-type InvoiceScanView = Omit<InvoiceScan, 'fileKey' | 'notifiedAt' | 'remindedAt'>;
+type InvoiceScanView = Omit<
+  InvoiceScan,
+  'fileKey' | 'notifiedAt' | 'remindedAt'
+> & {
+  /** Si el registro tiene documento original guardado (descargable). */
+  hasFile: boolean;
+};
 
 const MANUAL_ENTRY_WARNING =
   'Details were entered by hand because the automatic scan did not complete.';
@@ -131,6 +138,8 @@ const EDITABLE_FIELDS = [
   'total',
   'paymentStatus',
   'lineItems',
+  'description',
+  'transactionDirection',
 ] as const;
 
 @Injectable()
@@ -335,6 +344,12 @@ export class InvoiceScansService {
               amount: line.amount ?? null,
             }));
             break;
+          case 'description':
+            next.description = input.description?.trim() || null;
+            break;
+          case 'transactionDirection':
+            next.transactionDirection = input.transactionDirection!;
+            break;
         }
       }
       scan.extractedData = next;
@@ -449,6 +464,114 @@ export class InvoiceScansService {
     }
   }
 
+  /**
+   * Borra el registro y, si tenía documento, el archivo en S3. Se permite
+   * también sobre los ya marcados como entrados en QuickBooks: lo que se borra
+   * es la nota de la plataforma, no el asiento contable.
+   */
+  async remove(id: string): Promise<{ id: string; deleted: true }> {
+    const scan = await this.findScan(id);
+    if (scan.status === 'processing') {
+      throw new ConflictException(
+        'This document is being scanned; try again in a moment.',
+      );
+    }
+
+    if (scan.fileKey) {
+      // El archivo huérfano no justifica fallar el borrado: se avisa y sigue.
+      try {
+        await this.s3.deleteObject(scan.fileKey);
+      } catch (error) {
+        this.logger.warn(
+          `Could not delete the file of invoice scan ${id}: ${
+            error instanceof Error ? error.message : 'unknown error'
+          }`,
+        );
+      }
+    }
+
+    await this.scans.delete({ id: scan.id });
+    return { id: scan.id, deleted: true };
+  }
+
+  /** URL firmada que fuerza la descarga del documento original. */
+  async getDownloadUrl(
+    id: string,
+  ): Promise<{ url: string; fileName: string }> {
+    const scan = await this.findScan(id);
+    if (!scan.fileKey) {
+      throw new NotFoundException('This record has no document to download.');
+    }
+    const fileName = this.downloadFileName(scan);
+    const { url } = await this.s3.getPresignedGetUrl({
+      key: scan.fileKey,
+      expiresInSeconds: 900,
+      downloadFileName: fileName,
+    });
+    return { url, fileName };
+  }
+
+  /**
+   * Adjunta un documento a un registro existente (una transacción manual que se
+   * guardó sin archivo). Devuelve la URL de subida; el archivo no se escanea,
+   * los valores escritos a mano son los que valen.
+   */
+  async attachFile(
+    id: string,
+    input: AttachInvoiceScanFileDto,
+    actor?: Pick<AuthenticatedUser, 'id'>,
+  ): Promise<InvoiceScanView & { uploadUrl: string }> {
+    const scan = await this.findScan(id);
+    if (scan.status === 'processing') {
+      throw new ConflictException(
+        'This document is being scanned; try again in a moment.',
+      );
+    }
+    if (scan.fileKey) {
+      throw new ConflictException(
+        'This record already has a document attached.',
+      );
+    }
+
+    const maxUploadBytes = this.s3.getUploadRules().maxUploadBytes;
+    if (input.sizeBytes < 1 || input.sizeBytes > maxUploadBytes) {
+      throw new BadRequestException(
+        `The file must be smaller than ${Math.floor(maxUploadBytes / 1024 / 1024)} MB.`,
+      );
+    }
+
+    const upload = await this.s3.getPresignedPutUrl({
+      fileName: input.fileName,
+      contentType: input.contentType,
+      sizeBytes: input.sizeBytes,
+      prefix: 'invoice-scans',
+    });
+
+    scan.fileKey = upload.key;
+    scan.fileName = input.fileName;
+    scan.contentType = input.contentType;
+    if (actor?.id) scan.updatedBy = actor.id;
+
+    const saved = await this.scans.save(scan);
+    return { ...this.toPublicScan(saved), uploadUrl: upload.url };
+  }
+
+  /** El nombre con el que el navegador guarda el archivo. */
+  private downloadFileName(scan: InvoiceScan): string {
+    const name = scan.fileName?.trim();
+    if (name && /\.[A-Za-z0-9]{2,5}$/.test(name)) return name;
+    const extension =
+      scan.contentType === 'application/pdf'
+        ? 'pdf'
+        : scan.contentType === 'image/png'
+          ? 'png'
+          : scan.contentType === 'image/webp'
+            ? 'webp'
+            : 'jpg';
+    const base = (name || `document-${scan.id}`).replace(/[\\\/:*?"<>|]/g, '_');
+    return `${base}.${extension}`;
+  }
+
   private async findScan(id: string): Promise<InvoiceScan> {
     const scan = await this.scans.findOne({ where: { id } });
     if (!scan) throw new NotFoundException('Invoice scan not found.');
@@ -460,6 +583,7 @@ export class InvoiceScansService {
       id: scan.id,
       recordType: scan.recordType ?? 'invoice',
       fileName: scan.fileName,
+      hasFile: !!scan.fileKey,
       contentType: scan.contentType,
       status: scan.status,
       extractedData: scan.extractedData,

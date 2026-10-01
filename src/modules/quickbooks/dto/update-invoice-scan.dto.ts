@@ -108,6 +108,17 @@ export class UpdateInvoiceScanDto {
   @Type(() => InvoiceLineItemDto)
   lineItems?: InvoiceLineItemDto[];
 
+  /** Manual transactions only: what the payment was for. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  description?: string | null;
+
+  /** Manual transactions only: whether the money went out or came in. */
+  @IsOptional()
+  @IsIn(['payment_made', 'payment_received'])
+  transactionDirection?: 'payment_made' | 'payment_received';
+
   /** Reviewer note. Empty or null clears it. */
   @IsOptional()
   @IsString()

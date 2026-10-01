@@ -18,6 +18,11 @@ export interface PresignedPutUrlResult {
 export interface GetPresignedGetUrlInput {
   key: string;
   expiresInSeconds?: number;
+  /**
+   * Cuando viene, la URL fuerza la descarga con este nombre de archivo en vez de
+   * abrir el objeto en el navegador.
+   */
+  downloadFileName?: string;
 }
 
 export interface PresignedGetUrlResult {

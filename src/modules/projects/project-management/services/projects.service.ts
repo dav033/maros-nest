@@ -467,6 +467,10 @@ export class ProjectsService extends BaseService<any, number, Project> {
       status: project.lead.status,
       notes: project.lead.notes,
       inReview: project.lead.inReview,
+      // Estimado manual del CRM: es lo que se guarda al editar el estimate del
+      // proyecto, aunque QuickBooks no lo tenga.
+      estimate:
+        project.lead.estimate != null ? Number(project.lead.estimate) : null,
       contact: project.lead.contact ? {
         id: project.lead.contact.id,
         name: project.lead.contact.name,
@@ -623,10 +627,30 @@ export class ProjectsService extends BaseService<any, number, Project> {
    * reciente para que la suma quede igual a `amount` (o crea uno si no existe).
    * Devuelve el estimate normalizado y el resumen financiero recalculado.
    */
+  /**
+   * Guarda el estimate del proyecto en el CRM (campo `estimate` del lead, que es
+   * la fuente de verdad de la plataforma) y después intenta sincronizarlo con
+   * QuickBooks. Antes se escribía solo en QuickBooks: si el proyecto no estaba
+   * vinculado a un job, o QBO fallaba, el monto se perdía y la pantalla seguía
+   * mostrando el valor viejo. Ahora el guardado nunca depende de QuickBooks y la
+   * respuesta dice si la sincronización se logró.
+   */
   async updateProjectEstimate(
     id: number,
     amount: number,
-  ): Promise<{ estimate: unknown; financial: unknown }> {
+  ): Promise<{
+    savedAmount: number;
+    synced: boolean;
+    syncError: string | null;
+    estimate: unknown;
+    financial: unknown;
+  }> {
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw ValidationException.format(
+        'El monto del estimate debe ser un número mayor o igual a 0.',
+      );
+    }
+
     const project = await this.projectRepo.findOne({
       where: { id },
       relations: ['lead'],
@@ -634,26 +658,60 @@ export class ProjectsService extends BaseService<any, number, Project> {
     if (!project) {
       throw new ResourceNotFoundException(`Project not found with id: ${id}`);
     }
-
-    const leadNumber = project.lead?.leadNumber;
-    if (!leadNumber) {
+    if (!project.lead) {
       throw ValidationException.format(
-        'El proyecto %s no tiene un número de lead asociado, no se puede sincronizar el estimate con QuickBooks.',
+        'El proyecto %s no tiene un lead asociado, no se puede guardar el estimate.',
         id.toString(),
       );
     }
 
-    const estimate = await this.qboFinancials.setProjectEstimateTotal(
-      leadNumber,
-      amount,
-    );
+    const rounded = Math.round(amount * 100) / 100;
+    await this.leadRepo.update({ id: project.lead.id }, { estimate: rounded });
 
-    // Recalcula el resumen financiero para que la UI refleje el nuevo total.
-    const [financial] = await this.qboFinancials.getProjectFinancials([
-      leadNumber,
-    ]);
+    const leadNumber = project.lead.leadNumber;
+    if (!leadNumber) {
+      return {
+        savedAmount: rounded,
+        synced: false,
+        syncError:
+          'El proyecto no tiene número de lead, así que no se pudo sincronizar con QuickBooks.',
+        estimate: null,
+        financial: null,
+      };
+    }
 
-    return { estimate, financial: financial ?? null };
+    try {
+      const estimate = await this.qboFinancials.setProjectEstimateTotal(
+        leadNumber,
+        rounded,
+      );
+      // Recalcula el resumen financiero para que la UI refleje el nuevo total.
+      const [financial] = await this.qboFinancials.getProjectFinancials([
+        leadNumber,
+      ]);
+      return {
+        savedAmount: rounded,
+        synced: true,
+        syncError: null,
+        estimate,
+        financial: financial ?? null,
+      };
+    } catch (error) {
+      const syncError =
+        error instanceof Error
+          ? error.message
+          : 'QuickBooks no pudo actualizar el estimate.';
+      this.logger.warn(
+        `Estimate saved in the CRM for project ${id} (${leadNumber}) but QuickBooks was not updated: ${syncError}`,
+      );
+      return {
+        savedAmount: rounded,
+        synced: false,
+        syncError,
+        estimate: null,
+        financial: null,
+      };
+    }
   }
 
   async findEstimateFile(

@@ -171,6 +171,9 @@ export class S3Service {
     const command = new GetObjectCommand({
       Bucket: this.config.bucketName,
       Key: key,
+      ResponseContentDisposition: input.downloadFileName
+        ? this.buildAttachmentDisposition(input.downloadFileName)
+        : undefined,
     });
 
     const url = await this.exec<string>(
@@ -184,6 +187,12 @@ export class S3Service {
       url,
       expiresInSeconds,
     };
+  }
+
+  /** `attachment` con el nombre saneado: comillas y saltos romperian la cabecera. */
+  private buildAttachmentDisposition(fileName: string): string {
+    const safe = fileName.replace(/[\r\n"\\]/g, '_').trim() || 'download';
+    return `attachment; filename="${safe}"`;
   }
 
   async listObjects(input: ListS3ObjectsInput = {}): Promise<ListS3ObjectsResult> {

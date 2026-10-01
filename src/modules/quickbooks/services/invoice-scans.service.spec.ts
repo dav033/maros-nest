@@ -72,7 +72,7 @@ function mockOpenAi(payload: Record<string, unknown>) {
 
 interface Harness {
   scan: InvoiceScan;
-  scans: { findOne: jest.Mock; save: jest.Mock };
+  scans: { findOne: jest.Mock; save: jest.Mock; delete: jest.Mock };
   s3: Record<string, jest.Mock>;
   qboApi: { queryAll: jest.Mock };
   financials: { getDefaultRealmId: jest.Mock };
@@ -98,6 +98,7 @@ function harness(opts: {
       savedStatuses.push(value.status);
       return Promise.resolve(value);
     }),
+    delete: jest.fn().mockResolvedValue({ affected: 1 }),
   };
   const s3 = {
     getObjectMetadata: jest.fn().mockResolvedValue({
@@ -109,6 +110,14 @@ function harness(opts: {
       buffer: opts.buffer ?? Buffer.from('invoice-photo'),
       contentType: scan.contentType,
       fileName: scan.fileName,
+    }),
+    deleteObject: jest.fn().mockResolvedValue({ deleted: true }),
+    getPresignedGetUrl: jest
+      .fn()
+      .mockResolvedValue({ url: 'https://signed/download' }),
+    getPresignedPutUrl: jest.fn().mockResolvedValue({
+      key: 'mcp/attachments/invoice-scans/receipt.pdf',
+      url: 'https://signed/put',
     }),
   };
   const qboApi = {
@@ -285,6 +294,56 @@ describe('InvoiceScansService', () => {
       expect((await h.service.update(SCAN_ID, { comments: '' })).comments).toBeNull();
     });
 
+    it('corrects the amount, date and description of a manual transaction', async () => {
+      const h = harness({
+        scan: {
+          recordType: 'transaction',
+          fileKey: null,
+          status: 'needs_review',
+          extractedData: {
+            direction: 'unknown',
+            classification: 'other',
+            counterpartyName: 'Lion Plumbing',
+            invoiceNumber: null,
+            issueDate: '2026-09-28',
+            dueDate: null,
+            currency: 'USD',
+            subtotal: 69.6,
+            taxTotal: null,
+            total: 69.6,
+            paymentStatus: 'paid',
+            description: 'Materials',
+            transactionDirection: 'payment_made',
+            confidence: 1,
+            lineItems: [],
+          },
+        },
+      });
+
+      const result = await h.service.update(
+        SCAN_ID,
+        {
+          total: 870.4,
+          subtotal: 870.4,
+          issueDate: '2026-09-29',
+          description: '  Lion Plumbing invoice  ',
+          transactionDirection: 'payment_received',
+        },
+        { id: 7 },
+      );
+
+      expect(result.extractedData).toMatchObject({
+        total: 870.4,
+        subtotal: 870.4,
+        issueDate: '2026-09-29',
+        description: 'Lion Plumbing invoice',
+        transactionDirection: 'payment_received',
+      });
+      // Ya estaba en needs_review: corregir a mano no debe ensuciarlo con el
+      // aviso de "los datos se escribieron a mano".
+      expect(result.warnings).toEqual([]);
+    });
+
     it('records the user who saved the change as the last editor', async () => {
       const h = harness();
       const result = await h.service.update(SCAN_ID, { comments: 'Checked' }, { id: 7 });
@@ -399,6 +458,109 @@ describe('InvoiceScansService', () => {
       expect(result.map((scan) => scan.id)).toEqual(['pending', 'done']);
       expect(result[1].enteredAt).toEqual(new Date('2026-09-20T00:00:00Z'));
       expect(result[0]).not.toHaveProperty('fileKey');
+    });
+  });
+
+  describe('remove', () => {
+    it('deletes the record and its stored file', async () => {
+      const h = harness();
+
+      const result = await h.service.remove(SCAN_ID);
+
+      expect(result).toEqual({ id: SCAN_ID, deleted: true });
+      expect(h.s3.deleteObject).toHaveBeenCalledWith(h.scan.fileKey);
+      expect(h.scans.delete).toHaveBeenCalledWith({ id: SCAN_ID });
+    });
+
+    it('deletes a record already entered in QuickBooks', async () => {
+      const h = harness({
+        scan: { status: 'needs_review', enteredAt: new Date('2026-09-20T00:00:00Z') },
+      });
+
+      await expect(h.service.remove(SCAN_ID)).resolves.toEqual({
+        id: SCAN_ID,
+        deleted: true,
+      });
+    });
+
+    it('deletes the record even when the file could not be removed', async () => {
+      const h = harness();
+      h.s3.deleteObject.mockRejectedValue(new Error('S3 down'));
+
+      await expect(h.service.remove(SCAN_ID)).resolves.toMatchObject({ deleted: true });
+      expect(h.scans.delete).toHaveBeenCalled();
+    });
+
+    it('refuses to delete while the file is being scanned', async () => {
+      const h = harness({ scan: { status: 'processing' } });
+      await expect(h.service.remove(SCAN_ID)).rejects.toThrow('being scanned');
+      expect(h.scans.delete).not.toHaveBeenCalled();
+    });
+
+    it('deletes a manual transaction with no file without touching S3', async () => {
+      const h = harness({ scan: { fileKey: null, recordType: 'transaction' } });
+
+      await h.service.remove(SCAN_ID);
+
+      expect(h.s3.deleteObject).not.toHaveBeenCalled();
+      expect(h.scans.delete).toHaveBeenCalledWith({ id: SCAN_ID });
+    });
+  });
+
+  describe('getDownloadUrl', () => {
+    it('signs a URL that forces the download with the stored file name', async () => {
+      const h = harness();
+
+      const result = await h.service.getDownloadUrl(SCAN_ID);
+
+      expect(result).toEqual({ url: 'https://signed/download', fileName: 'invoice.jpg' });
+      expect(h.s3.getPresignedGetUrl).toHaveBeenCalledWith(
+        expect.objectContaining({ downloadFileName: 'invoice.jpg' }),
+      );
+    });
+
+    it('adds an extension when the stored name has none', async () => {
+      const h = harness({
+        scan: { fileName: 'Lion Plumbing payment', contentType: 'application/pdf' },
+      });
+
+      const result = await h.service.getDownloadUrl(SCAN_ID);
+
+      expect(result.fileName).toBe('Lion Plumbing payment.pdf');
+    });
+
+    it('fails when the record has no document', async () => {
+      const h = harness({ scan: { fileKey: null } });
+      await expect(h.service.getDownloadUrl(SCAN_ID)).rejects.toThrow(
+        'no document to download',
+      );
+    });
+  });
+
+  describe('attachFile', () => {
+    const file = {
+      fileName: 'receipt.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 2048,
+    };
+
+    it('attaches a document to a manual transaction and returns the upload URL', async () => {
+      const h = harness({ scan: { fileKey: null, recordType: 'transaction', status: 'needs_review' } });
+
+      const result = await h.service.attachFile(SCAN_ID, file, { id: 11 });
+
+      expect(result.uploadUrl).toBe('https://signed/put');
+      expect(result.hasFile).toBe(true);
+      expect(result.fileName).toBe('receipt.pdf');
+      expect(result.contentType).toBe('application/pdf');
+      expect(result.updatedBy).toBe(11);
+    });
+
+    it('refuses to attach a second document', async () => {
+      const h = harness({ scan: { status: 'needs_review' } });
+      await expect(h.service.attachFile(SCAN_ID, file, { id: 11 })).rejects.toThrow(
+        'already has a document',
+      );
     });
   });
 });

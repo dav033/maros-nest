@@ -248,3 +248,72 @@ describe('ProjectsService.findAllFinancials caching', () => {
     expect(qboEnrichment.enrichProjectsSummary.mock.calls).toHaveLength(2);
   });
 });
+
+describe('ProjectsService.updateProjectEstimate', () => {
+  const buildService = (opts: { syncFails?: boolean; leadNumber?: string | null } = {}) => {
+    const projectRepo = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 7,
+        lead: { id: 3, leadNumber: opts.leadNumber === undefined ? '001-0726' : opts.leadNumber },
+      }),
+    };
+    const leadRepo = { update: jest.fn().mockResolvedValue({ affected: 1 }) };
+    const qboFinancials = {
+      setProjectEstimateTotal: opts.syncFails
+        ? jest.fn().mockRejectedValue(new Error('El proyecto no está vinculado a un job'))
+        : jest.fn().mockResolvedValue({ entityId: 'estimate-1' }),
+      getProjectFinancials: jest
+        .fn()
+        .mockResolvedValue([{ projectNumber: '001-0726', estimatedAmount: 870.4 }]),
+    };
+    const service = new ProjectsService(
+      {} as never,
+      projectRepo as never,
+      leadRepo as never,
+      {} as never,
+      {} as never,
+      qboFinancials as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    return { service, leadRepo, qboFinancials };
+  };
+
+  it('saves the amount on the lead and reports the QuickBooks sync', async () => {
+    const { service, leadRepo, qboFinancials } = buildService();
+
+    const result = await service.updateProjectEstimate(7, 870.404);
+
+    expect(leadRepo.update).toHaveBeenCalledWith({ id: 3 }, { estimate: 870.4 });
+    expect(qboFinancials.setProjectEstimateTotal).toHaveBeenCalledWith('001-0726', 870.4);
+    expect(result).toMatchObject({ savedAmount: 870.4, synced: true, syncError: null });
+  });
+
+  it('keeps the saved amount when QuickBooks refuses the sync', async () => {
+    const { service, leadRepo } = buildService({ syncFails: true });
+
+    const result = await service.updateProjectEstimate(7, 1200);
+
+    expect(leadRepo.update).toHaveBeenCalledWith({ id: 3 }, { estimate: 1200 });
+    expect(result.savedAmount).toBe(1200);
+    expect(result.synced).toBe(false);
+    expect(result.syncError).toContain('no está vinculado');
+  });
+
+  it('saves without syncing when the project has no lead number', async () => {
+    const { service, leadRepo, qboFinancials } = buildService({ leadNumber: null });
+
+    const result = await service.updateProjectEstimate(7, 500);
+
+    expect(leadRepo.update).toHaveBeenCalledWith({ id: 3 }, { estimate: 500 });
+    expect(qboFinancials.setProjectEstimateTotal).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ savedAmount: 500, synced: false });
+  });
+
+  it('rejects a negative amount before touching anything', async () => {
+    const { service, leadRepo } = buildService();
+    await expect(service.updateProjectEstimate(7, -1)).rejects.toThrow();
+    expect(leadRepo.update).not.toHaveBeenCalled();
+  });
+});
