@@ -1,4 +1,8 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import type { AuthenticatedUser } from '../../common/auth/authenticated-user';
 import type { TaskActor } from '../tasks/task-management/services/task-actor';
 import { UsersRepository } from '../users/user-management/repositories/users.repository';
@@ -57,5 +61,31 @@ export class McpActorService {
   async taskActor(): Promise<TaskActor> {
     const { id } = await this.authenticatedUser();
     return { id, canDelete: false };
+  }
+
+  /**
+   * Actuar **como otra persona**. Es el único sitio del MCP donde eso pasa, a
+   * propósito: si algún día hay que auditarlo o quitarlo, está aquí.
+   *
+   * Existe por Google Calendar y nada más. La conexión con Google es por usuario
+   * (`google_calendar_connections.user_id`) y el usuario de sistema del MCP no
+   * puede autorizarla nunca, porque no puede iniciar sesión. O las tools de
+   * calendario actúan como alguien con conexión propia, o fallan siempre.
+   *
+   * Lo que implica, sin rodeos: la reunión se crea en el calendario de Google de
+   * esa persona y los invitados reciben el correo de su parte. Por eso el
+   * `userId` es un parámetro explícito de cada tool y no un valor por defecto.
+   *
+   * Se rechaza suplantar una cuenta desactivada: si alguien ya no tiene acceso,
+   * el agente tampoco debe actuar en su nombre.
+   */
+  async userAs(userId: number): Promise<AuthenticatedUser> {
+    const user = await this.users.findById(userId);
+    if (!user.isActive) {
+      throw new BadRequestException(
+        `La cuenta de ${user.email} está desactivada; el MCP no actúa en nombre de alguien sin acceso.`,
+      );
+    }
+    return this.users.toAuthenticatedUser(user);
   }
 }

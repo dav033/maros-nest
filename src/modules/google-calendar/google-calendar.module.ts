@@ -20,5 +20,6 @@ import { GoogleCalendarService } from './google-calendar.service';
   ],
   controllers: [GoogleCalendarController],
   providers: [GoogleCalendarService],
+  exports: [GoogleCalendarService],
 })
 export class GoogleCalendarModule {}
