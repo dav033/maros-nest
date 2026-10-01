@@ -21,6 +21,11 @@ import { UserInvitationsService } from '../../users/user-management/services/use
 import { QuickbooksProjectImportService } from '../../projects/project-management/services/quickbooks-project-import.service';
 import { ProjectQboReportService } from '../../projects/project-management/services/project-qbo-report.service';
 import { QuickbooksConnectionStatusService } from '../../quickbooks/services/core/quickbooks-connection-status.service';
+import { TaskLabelsService } from '../../tasks/task-management/services/task-labels.service';
+import { TaskTemplatesService } from '../../tasks/task-management/services/task-templates.service';
+import { TaskWorkspacesService } from '../../task-workspaces/services/task-workspaces.service';
+import { TaskWorkspaceFoldersService } from '../../task-workspaces/services/task-workspace-folders.service';
+import { TaskWorkspaceAssignmentService } from '../../task-workspaces/services/task-workspace-assignment.service';
 import { McpActorService } from '../mcp-actor.service';
 import { NoteTagsService } from '../../notes/note-management/services/note-tags.service';
 
@@ -62,6 +67,11 @@ export type McpToolDeps = {
   noteTagsService: NoteTagsService;
   tasksService: TasksService;
   taskCommentsService: TaskCommentsService;
+  taskLabelsService: TaskLabelsService;
+  taskTemplatesService: TaskTemplatesService;
+  taskWorkspacesService: TaskWorkspacesService;
+  taskWorkspaceFolders: TaskWorkspaceFoldersService;
+  taskWorkspaceAssignment: TaskWorkspaceAssignmentService;
   usersService: UsersService;
   rolesService: RolesService;
   userInvitationsService: UserInvitationsService;

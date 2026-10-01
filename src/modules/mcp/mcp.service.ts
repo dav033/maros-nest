@@ -21,6 +21,11 @@ import { UserInvitationsService } from '../users/user-management/services/user-i
 import { QuickbooksProjectImportService } from '../projects/project-management/services/quickbooks-project-import.service';
 import { ProjectQboReportService } from '../projects/project-management/services/project-qbo-report.service';
 import { QuickbooksConnectionStatusService } from '../quickbooks/services/core/quickbooks-connection-status.service';
+import { TaskLabelsService } from '../tasks/task-management/services/task-labels.service';
+import { TaskTemplatesService } from '../tasks/task-management/services/task-templates.service';
+import { TaskWorkspacesService } from '../task-workspaces/services/task-workspaces.service';
+import { TaskWorkspaceFoldersService } from '../task-workspaces/services/task-workspace-folders.service';
+import { TaskWorkspaceAssignmentService } from '../task-workspaces/services/task-workspace-assignment.service';
 import { McpActorService } from './mcp-actor.service';
 import { TrelloService } from '../trello/services/trello.service';
 import { NotesService } from '../notes/note-management/notes.service';
@@ -53,6 +58,7 @@ import { registerInvoiceScanTools } from './tools/invoice-scans';
 import { registerTaskTools } from './tools/tasks';
 import { registerUserTools } from './tools/users';
 import { registerQboImportTools } from './tools/qbo-import';
+import { registerTaskWorkspaceTools } from './tools/task-workspaces';
 import { registerS3Tools } from './tools/s3';
 import { registerTrelloTools } from './tools/trello';
 import { registerNoteTools } from './tools/notes';
@@ -79,6 +85,11 @@ export class McpService {
     private readonly noteTagsService: NoteTagsService,
     private readonly tasksService: TasksService,
     private readonly taskCommentsService: TaskCommentsService,
+    private readonly taskLabelsService: TaskLabelsService,
+    private readonly taskTemplatesService: TaskTemplatesService,
+    private readonly taskWorkspacesService: TaskWorkspacesService,
+    private readonly taskWorkspaceFolders: TaskWorkspaceFoldersService,
+    private readonly taskWorkspaceAssignment: TaskWorkspaceAssignmentService,
     private readonly usersService: UsersService,
     private readonly rolesService: RolesService,
     private readonly userInvitationsService: UserInvitationsService,
@@ -113,6 +124,11 @@ export class McpService {
       noteTagsService: this.noteTagsService,
       tasksService: this.tasksService,
       taskCommentsService: this.taskCommentsService,
+      taskLabelsService: this.taskLabelsService,
+      taskTemplatesService: this.taskTemplatesService,
+      taskWorkspacesService: this.taskWorkspacesService,
+      taskWorkspaceFolders: this.taskWorkspaceFolders,
+      taskWorkspaceAssignment: this.taskWorkspaceAssignment,
       usersService: this.usersService,
       rolesService: this.rolesService,
       userInvitationsService: this.userInvitationsService,
@@ -145,6 +161,7 @@ export class McpService {
     registerTaskTools(server, deps);
     registerUserTools(server, deps);
     registerQboImportTools(server, deps);
+    registerTaskWorkspaceTools(server, deps);
 
     return server;
   }

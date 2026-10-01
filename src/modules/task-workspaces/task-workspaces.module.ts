@@ -24,6 +24,13 @@ import { TaskWorkspaceFoldersRepository } from './repositories/task-workspace-fo
   imports: [TypeOrmModule.forFeature([TaskWorkspace, TaskWorkspaceFolder, TaskWorkspaceLink, TaskFile, Task, Lead, Project, Contact, Company])],
   controllers: [TaskWorkspaceOptionsController, TaskWorkspacesController, TaskWorkspaceFoldersController],
   providers: [TaskWorkspacesRepository, TaskWorkspaceFoldersRepository, TaskWorkspaceAssignmentService, TaskWorkspaceMapper, TaskWorkspacesService, TaskWorkspaceFoldersService, TaskWorkspaceLinkResolverService],
-  exports: [TaskWorkspacesRepository, TaskWorkspaceAssignmentService, TaskWorkspaceMapper, TypeOrmModule],
+  exports: [
+    TaskWorkspacesRepository,
+    TaskWorkspaceAssignmentService,
+    TaskWorkspacesService,
+    TaskWorkspaceFoldersService,
+    TaskWorkspaceMapper,
+    TypeOrmModule,
+  ],
 })
 export class TaskWorkspacesModule {}
