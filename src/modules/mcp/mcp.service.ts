@@ -71,6 +71,7 @@ import { registerTaskWorkspaceTools } from './tools/task-workspaces';
 import { registerAnalyticsTools } from './tools/analytics';
 import { registerTaskAdvancedTools } from './tools/tasks-advanced';
 import { registerPlatformTools } from './tools/platform';
+import { registerNoteAdvancedTools } from './tools/notes-advanced';
 import { registerS3Tools } from './tools/s3';
 import { registerTrelloTools } from './tools/trello';
 import { registerNoteTools } from './tools/notes';
@@ -195,6 +196,7 @@ export class McpService {
     registerAnalyticsTools(server, deps);
     registerTaskAdvancedTools(server, deps);
     registerPlatformTools(server, deps);
+    registerNoteAdvancedTools(server, deps);
 
     return server;
   }
