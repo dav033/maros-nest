@@ -48,6 +48,11 @@ import { ProjectQboLinkEvent } from './project-management/entities/project-qbo-l
     QuickbooksProjectImportService,
     ProjectQboReportService,
   ],
-  exports: [ProjectsService, ProjectTypesService],
+  exports: [
+    ProjectsService,
+    ProjectTypesService,
+    QuickbooksProjectImportService,
+    ProjectQboReportService,
+  ],
 })
 export class ProjectsModule {}

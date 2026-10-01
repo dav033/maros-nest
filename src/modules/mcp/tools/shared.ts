@@ -18,6 +18,9 @@ import { TaskCommentsService } from '../../tasks/task-management/services/task-c
 import { UsersService } from '../../users/user-management/users.service';
 import { RolesService } from '../../users/user-management/services/roles.service';
 import { UserInvitationsService } from '../../users/user-management/services/user-invitations.service';
+import { QuickbooksProjectImportService } from '../../projects/project-management/services/quickbooks-project-import.service';
+import { ProjectQboReportService } from '../../projects/project-management/services/project-qbo-report.service';
+import { QuickbooksConnectionStatusService } from '../../quickbooks/services/core/quickbooks-connection-status.service';
 import { McpActorService } from '../mcp-actor.service';
 import { NoteTagsService } from '../../notes/note-management/services/note-tags.service';
 
@@ -62,6 +65,9 @@ export type McpToolDeps = {
   usersService: UsersService;
   rolesService: RolesService;
   userInvitationsService: UserInvitationsService;
+  qboProjectImport: QuickbooksProjectImportService;
+  projectQboReport: ProjectQboReportService;
+  qboConnectionStatus: QuickbooksConnectionStatusService;
   /** Quien firma las escrituras: el MCP no tiene sesion de persona. */
   mcpActor: McpActorService;
 };

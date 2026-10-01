@@ -18,6 +18,9 @@ import { TaskCommentsService } from '../tasks/task-management/services/task-comm
 import { UsersService } from '../users/user-management/users.service';
 import { RolesService } from '../users/user-management/services/roles.service';
 import { UserInvitationsService } from '../users/user-management/services/user-invitations.service';
+import { QuickbooksProjectImportService } from '../projects/project-management/services/quickbooks-project-import.service';
+import { ProjectQboReportService } from '../projects/project-management/services/project-qbo-report.service';
+import { QuickbooksConnectionStatusService } from '../quickbooks/services/core/quickbooks-connection-status.service';
 import { McpActorService } from './mcp-actor.service';
 import { TrelloService } from '../trello/services/trello.service';
 import { NotesService } from '../notes/note-management/notes.service';
@@ -49,6 +52,7 @@ import { registerQboProxyTools } from './tools/qbo-proxy';
 import { registerInvoiceScanTools } from './tools/invoice-scans';
 import { registerTaskTools } from './tools/tasks';
 import { registerUserTools } from './tools/users';
+import { registerQboImportTools } from './tools/qbo-import';
 import { registerS3Tools } from './tools/s3';
 import { registerTrelloTools } from './tools/trello';
 import { registerNoteTools } from './tools/notes';
@@ -78,6 +82,9 @@ export class McpService {
     private readonly usersService: UsersService,
     private readonly rolesService: RolesService,
     private readonly userInvitationsService: UserInvitationsService,
+    private readonly qboProjectImport: QuickbooksProjectImportService,
+    private readonly projectQboReport: ProjectQboReportService,
+    private readonly qboConnectionStatus: QuickbooksConnectionStatusService,
     private readonly mcpActor: McpActorService,
   ) {}
 
@@ -109,6 +116,9 @@ export class McpService {
       usersService: this.usersService,
       rolesService: this.rolesService,
       userInvitationsService: this.userInvitationsService,
+      qboProjectImport: this.qboProjectImport,
+      projectQboReport: this.projectQboReport,
+      qboConnectionStatus: this.qboConnectionStatus,
       mcpActor: this.mcpActor,
     };
 
@@ -134,6 +144,7 @@ export class McpService {
     registerNoteTools(server, deps);
     registerTaskTools(server, deps);
     registerUserTools(server, deps);
+    registerQboImportTools(server, deps);
 
     return server;
   }

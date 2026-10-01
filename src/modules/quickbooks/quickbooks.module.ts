@@ -82,6 +82,7 @@ import { Project } from '../../entities/project.entity';
   ],
   exports: [
     TokenCryptoService,
+    QuickbooksConnectionStatusService,
     InvoiceScansService,
     QuickbooksAuthService,
     QuickbooksApiService,
