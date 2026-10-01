@@ -92,6 +92,12 @@ import { TaskSavedViewsController } from './task-management/task-saved-views.con
     TaskDependenciesService,
     TaskSavedViewsService,
   ],
-  exports: [TasksRepository, TasksService, TaskTemplatesService, TaskWorkspacesModule],
+  exports: [
+    TasksRepository,
+    TasksService,
+    TaskCommentsService,
+    TaskTemplatesService,
+    TaskWorkspacesModule,
+  ],
 })
 export class TasksModule {}

@@ -13,6 +13,12 @@ import { QuickbooksVendorMatchingService } from '../quickbooks/services/vendor/q
 import { QuickbooksNormalizerService } from '../quickbooks/services/core/quickbooks-normalizer.service';
 import { InvoiceScansService } from '../quickbooks/services/invoice-scans.service';
 import { S3Service } from '../s3/services/s3.service';
+import { TasksService } from '../tasks/task-management/tasks.service';
+import { TaskCommentsService } from '../tasks/task-management/services/task-comments.service';
+import { UsersService } from '../users/user-management/users.service';
+import { RolesService } from '../users/user-management/services/roles.service';
+import { UserInvitationsService } from '../users/user-management/services/user-invitations.service';
+import { McpActorService } from './mcp-actor.service';
 import { TrelloService } from '../trello/services/trello.service';
 import { NotesService } from '../notes/note-management/notes.service';
 import { NoteTagsService } from '../notes/note-management/services/note-tags.service';
@@ -41,6 +47,8 @@ import {
 } from './tools/qbo-reports';
 import { registerQboProxyTools } from './tools/qbo-proxy';
 import { registerInvoiceScanTools } from './tools/invoice-scans';
+import { registerTaskTools } from './tools/tasks';
+import { registerUserTools } from './tools/users';
 import { registerS3Tools } from './tools/s3';
 import { registerTrelloTools } from './tools/trello';
 import { registerNoteTools } from './tools/notes';
@@ -65,6 +73,12 @@ export class McpService {
     private readonly trelloService: TrelloService,
     private readonly notesService: NotesService,
     private readonly noteTagsService: NoteTagsService,
+    private readonly tasksService: TasksService,
+    private readonly taskCommentsService: TaskCommentsService,
+    private readonly usersService: UsersService,
+    private readonly rolesService: RolesService,
+    private readonly userInvitationsService: UserInvitationsService,
+    private readonly mcpActor: McpActorService,
   ) {}
 
   createServer(): McpServer {
@@ -90,6 +104,12 @@ export class McpService {
       trelloService: this.trelloService,
       notesService: this.notesService,
       noteTagsService: this.noteTagsService,
+      tasksService: this.tasksService,
+      taskCommentsService: this.taskCommentsService,
+      usersService: this.usersService,
+      rolesService: this.rolesService,
+      userInvitationsService: this.userInvitationsService,
+      mcpActor: this.mcpActor,
     };
 
     registerLeadTools(server, deps);
@@ -112,6 +132,8 @@ export class McpService {
     registerS3Tools(server, deps);
     registerTrelloTools(server, deps);
     registerNoteTools(server, deps);
+    registerTaskTools(server, deps);
+    registerUserTools(server, deps);
 
     return server;
   }

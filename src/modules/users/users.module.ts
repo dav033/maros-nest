@@ -38,6 +38,12 @@ import { UserMapper } from './user-management/mappers/user.mapper';
     UserInvitationNotificationsService,
     UserMapper,
   ],
-  exports: [UsersService, RolesService, UsersRepository, RolesRepository],
+  exports: [
+    UsersService,
+    RolesService,
+    UserInvitationsService,
+    UsersRepository,
+    RolesRepository,
+  ],
 })
 export class UsersModule {}

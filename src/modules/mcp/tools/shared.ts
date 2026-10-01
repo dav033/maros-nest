@@ -13,6 +13,12 @@ import { InvoiceScansService } from '../../quickbooks/services/invoice-scans.ser
 import { S3Service } from '../../s3/services/s3.service';
 import { TrelloService } from '../../trello/services/trello.service';
 import { NotesService } from '../../notes/note-management/notes.service';
+import { TasksService } from '../../tasks/task-management/tasks.service';
+import { TaskCommentsService } from '../../tasks/task-management/services/task-comments.service';
+import { UsersService } from '../../users/user-management/users.service';
+import { RolesService } from '../../users/user-management/services/roles.service';
+import { UserInvitationsService } from '../../users/user-management/services/user-invitations.service';
+import { McpActorService } from '../mcp-actor.service';
 import { NoteTagsService } from '../../notes/note-management/services/note-tags.service';
 
 export type QboMcpPayload = {
@@ -51,6 +57,13 @@ export type McpToolDeps = {
   trelloService: TrelloService;
   notesService: NotesService;
   noteTagsService: NoteTagsService;
+  tasksService: TasksService;
+  taskCommentsService: TaskCommentsService;
+  usersService: UsersService;
+  rolesService: RolesService;
+  userInvitationsService: UserInvitationsService;
+  /** Quien firma las escrituras: el MCP no tiene sesion de persona. */
+  mcpActor: McpActorService;
 };
 
 export function jsonContent(data: unknown) {

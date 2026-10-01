@@ -7,9 +7,11 @@ import { QuickbooksModule } from '../quickbooks/quickbooks.module';
 import { S3Module } from '../s3/s3.module';
 import { TrelloModule } from '../trello/trello.module';
 import { NotesModule } from '../notes/notes.module';
+import { TasksModule } from '../tasks/tasks.module';
 import { McpController } from './mcp.controller';
 import { McpService } from './mcp.service';
 import { McpAuthGuard } from './guards/mcp-auth.guard';
+import { McpActorService } from './mcp-actor.service';
 
 @Module({
   imports: [
@@ -21,8 +23,9 @@ import { McpAuthGuard } from './guards/mcp-auth.guard';
     S3Module,
     TrelloModule,
     NotesModule,
+    TasksModule,
   ],
   controllers: [McpController],
-  providers: [McpService, McpAuthGuard],
+  providers: [McpService, McpAuthGuard, McpActorService],
 })
 export class McpModule {}
