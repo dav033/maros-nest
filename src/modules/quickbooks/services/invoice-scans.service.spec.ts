@@ -72,7 +72,12 @@ function mockOpenAi(payload: Record<string, unknown>) {
 
 interface Harness {
   scan: InvoiceScan;
-  scans: { findOne: jest.Mock; save: jest.Mock; delete: jest.Mock };
+  scans: {
+    findOne: jest.Mock;
+    create: jest.Mock;
+    save: jest.Mock;
+    delete: jest.Mock;
+  };
   s3: Record<string, jest.Mock>;
   qboApi: { queryAll: jest.Mock };
   financials: { getDefaultRealmId: jest.Mock };
@@ -94,6 +99,7 @@ function harness(opts: {
   const savedStatuses: string[] = [];
   const scans = {
     findOne: jest.fn().mockResolvedValue(scan),
+    create: jest.fn().mockImplementation((value: InvoiceScan) => value),
     save: jest.fn().mockImplementation((value: InvoiceScan) => {
       savedStatuses.push(value.status);
       return Promise.resolve(value);
@@ -561,6 +567,46 @@ describe('InvoiceScansService', () => {
       await expect(h.service.attachFile(SCAN_ID, file, { id: 11 })).rejects.toThrow(
         'already has a document',
       );
+    });
+  });
+
+  describe('createManualTransaction', () => {
+    const input = {
+      description: 'Deposit for the Smith roof',
+      direction: 'payment_received' as const,
+      transactionDate: '2026-09-30',
+      amount: 1500,
+    };
+
+    it('records the editor when a person creates it', async () => {
+      const h = harness();
+
+      await h.service.createManualTransaction(input, { id: 7 });
+
+      expect(h.scans.create).toHaveBeenCalledWith(
+        expect.objectContaining({ recordType: 'transaction', updatedBy: 7 }),
+      );
+    });
+
+    // El MCP se autentica con un token compartido, no con la sesion de una
+    // persona: no hay a quien atribuir la escritura y el campo queda nulo. Sin
+    // esto, `actor.id` reventaba con "cannot read properties of undefined".
+    it('leaves the editor empty when there is no actor, as the MCP has none', async () => {
+      const h = harness();
+
+      await h.service.createManualTransaction(input);
+
+      expect(h.scans.create).toHaveBeenCalledWith(
+        expect.objectContaining({ updatedBy: null }),
+      );
+    });
+
+    it('refuses a project number that does not exist', async () => {
+      const h = harness({ leadExists: false });
+
+      await expect(
+        h.service.createManualTransaction({ ...input, projectNumber: '999-9999' }),
+      ).rejects.toThrow('No project found with number 999-9999');
     });
   });
 });

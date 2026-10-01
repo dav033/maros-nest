@@ -233,7 +233,7 @@ export class InvoiceScansService {
 
   async createManualTransaction(
     input: CreateManualInvoiceTransactionDto,
-    actor: Pick<AuthenticatedUser, 'id'>,
+    actor?: Pick<AuthenticatedUser, 'id'>,
   ): Promise<InvoiceScanView> {
     const projectNumber = input.projectNumber?.trim() || null;
     if (
@@ -275,7 +275,7 @@ export class InvoiceScansService {
       warnings: [],
       enteredAt: null,
       enteredBy: null,
-      updatedBy: actor.id,
+      updatedBy: actor?.id ?? null,
       comments: null,
       notifiedAt: null,
       remindedAt: null,
