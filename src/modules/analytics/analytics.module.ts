@@ -20,6 +20,12 @@ import { AnalyticsProjectsService } from './services/analytics-projects.service'
     QuickbooksModule,
   ],
   controllers: [AnalyticsController],
+  exports: [
+    AnalyticsOverviewService,
+    AnalyticsPipelineService,
+    AnalyticsFinancialService,
+    AnalyticsProjectsService,
+  ],
   providers: [
     AnalyticsOverviewService,
     AnalyticsPipelineService,

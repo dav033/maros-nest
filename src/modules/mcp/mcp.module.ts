@@ -8,6 +8,7 @@ import { S3Module } from '../s3/s3.module';
 import { TrelloModule } from '../trello/trello.module';
 import { NotesModule } from '../notes/notes.module';
 import { TasksModule } from '../tasks/tasks.module';
+import { AnalyticsModule } from '../analytics/analytics.module';
 import { McpController } from './mcp.controller';
 import { McpService } from './mcp.service';
 import { McpAuthGuard } from './guards/mcp-auth.guard';
@@ -24,6 +25,7 @@ import { McpActorService } from './mcp-actor.service';
     TrelloModule,
     NotesModule,
     TasksModule,
+    AnalyticsModule,
   ],
   controllers: [McpController],
   providers: [McpService, McpAuthGuard, McpActorService],

@@ -26,6 +26,10 @@ import { TaskTemplatesService } from '../../tasks/task-management/services/task-
 import { TaskWorkspacesService } from '../../task-workspaces/services/task-workspaces.service';
 import { TaskWorkspaceFoldersService } from '../../task-workspaces/services/task-workspace-folders.service';
 import { TaskWorkspaceAssignmentService } from '../../task-workspaces/services/task-workspace-assignment.service';
+import { AnalyticsOverviewService } from '../../analytics/services/analytics-overview.service';
+import { AnalyticsPipelineService } from '../../analytics/services/analytics-pipeline.service';
+import { AnalyticsFinancialService } from '../../analytics/services/analytics-financial.service';
+import { AnalyticsProjectsService } from '../../analytics/services/analytics-projects.service';
 import { McpActorService } from '../mcp-actor.service';
 import { NoteTagsService } from '../../notes/note-management/services/note-tags.service';
 
@@ -75,6 +79,10 @@ export type McpToolDeps = {
   usersService: UsersService;
   rolesService: RolesService;
   userInvitationsService: UserInvitationsService;
+  analyticsOverview: AnalyticsOverviewService;
+  analyticsPipeline: AnalyticsPipelineService;
+  analyticsFinancial: AnalyticsFinancialService;
+  analyticsProjects: AnalyticsProjectsService;
   qboProjectImport: QuickbooksProjectImportService;
   projectQboReport: ProjectQboReportService;
   qboConnectionStatus: QuickbooksConnectionStatusService;

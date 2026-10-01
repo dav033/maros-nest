@@ -26,6 +26,10 @@ import { TaskTemplatesService } from '../tasks/task-management/services/task-tem
 import { TaskWorkspacesService } from '../task-workspaces/services/task-workspaces.service';
 import { TaskWorkspaceFoldersService } from '../task-workspaces/services/task-workspace-folders.service';
 import { TaskWorkspaceAssignmentService } from '../task-workspaces/services/task-workspace-assignment.service';
+import { AnalyticsOverviewService } from '../analytics/services/analytics-overview.service';
+import { AnalyticsPipelineService } from '../analytics/services/analytics-pipeline.service';
+import { AnalyticsFinancialService } from '../analytics/services/analytics-financial.service';
+import { AnalyticsProjectsService } from '../analytics/services/analytics-projects.service';
 import { McpActorService } from './mcp-actor.service';
 import { TrelloService } from '../trello/services/trello.service';
 import { NotesService } from '../notes/note-management/notes.service';
@@ -59,6 +63,7 @@ import { registerTaskTools } from './tools/tasks';
 import { registerUserTools } from './tools/users';
 import { registerQboImportTools } from './tools/qbo-import';
 import { registerTaskWorkspaceTools } from './tools/task-workspaces';
+import { registerAnalyticsTools } from './tools/analytics';
 import { registerS3Tools } from './tools/s3';
 import { registerTrelloTools } from './tools/trello';
 import { registerNoteTools } from './tools/notes';
@@ -93,6 +98,10 @@ export class McpService {
     private readonly usersService: UsersService,
     private readonly rolesService: RolesService,
     private readonly userInvitationsService: UserInvitationsService,
+    private readonly analyticsOverview: AnalyticsOverviewService,
+    private readonly analyticsPipeline: AnalyticsPipelineService,
+    private readonly analyticsFinancial: AnalyticsFinancialService,
+    private readonly analyticsProjects: AnalyticsProjectsService,
     private readonly qboProjectImport: QuickbooksProjectImportService,
     private readonly projectQboReport: ProjectQboReportService,
     private readonly qboConnectionStatus: QuickbooksConnectionStatusService,
@@ -132,6 +141,10 @@ export class McpService {
       usersService: this.usersService,
       rolesService: this.rolesService,
       userInvitationsService: this.userInvitationsService,
+      analyticsOverview: this.analyticsOverview,
+      analyticsPipeline: this.analyticsPipeline,
+      analyticsFinancial: this.analyticsFinancial,
+      analyticsProjects: this.analyticsProjects,
       qboProjectImport: this.qboProjectImport,
       projectQboReport: this.projectQboReport,
       qboConnectionStatus: this.qboConnectionStatus,
@@ -162,6 +175,7 @@ export class McpService {
     registerUserTools(server, deps);
     registerQboImportTools(server, deps);
     registerTaskWorkspaceTools(server, deps);
+    registerAnalyticsTools(server, deps);
 
     return server;
   }
