@@ -26,6 +26,11 @@ import { TaskTemplatesService } from '../../tasks/task-management/services/task-
 import { TaskWorkspacesService } from '../../task-workspaces/services/task-workspaces.service';
 import { TaskWorkspaceFoldersService } from '../../task-workspaces/services/task-workspace-folders.service';
 import { TaskWorkspaceAssignmentService } from '../../task-workspaces/services/task-workspace-assignment.service';
+import { TaskDependenciesService } from '../../tasks/task-management/services/task-dependencies.service';
+import { CompanyServicesService } from '../../companies/company-services/services/company-services.service';
+import { NotificationsService } from '../../notifications/notifications.service';
+import { ManagedFilesService } from '../../managed-files/managed-files.service';
+import { ReportsService } from '../../reports/restoration-visit/restoration-visit.service';
 import { AnalyticsOverviewService } from '../../analytics/services/analytics-overview.service';
 import { AnalyticsPipelineService } from '../../analytics/services/analytics-pipeline.service';
 import { AnalyticsFinancialService } from '../../analytics/services/analytics-financial.service';
@@ -72,6 +77,11 @@ export type McpToolDeps = {
   tasksService: TasksService;
   taskCommentsService: TaskCommentsService;
   taskLabelsService: TaskLabelsService;
+  taskDependencies: TaskDependenciesService;
+  companyServicesService: CompanyServicesService;
+  notificationsService: NotificationsService;
+  managedFilesService: ManagedFilesService;
+  restorationVisitService: ReportsService;
   taskTemplatesService: TaskTemplatesService;
   taskWorkspacesService: TaskWorkspacesService;
   taskWorkspaceFolders: TaskWorkspaceFoldersService;

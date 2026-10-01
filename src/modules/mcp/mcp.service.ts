@@ -26,6 +26,11 @@ import { TaskTemplatesService } from '../tasks/task-management/services/task-tem
 import { TaskWorkspacesService } from '../task-workspaces/services/task-workspaces.service';
 import { TaskWorkspaceFoldersService } from '../task-workspaces/services/task-workspace-folders.service';
 import { TaskWorkspaceAssignmentService } from '../task-workspaces/services/task-workspace-assignment.service';
+import { TaskDependenciesService } from '../tasks/task-management/services/task-dependencies.service';
+import { CompanyServicesService } from '../companies/company-services/services/company-services.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { ManagedFilesService } from '../managed-files/managed-files.service';
+import { ReportsService } from '../reports/restoration-visit/restoration-visit.service';
 import { AnalyticsOverviewService } from '../analytics/services/analytics-overview.service';
 import { AnalyticsPipelineService } from '../analytics/services/analytics-pipeline.service';
 import { AnalyticsFinancialService } from '../analytics/services/analytics-financial.service';
@@ -64,6 +69,8 @@ import { registerUserTools } from './tools/users';
 import { registerQboImportTools } from './tools/qbo-import';
 import { registerTaskWorkspaceTools } from './tools/task-workspaces';
 import { registerAnalyticsTools } from './tools/analytics';
+import { registerTaskAdvancedTools } from './tools/tasks-advanced';
+import { registerPlatformTools } from './tools/platform';
 import { registerS3Tools } from './tools/s3';
 import { registerTrelloTools } from './tools/trello';
 import { registerNoteTools } from './tools/notes';
@@ -91,6 +98,11 @@ export class McpService {
     private readonly tasksService: TasksService,
     private readonly taskCommentsService: TaskCommentsService,
     private readonly taskLabelsService: TaskLabelsService,
+    private readonly taskDependencies: TaskDependenciesService,
+    private readonly companyServicesService: CompanyServicesService,
+    private readonly notificationsService: NotificationsService,
+    private readonly managedFilesService: ManagedFilesService,
+    private readonly restorationVisitService: ReportsService,
     private readonly taskTemplatesService: TaskTemplatesService,
     private readonly taskWorkspacesService: TaskWorkspacesService,
     private readonly taskWorkspaceFolders: TaskWorkspaceFoldersService,
@@ -134,6 +146,11 @@ export class McpService {
       tasksService: this.tasksService,
       taskCommentsService: this.taskCommentsService,
       taskLabelsService: this.taskLabelsService,
+      taskDependencies: this.taskDependencies,
+      companyServicesService: this.companyServicesService,
+      notificationsService: this.notificationsService,
+      managedFilesService: this.managedFilesService,
+      restorationVisitService: this.restorationVisitService,
       taskTemplatesService: this.taskTemplatesService,
       taskWorkspacesService: this.taskWorkspacesService,
       taskWorkspaceFolders: this.taskWorkspaceFolders,
@@ -176,6 +193,8 @@ export class McpService {
     registerQboImportTools(server, deps);
     registerTaskWorkspaceTools(server, deps);
     registerAnalyticsTools(server, deps);
+    registerTaskAdvancedTools(server, deps);
+    registerPlatformTools(server, deps);
 
     return server;
   }
