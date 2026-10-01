@@ -3,6 +3,20 @@ import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { timingSafeEqual } from 'crypto';
 
+/**
+ * CUIDADO con el token en query string.
+ *
+ * Este guard acepta el token por `?token=` además de por cabecera, porque algunos
+ * clientes MCP sólo saben pasarlo en la URL. Las query strings acaban en sitios
+ * donde una cabecera no: logs de acceso del proxy, historial del navegador,
+ * referers.
+ *
+ * Eso era un riesgo moderado cuando el MCP sólo leía y escribía datos de negocio.
+ * Dejó de serlo: `update_user` y `create_role` permiten darse el rol admin, así
+ * que MCP_TOKEN vale hoy lo mismo que la contraseña de un administrador. Si hay
+ * que elegir, pásalo siempre por la cabecera Authorization y considera quitar
+ * `readQueryToken` cuando ningún cliente lo necesite.
+ */
 @Injectable()
 export class McpAuthGuard implements CanActivate {
   constructor(private readonly configService: ConfigService) {}

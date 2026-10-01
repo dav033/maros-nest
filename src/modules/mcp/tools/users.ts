@@ -1,26 +1,37 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import {
+  PERMISSIONS,
+  PERMISSION_GROUPS,
+} from '../../../common/auth/permissions';
 import { McpToolDeps } from './shared';
 import { registerMcpTool } from './tool-registration';
 
 /**
- * Usuarios e invitaciones.
+ * Usuarios, invitaciones, roles y permisos.
  *
- * Deliberadamente NO hay tool para cambiar el rol de alguien, ni para activarlo
- * o desactivarlo. El MCP se autentica con un único token compartido que no
- * identifica a nadie: si ese token se filtra, una tool de roles lo convertiría
- * en una llave de escalada de privilegios. Esos cambios siguen pasando por la
- * UI, con la sesión de una persona detrás.
+ * Alcance completo por decisión explícita del dueño del sistema: el MCP lo usa
+ * una sola persona, así que su token lleva todo el poder, incluido cambiar roles
+ * y activar o desactivar cuentas.
  *
- * Lo que sí hay es invitar, reenviar y revocar, que es lo que se hace a mano
- * unas pocas veces al mes. Las dos protecciones del servicio siguen en pie y no
- * se eluden por venir del MCP:
+ * Lo que eso implica, para que quede escrito: `MCP_TOKEN` pasa a ser una
+ * credencial de nivel administrador. Quien lo tenga puede darse a sí mismo el rol
+ * admin a través de `update_user`. Vale lo mismo que la contraseña de un admin y
+ * hay que tratarlo así — ver la nota sobre el token en query string en
+ * `guards/mcp-auth.guard.ts`.
+ *
+ * Las protecciones del servicio NO se eluden por venir del MCP, y es a propósito
+ * que no las toco:
+ *   - no se puede dejar el sistema sin ningún admin activo (`LastAdminException`);
  *   - un usuario `external` no puede recibir un rol con permisos efectivos;
- *   - el envío del correo ocurre dentro de la transacción, así que un SMTP
+ *   - un rol de sistema no se renombra ni se borra, y un rol en uso no se borra;
+ *   - al invitar, el correo se envía dentro de la transacción, así que un SMTP
  *     caído deshace la cuenta en vez de dejar a alguien invitado sin aviso.
  *
- * `invited_by_id` queda apuntando al usuario de sistema del MCP, nunca a una
- * persona que no apretó el botón.
+ * `invited_by_id` y el actor de los cambios apuntan al usuario de sistema del
+ * MCP, nunca a una persona que no apretó el botón. Como ese usuario nunca es el
+ * destinatario, `SelfModificationException` no salta por accidente — y el MCP
+ * tampoco puede bloquearse a sí mismo.
  */
 
 const userId = z.number().int().positive();
@@ -113,6 +124,92 @@ export function registerUserTools(server: McpServer, deps: McpToolDeps) {
       deps.userInvitationsService
         .revoke(id)
         .then(() => ({ userId: id, revoked: true })),
+  );
+
+  registerMcpTool(
+    server,
+    'update_user',
+    'Cambia el rol de un usuario, lo activa o lo desactiva. Desactivar le quita el acceso en la siguiente petición, no cuando caduque la caché. No se puede dejar el sistema sin ningún admin activo: esa llamada falla.',
+    {
+      id: userId,
+      roleId: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe('Rol nuevo; sale de list_roles'),
+      isActive: z
+        .boolean()
+        .optional()
+        .describe('false le quita el acceso; true lo devuelve'),
+    },
+    async ({
+      id,
+      ...changes
+    }: {
+      id: number;
+      roleId?: number;
+      isActive?: boolean;
+    }) => {
+      const actor = await deps.mcpActor.authenticatedUser();
+      return deps.usersService.update(id, changes, actor.id);
+    },
+  );
+
+  registerMcpTool(
+    server,
+    'list_permissions',
+    'El catálogo de permisos que acepta un rol, agrupado como en el editor. Los nombres de create_role y update_role salen de acá; uno desconocido hace fallar la llamada.',
+    {},
+    // Constantes en codigo, no hay nada que esperar: Promise.resolve en vez de
+    // un async sin await, que el lint marca con razon.
+    () => Promise.resolve({ permissions: PERMISSIONS, groups: PERMISSION_GROUPS }),
+  );
+
+  registerMcpTool(
+    server,
+    'create_role',
+    'Crea un rol con sus permisos. El nombre tiene que estar libre y cada permiso tiene que existir en list_permissions.',
+    {
+      name: z.string().trim().min(1).max(100),
+      permissions: z
+        .array(z.enum(PERMISSIONS as unknown as [string, ...string[]]))
+        .describe('Permisos exactos del rol; lista vacía = rol sin permisos'),
+      description: z.string().max(255).optional(),
+    },
+    async (input: { name: string; permissions: string[]; description?: string }) =>
+      deps.rolesService.create(input as never),
+  );
+
+  registerMcpTool(
+    server,
+    'update_role',
+    'Cambia nombre, descripción o permisos de un rol. CUIDADO: reescribe los permisos de TODOS los que tengan ese rol, no de uno. Los roles de sistema (admin, member) no se renombran.',
+    {
+      id: z.number().int().positive(),
+      name: z.string().trim().min(1).max(100).optional(),
+      description: z.string().max(255).optional(),
+      permissions: z
+        .array(z.enum(PERMISSIONS as unknown as [string, ...string[]]))
+        .optional()
+        .describe('Reemplaza la lista entera, no se suma a la que había'),
+    },
+    async ({ id, ...changes }: { id: number }) =>
+      deps.rolesService.update(id, changes as never),
+  );
+
+  registerMcpTool(
+    server,
+    'delete_role',
+    'Borra un rol. Falla si es de sistema o si algún usuario lo tiene asignado. Pide confirm=true porque no se puede deshacer.',
+    {
+      id: z.number().int().positive(),
+      confirm: z
+        .literal(true)
+        .describe('Debe ser exactamente true. Confirma un borrado irreversible.'),
+    },
+    async ({ id }: { id: number; confirm: true }) =>
+      deps.rolesService.delete(id).then(() => ({ id, deleted: true })),
   );
 
   registerMcpTool(

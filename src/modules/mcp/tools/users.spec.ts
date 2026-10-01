@@ -11,6 +11,9 @@ type Registered = {
 
 const MCP_USER = { id: 42, email: 'mcp-agent@maros.invalid' };
 
+/** Compartido porque usersService.update se asigna dentro de registerTools. */
+let usersUpdateMock: jest.Mock;
+
 function registerTools() {
   const tools = new Map<string, Registered>();
   const server = {
@@ -28,7 +31,15 @@ function registerTools() {
     findAll: jest.fn().mockResolvedValue([]),
     findById: jest.fn().mockResolvedValue({ id: 1 }),
   };
-  const rolesService = { findAll: jest.fn().mockResolvedValue([]) };
+  const usersServiceUpdate = jest.fn().mockResolvedValue({ id: 1 });
+  (usersService as Record<string, unknown>).update = usersServiceUpdate;
+  usersUpdateMock = usersServiceUpdate;
+  const rolesService = {
+    findAll: jest.fn().mockResolvedValue([]),
+    create: jest.fn().mockResolvedValue({ id: 5 }),
+    update: jest.fn().mockResolvedValue({ id: 5 }),
+    delete: jest.fn().mockResolvedValue(undefined),
+  };
   const userInvitationsService = {
     invite: jest.fn().mockResolvedValue({ user: { id: 2 }, invitation: {} }),
     resend: jest.fn().mockResolvedValue({}),
@@ -63,31 +74,94 @@ describe('registerUserTools', () => {
 
     expect([...tools.keys()].sort()).toEqual([
       'check_user_access',
+      'create_role',
+      'delete_role',
       'get_user',
       'invite_user',
+      'list_permissions',
       'list_roles',
       'list_users',
       'resend_invitation',
       'revoke_invitation',
+      'update_role',
+      'update_user',
     ]);
   });
 
-  // El MCP se autentica con un token compartido que no identifica a nadie. Una
-  // tool de roles convertiria ese token en una llave de escalada de privilegios.
-  it('exposes nothing that changes a role or switches an account on or off', () => {
-    const { tools } = registerTools();
-    const names = [...tools.keys()];
+  // Alcance completo por decision explicita del dueno: el MCP lo usa una sola
+  // persona y su token lleva todo el poder. Eso convierte MCP_TOKEN en una
+  // credencial de nivel admin, y estos tests fijan que al menos quede firmado
+  // por el usuario de sistema y no por nadie del equipo.
+  describe('role and account management', () => {
+    it('changes a role as the MCP system user, never as a person', async () => {
+      const { tools, mcpActor } = registerTools();
 
-    for (const forbidden of [
-      'update_user',
-      'update_user_role',
-      'set_user_role',
-      'deactivate_user',
-      'activate_user',
-      'delete_user',
-    ]) {
-      expect(names).not.toContain(forbidden);
-    }
+      await tools.get('update_user')!.handler({ id: 3, roleId: 1 });
+
+      expect(mcpActor.authenticatedUser).toHaveBeenCalled();
+      expect(usersUpdateMock).toHaveBeenCalledWith(3, { roleId: 1 }, MCP_USER.id);
+    });
+
+    it('switches an account off without touching its role', async () => {
+      const { tools } = registerTools();
+
+      await tools.get('update_user')!.handler({ id: 3, isActive: false });
+
+      expect(usersUpdateMock).toHaveBeenCalledWith(3, { isActive: false }, MCP_USER.id);
+    });
+
+    it('creates and edits roles', async () => {
+      const { tools, rolesService } = registerTools();
+
+      await tools
+        .get('create_role')!
+        .handler({ name: 'Bookkeeper', permissions: ['finance:read'] });
+      await tools.get('update_role')!.handler({ id: 5, permissions: [] });
+
+      expect(rolesService.create).toHaveBeenCalledWith({
+        name: 'Bookkeeper',
+        permissions: ['finance:read'],
+      });
+      expect(rolesService.update).toHaveBeenCalledWith(5, { permissions: [] });
+    });
+
+    it('refuses a permission that is not in the catalogue', () => {
+      const { tools } = registerTools();
+
+      expect(
+        parse(tools.get('create_role')!.schema, {
+          name: 'Invented',
+          permissions: ['everything:always'],
+        }).success,
+      ).toBe(false);
+    });
+
+    it.each([
+      ['confirm is false', { id: 5, confirm: false }],
+      ['confirm is missing', { id: 5 }],
+    ])('refuses to delete a role when %s', (_label, args) => {
+      const { tools } = registerTools();
+
+      expect(parse(tools.get('delete_role')!.schema, args).success).toBe(false);
+    });
+
+    it('deletes a role when the call confirms it', async () => {
+      const { tools, rolesService } = registerTools();
+
+      await expect(
+        callJson(tools.get('delete_role')!, { id: 5, confirm: true }),
+      ).resolves.toEqual({ id: 5, deleted: true });
+      expect(rolesService.delete).toHaveBeenCalledWith(5);
+    });
+
+    it('serves the permission catalogue so a role can be built from it', async () => {
+      const { tools } = registerTools();
+
+      const result = await callJson(tools.get('list_permissions')!, {});
+
+      expect(Array.isArray(result.permissions)).toBe(true);
+      expect(result.permissions.length).toBeGreaterThan(0);
+    });
   });
 
   it('invites on behalf of the MCP system user, never a person', async () => {
