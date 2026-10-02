@@ -109,6 +109,24 @@ describe('rankExpenseAccounts', () => {
     expect(names.indexOf('Dumpster')).toBeLessThan(names.indexOf('Permits'));
   });
 
+  /**
+   * Found by running a real document through the pipeline: this company's chart contains
+   * "Equipment rental - COGS (DO NOT USE)", and the hint words lifted it into the top five.
+   */
+  it('sinks an account the bookkeeper marked as not to be used', () => {
+    const names = rankExpenseAccounts(
+      [
+        account('1', 'Equipment rental - COGS (DO NOT USE)', 'Cost of Goods Sold'),
+        account('2', 'Construction Materials Costs'),
+      ],
+      'materials_expense',
+    ).map((a) => a.name);
+
+    expect(names[0]).toBe('Construction Materials Costs');
+    // Still offered: only the bookkeeper knows if a historical entry belongs there.
+    expect(names).toContain('Equipment rental - COGS (DO NOT USE)');
+  });
+
   it('still returns the whole list when nothing matches at all', () => {
     const result = rankExpenseAccounts(chart, 'unknown');
 

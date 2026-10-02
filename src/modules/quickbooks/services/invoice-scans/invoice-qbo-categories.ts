@@ -45,8 +45,16 @@ const CLASSIFICATION_HINTS: Record<string, readonly string[]> = {
   customer_service: ['income', 'revenue', 'sales', 'service'],
 };
 
-/** Accounts whose name says "office", offered for construction materials, were noise. */
-const DEPRIORITISED = ['office', 'bank', 'payroll tax', 'penalt'];
+/**
+ * Names that should sink, not disappear.
+ *
+ * "office" because Office Supplies was being offered for construction materials. And the
+ * retired-account markers because this company's chart really contains
+ * "Equipment rental - COGS (DO NOT USE)" — an account the bookkeeper has labelled as
+ * off-limits, which the hint words still matched straight into the top five. It stays in the
+ * list, since only the bookkeeper knows whether a historical entry belongs there.
+ */
+const DEPRIORITISED = ['office', 'bank', 'payroll tax', 'penalt', 'do not use', 'deprecated'];
 
 function normalise(value: unknown): string {
   return String(value ?? '')
