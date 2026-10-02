@@ -409,18 +409,32 @@ export class ProjectsService extends BaseService<any, number, Project> {
     };
   }
 
-  /** A small, local-only list used by selectors that must not wait on QuickBooks. */
+  /**
+   * A small, local-only list used by selectors that must not wait on QuickBooks.
+   *
+   * Three columns, explicitly selected. It used to be `find({ relations: ['lead'] })`,
+   * which hydrated every project and every lead in full — including their `notes` and
+   * `attachments` array columns — to produce an id and a name. The picker opens on a
+   * keystroke, so the payload is the whole cost.
+   *
+   * Still a LEFT join: a project's lead is non-nullable in the model but has been absent
+   * in practice, which is what the `Project #id` fallback is for. An inner join would
+   * silently drop those rows from the selector instead of naming them.
+   */
   async findProjectsForPicker(): Promise<
     Array<{ id: number; name: string; leadNumber: string | null }>
   > {
-    const projects = await this.projectRepo.find({ relations: ['lead'] });
-    return projects.map((project) => ({
-      id: project.id,
-      name:
-        project.lead?.name ??
-        project.lead?.leadNumber ??
-        `Project #${project.id}`,
-      leadNumber: project.lead?.leadNumber ?? null,
+    const rows = await this.projectRepo
+      .createQueryBuilder('project')
+      .leftJoin('project.lead', 'lead')
+      .select(['project.id AS id', 'lead.name AS name', 'lead.lead_number AS lead_number'])
+      .orderBy('project.id', 'DESC')
+      .getRawMany<{ id: number; name: string | null; lead_number: string | null }>();
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name?.trim() || row.lead_number || `Project #${row.id}`,
+      leadNumber: row.lead_number ?? null,
     }));
   }
 

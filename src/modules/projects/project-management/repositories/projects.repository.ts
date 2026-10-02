@@ -6,6 +6,17 @@ import { ProjectProgressStatus } from '../../../../common/enums/project-progress
 import { LeadType } from '../../../../common/enums/lead-type.enum';
 import { leadNumberSqlFilter } from '../../../../common/utils/lead-type.utils';
 
+/** One unhydrated project row for the aging report, values as the driver returns them. */
+export interface ReceivableCandidateRow {
+  id: number | string;
+  leadNumber: string | null;
+  name: string | null;
+  billedAmount: string | null;
+  collectedAmount: string | null;
+  billedAt: string | Date | null;
+  endDate: string | Date | null;
+}
+
 @Injectable()
 export class ProjectsRepository {
   constructor(
@@ -15,6 +26,37 @@ export class ProjectsRepository {
 
   async findByProjectProgressStatus(status: ProjectProgressStatus): Promise<Project[]> {
     return this.repo.find({ where: { projectProgressStatus: status } });
+  }
+
+  /**
+   * Rows GET /projects/receivables might have to show: finished work whose collection is
+   * not provably closed.
+   *
+   * The amount test is deliberately loose — it lets through billed_amount = 0 and rows
+   * where only collected_amount is missing — because what counts as settled is decided by
+   * isCollectionSettled in project-billing.util, and a second copy of that rule living in
+   * SQL is the kind of thing that drifts and starts hiding debt. This narrows the scan
+   * (idx_projects_completed_aging); it does not judge.
+   */
+  async findCompletedCollectionCandidates(): Promise<ReceivableCandidateRow[]> {
+    return this.repo
+      .createQueryBuilder('project')
+      .innerJoin('project.lead', 'lead')
+      .select('project.id', 'id')
+      .addSelect('lead.leadNumber', 'leadNumber')
+      .addSelect('lead.name', 'name')
+      .addSelect('project.billedAmount', 'billedAmount')
+      .addSelect('project.collectedAmount', 'collectedAmount')
+      .addSelect('project.billedAt', 'billedAt')
+      .addSelect('project.endDate', 'endDate')
+      .where('project.projectProgressStatus = :status', {
+        status: ProjectProgressStatus.COMPLETED,
+      })
+      .andWhere(
+        '(project.billedAmount IS NULL OR project.collectedAmount IS NULL OR project.collectedAmount < project.billedAmount)',
+      )
+      .orderBy('project.id', 'ASC')
+      .getRawMany<ReceivableCandidateRow>();
   }
 
   async getStatusCounts(

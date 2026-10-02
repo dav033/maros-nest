@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { CreateProjectDto } from '../dto/create-project.dto';
 import { UpdateProjectDto } from '../dto/update-project.dto';
 import { Project } from '../../../../entities/project.entity';
+import { sealEndDate } from '../services/project-billing.util';
 
 @Injectable()
 export class ProjectMapper {
@@ -12,14 +13,24 @@ export class ProjectMapper {
     entity.notes = dto.notes ?? [];
     entity.attachments = dto.attachments ?? [];
 
+    // Sealed here rather than in the service because this is the one place both the REST
+    // and MCP write paths funnel through, so the clock cannot start on one and not the other.
+    const sealed = sealEndDate(undefined, entity.projectProgressStatus, entity.endDate, new Date());
+    if (sealed) entity.endDate = sealed;
+
     return entity;
   }
 
   updateEntity(dto: UpdateProjectDto, entity: Project): void {
+    const previousStatus = entity.projectProgressStatus;
+
     if (dto.projectProgressStatus !== undefined) entity.projectProgressStatus = dto.projectProgressStatus;
     if (dto.overview !== undefined) entity.overview = dto.overview;
     if (dto.notes !== undefined) entity.notes = dto.notes;
     if (dto.attachments !== undefined) entity.attachments = dto.attachments;
+
+    const sealed = sealEndDate(previousStatus, entity.projectProgressStatus, entity.endDate, new Date());
+    if (sealed) entity.endDate = sealed;
   }
 
   toDto(entity: Project): any {

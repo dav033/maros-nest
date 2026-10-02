@@ -28,6 +28,7 @@ import { ImportQuickbooksBatchDto } from './dto/import-quickbooks-batch.dto';
 import { ImportQuickbooksProjectDto } from './dto/import-quickbooks-project.dto';
 import { LinkQuickbooksJobDto } from './dto/link-quickbooks-job.dto';
 import { ProjectQboReportService } from './services/project-qbo-report.service';
+import { ProjectReceivablesService } from './services/project-receivables.service';
 
 @ApiTags('projects')
 @Controller('projects')
@@ -38,6 +39,7 @@ export class ProjectsController {
     private readonly projectsService: ProjectsService,
     private readonly quickbooksProjectImport: QuickbooksProjectImportService,
     private readonly projectQboReport: ProjectQboReportService,
+    private readonly projectReceivables: ProjectReceivablesService,
   ) {}
 
   @Get('quickbooks-import/jobs')
@@ -135,6 +137,23 @@ export class ProjectsController {
   })
   async getProjectsFinancials(@CurrentUser() user: AuthenticatedUser) {
     return this.projectsService.findAllFinancials(user);
+  }
+
+  // Declared ahead of @Get(':id') — Nest matches in declaration order and 'receivables'
+  // would otherwise be swallowed as an id and rejected by ParseIntPipe.
+  @Get('receivables')
+  @RequirePermissions('finance:read')
+  @ApiOperation({
+    summary:
+      'Aged receivables: COMPLETED projects whose collection is not closed, aged from billed_at or, failing that, end_date',
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Returns one row per project plus totals per aging bucket. daysOutstanding and the bucket are null/unknown when neither date exists, and outstandingAmount is null when nothing was billed — none of those are zero',
+  })
+  async getProjectsReceivables() {
+    return this.projectReceivables.getReceivables();
   }
 
   @Get('by-lead-number')
