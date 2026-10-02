@@ -32,6 +32,10 @@ import {
   resolveQboLookupSides,
 } from './invoice-scans/invoice-qbo-lookup-sides';
 import {
+  rankExpenseAccounts,
+  SUGGESTABLE_ITEM_TYPES,
+} from './invoice-scans/invoice-qbo-categories';
+import {
   ExtractedInvoiceData,
   InvoiceScan,
 } from '../entities/invoice-scan.entity';
@@ -750,7 +754,10 @@ export class InvoiceScansService {
         sides.revenue
           ? this.qboApi.queryAll(realmId, 'Item', {
               select: 'Id, Name, Type, Active',
-              where: "Type = 'Service' AND Active = true",
+              // Not `Type = 'Service'`: QuickBooks has an item type literally called
+              // Category, and a materials purchase maps to an Inventory or NonInventory
+              // item. Restricting to Service is what kept all of those out of the picker.
+              where: 'Active = true',
               maxPages: 5,
             })
           : Promise.resolve([]),
@@ -769,7 +776,11 @@ export class InvoiceScansService {
         ...(sides.expense ? vendors : []),
       ];
       const matches = this.rankMatches(candidateRecords, invoice.counterpartyName);
-      const accountMatches = this.rankAccounts(accounts, invoice.classification);
+      const accountMatches = rankExpenseAccounts(
+        accounts,
+        invoice.classification,
+        invoice.lineItems,
+      );
       const serviceItems = this.rankServiceItems(services, invoice.lineItems);
 
       return {
@@ -840,32 +851,6 @@ export class InvoiceScansService {
       }));
   }
 
-  private rankAccounts(
-    records: unknown[],
-    classification: ExtractedInvoiceData['classification'],
-  ): Array<{ id: string; name: string }> {
-    const terms =
-      classification === 'materials_expense'
-        ? ['material', 'supply', 'supplies', 'lumber']
-        : classification === 'subcontractor_expense'
-          ? ['subcontract', 'sub-contractor']
-          : ['material', 'supply', 'subcontract'];
-    return records
-      .map((value) => this.asRecord(value))
-      .filter((record): record is QboRecord => record !== null)
-      .map((record) => ({
-        id: String(record.Id ?? ''),
-        name: String(record.Name ?? ''),
-      }))
-      .filter(
-        (account) =>
-          account.id &&
-          account.name &&
-          terms.some((term) => account.name.toLowerCase().includes(term)),
-      )
-      .slice(0, 10);
-  }
-
   private rankServiceItems(
     records: unknown[],
     lineItems: ExtractedInvoiceData['lineItems'],
@@ -877,7 +862,8 @@ export class InvoiceScansService {
     return records
       .map((value) => this.asRecord(value))
       .filter(
-        (item): item is QboRecord => item !== null && item.Type === 'Service',
+        (item): item is QboRecord =>
+          item !== null && SUGGESTABLE_ITEM_TYPES.has(String(item.Type ?? '')),
       )
       .map((item) => {
         const name = String(item.Name ?? '');
