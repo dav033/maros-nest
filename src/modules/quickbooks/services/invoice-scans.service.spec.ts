@@ -1,4 +1,5 @@
 import axios from 'axios';
+import type { Cache } from 'cache-manager';
 import type { ConfigService } from '@nestjs/config';
 import type { Repository } from 'typeorm';
 import { S3Service } from '../../s3/services/s3.service';
@@ -84,6 +85,7 @@ interface Harness {
   config: { get: jest.Mock };
   leads: { exists: jest.Mock; find: jest.Mock };
   notifications: { notifyScanReady: jest.Mock };
+  cache: { get: jest.Mock; set: jest.Mock };
   savedStatuses: string[];
   service: InvoiceScansService;
 }
@@ -145,6 +147,10 @@ function harness(opts: {
       .mockResolvedValue((opts.leadNumbers ?? []).map((leadNumber) => ({ leadNumber }))),
   };
   const notifications = { notifyScanReady: jest.fn().mockResolvedValue(true) };
+  const cache = {
+    get: jest.fn().mockResolvedValue(undefined),
+    set: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new InvoiceScansService(
     scans as unknown as Repository<InvoiceScan>,
     s3 as unknown as S3Service,
@@ -153,8 +159,21 @@ function harness(opts: {
     financials as unknown as QuickbooksFinancialsService,
     leads as unknown as Repository<Lead>,
     notifications as unknown as InvoiceScanNotificationsService,
+    cache as unknown as Cache,
   );
-  return { scan, scans, s3, qboApi, financials, config, leads, notifications, savedStatuses, service };
+  return {
+    scan,
+    scans,
+    s3,
+    qboApi,
+    financials,
+    config,
+    leads,
+    notifications,
+    cache,
+    savedStatuses,
+    service,
+  };
 }
 
 describe('InvoiceScansService', () => {
@@ -348,6 +367,94 @@ describe('InvoiceScansService', () => {
       // Ya estaba en needs_review: corregir a mano no debe ensuciarlo con el
       // aviso de "los datos se escribieron a mano".
       expect(result.warnings).toEqual([]);
+    });
+
+    describe('counterparty', () => {
+      function linkedScan(): Harness {
+        return harness({
+          scan: {
+            recordType: 'transaction',
+            fileKey: null,
+            status: 'needs_review',
+            extractedData: {
+              direction: 'unknown',
+              classification: 'other',
+              counterpartyName: 'Home Depot',
+              counterpartyId: '58',
+              counterpartyType: 'Vendor',
+              invoiceNumber: null,
+              issueDate: '2026-09-28',
+              dueDate: null,
+              currency: 'USD',
+              subtotal: 69.6,
+              taxTotal: null,
+              total: 69.6,
+              paymentStatus: 'paid',
+              description: 'Materials',
+              transactionDirection: 'payment_made',
+              confidence: 1,
+              lineItems: [],
+            },
+          },
+        });
+      }
+
+      it('stores the id and type when the reviewer picks from the QuickBooks list', async () => {
+        const h = harness();
+
+        const result = await h.service.update(SCAN_ID, {
+          counterpartyName: 'Anderson Family',
+          counterpartyId: '7',
+          counterpartyType: 'Customer',
+        });
+
+        expect(result.extractedData).toMatchObject({
+          counterpartyName: 'Anderson Family',
+          counterpartyId: '7',
+          counterpartyType: 'Customer',
+        });
+      });
+
+      // Dejar el id viejo apuntando a otro proveedor seria un cruce falso.
+      it('drops a stale id when the name is renamed on its own', async () => {
+        const h = linkedScan();
+
+        const result = await h.service.update(SCAN_ID, {
+          counterpartyName: 'Jose, day labourer',
+        });
+
+        expect(result.extractedData).toMatchObject({
+          counterpartyName: 'Jose, day labourer',
+          counterpartyId: null,
+          counterpartyType: null,
+        });
+      });
+
+      it('forgets the type when the id is cleared', async () => {
+        const h = linkedScan();
+
+        const result = await h.service.update(SCAN_ID, {
+          counterpartyName: 'Home Depot',
+          counterpartyId: null,
+        });
+
+        expect(result.extractedData).toMatchObject({
+          counterpartyName: 'Home Depot',
+          counterpartyId: null,
+          counterpartyType: null,
+        });
+      });
+
+      it('leaves the link alone when the edit is about another field', async () => {
+        const h = linkedScan();
+
+        const result = await h.service.update(SCAN_ID, { total: 70 });
+
+        expect(result.extractedData).toMatchObject({
+          counterpartyId: '58',
+          counterpartyType: 'Vendor',
+        });
+      });
     });
 
     it('records the user who saved the change as the last editor', async () => {
@@ -607,6 +714,141 @@ describe('InvoiceScansService', () => {
       await expect(
         h.service.createManualTransaction({ ...input, projectNumber: '999-9999' }),
       ).rejects.toThrow('No project found with number 999-9999');
+    });
+
+    it('keeps the QuickBooks id and type when the counterparty came from the list', async () => {
+      const h = harness();
+
+      const created = await h.service.createManualTransaction({
+        ...input,
+        counterpartyName: 'Home Depot',
+        counterpartyId: '58',
+        counterpartyType: 'Vendor',
+      });
+
+      expect(created.extractedData).toMatchObject({
+        counterpartyName: 'Home Depot',
+        counterpartyId: '58',
+        counterpartyType: 'Vendor',
+      });
+    });
+
+    // Un pago en efectivo a quien no esta dado de alta sigue siendo un apunte
+    // valido: se guarda el nombre tal cual y sin id.
+    it('accepts a counterparty typed by hand with no QuickBooks id', async () => {
+      const h = harness();
+
+      const created = await h.service.createManualTransaction({
+        ...input,
+        counterpartyName: '  Jose, day labourer  ',
+      });
+
+      expect(created.extractedData).toMatchObject({
+        counterpartyName: 'Jose, day labourer',
+        counterpartyId: null,
+        counterpartyType: null,
+      });
+    });
+
+    it('drops an id that arrives without a name', async () => {
+      const h = harness();
+
+      const created = await h.service.createManualTransaction({
+        ...input,
+        counterpartyId: '58',
+        counterpartyType: 'Vendor',
+      });
+
+      expect(created.extractedData).toMatchObject({
+        counterpartyName: null,
+        counterpartyId: null,
+        counterpartyType: null,
+      });
+    });
+  });
+
+  describe('listQboCounterparties', () => {
+    function counterpartyHarness(
+      vendors: unknown[],
+      customers: unknown[],
+    ): Harness {
+      const h = harness();
+      h.qboApi.queryAll.mockImplementation((_realmId: string, entity: string) =>
+        Promise.resolve(entity === 'Vendor' ? vendors : customers),
+      );
+      return h;
+    }
+
+    it('merges active vendors and customers into one sorted, typed list', async () => {
+      const h = counterpartyHarness(
+        [
+          { Id: '58', DisplayName: 'Home Depot' },
+          { Id: '61', CompanyName: 'Zeta Plumbing' },
+        ],
+        [{ Id: '7', DisplayName: 'Anderson Family' }],
+      );
+
+      const result = await h.service.listQboCounterparties();
+
+      expect(result).toEqual({
+        connected: true,
+        counterparties: [
+          { id: '7', name: 'Anderson Family', type: 'Customer' },
+          { id: '58', name: 'Home Depot', type: 'Vendor' },
+          { id: '61', name: 'Zeta Plumbing', type: 'Vendor' },
+        ],
+      });
+      expect(h.cache.set).toHaveBeenCalledWith(
+        'invoice-scans:qbo-counterparties',
+        result,
+        10 * 60 * 1000,
+      );
+    });
+
+    it('answers from the cache without calling QuickBooks again', async () => {
+      const h = counterpartyHarness([{ Id: '58', DisplayName: 'Home Depot' }], []);
+      const cached = {
+        connected: true,
+        counterparties: [{ id: '1', name: 'Cached Vendor', type: 'Vendor' as const }],
+      };
+      h.cache.get.mockResolvedValue(cached);
+
+      await expect(h.service.listQboCounterparties()).resolves.toEqual(cached);
+      expect(h.qboApi.queryAll).not.toHaveBeenCalled();
+    });
+
+    // El selector no puede quedarse en blanco porque QuickBooks este caido: se
+    // dice que no hay conexion y el campo sigue aceptando texto escrito.
+    it('reports no connection instead of failing, and does not cache the failure', async () => {
+      const h = harness({ qboFails: true });
+
+      await expect(h.service.listQboCounterparties()).resolves.toEqual({
+        connected: false,
+        counterparties: [],
+      });
+      expect(h.cache.set).not.toHaveBeenCalled();
+    });
+
+    it('returns an empty list when the company has no vendors or customers yet', async () => {
+      const h = counterpartyHarness([], []);
+
+      await expect(h.service.listQboCounterparties()).resolves.toEqual({
+        connected: true,
+        counterparties: [],
+      });
+    });
+
+    it('skips records with no usable id or name', async () => {
+      const h = counterpartyHarness(
+        [{ Id: '58' }, { DisplayName: 'No id' }, null],
+        [{ Id: '7', DisplayName: 'Anderson Family' }],
+      );
+
+      const { counterparties } = await h.service.listQboCounterparties();
+
+      expect(counterparties).toEqual([
+        { id: '7', name: 'Anderson Family', type: 'Customer' },
+      ]);
     });
   });
 });

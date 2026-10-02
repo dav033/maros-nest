@@ -1,12 +1,15 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   InternalServerErrorException,
   Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import axios from 'axios';
@@ -38,6 +41,7 @@ import {
 import {
   ExtractedInvoiceData,
   InvoiceScan,
+  QboCounterpartyType,
 } from '../entities/invoice-scan.entity';
 import { QuickbooksApiService } from './core/quickbooks-api.service';
 import { QuickbooksFinancialsService } from './financials/quickbooks-financials.service';
@@ -133,10 +137,31 @@ const QBO_UNAVAILABLE_WARNING =
 const PENDING_LIST_LIMIT = 200;
 const COMPLETED_LIST_LIMIT = 50;
 
+/** Vendor or customer of QuickBooks, flattened for the counterparty picker. */
+export interface QboCounterpartyOption {
+  id: string;
+  name: string;
+  type: QboCounterpartyType;
+}
+
+const COUNTERPARTIES_CACHE_KEY = 'invoice-scans:qbo-counterparties';
+/**
+ * Ten minutes. The list only moves when somebody creates a vendor or a customer
+ * inside QuickBooks, which is rare next to how often it is read: the picker is
+ * consulted while typing every transaction, and a miss costs ten paginated
+ * calls to Intuit over hundreds of records. Seconds-long windows were tried in
+ * this module and practically never hit (see readCacheTtlMs in
+ * quickbooks-api.service); meanwhile nothing is blocked by the staleness, since
+ * a vendor created minutes ago can still be typed in by hand.
+ */
+const COUNTERPARTIES_CACHE_TTL_MS = 10 * 60 * 1000;
+
 const EDITABLE_FIELDS = [
   'direction',
   'classification',
   'counterpartyName',
+  'counterpartyId',
+  'counterpartyType',
   'invoiceNumber',
   'issueDate',
   'dueDate',
@@ -164,6 +189,7 @@ export class InvoiceScansService {
     @InjectRepository(Lead)
     private readonly leads: Repository<Lead>,
     private readonly notifications: InvoiceScanNotificationsService,
+    @Inject(CACHE_MANAGER) private readonly cache?: Cache,
   ) {}
 
   /** Every pending scan plus the most recently completed ones. */
@@ -253,6 +279,13 @@ export class InvoiceScansService {
 
     const description = input.description.trim();
     const amount = input.amount;
+    // The QuickBooks id only survives next to a name: an id alone identifies
+    // nothing on screen, and a name alone is the free-text case this field has
+    // to keep accepting.
+    const counterpartyName = input.counterpartyName?.trim() || null;
+    const counterpartyId = counterpartyName
+      ? input.counterpartyId?.trim() || null
+      : null;
     const scan = this.scans.create({
       id: randomUUID(),
       recordType: 'transaction',
@@ -263,7 +296,9 @@ export class InvoiceScansService {
       extractedData: {
         direction: 'unknown',
         classification: 'other',
-        counterpartyName: input.counterpartyName?.trim() || null,
+        counterpartyName,
+        counterpartyId,
+        counterpartyType: counterpartyId ? (input.counterpartyType ?? null) : null,
         invoiceNumber: null,
         issueDate: input.transactionDate,
         dueDate: null,
@@ -331,6 +366,24 @@ export class InvoiceScansService {
             next.paymentStatus = input.paymentStatus!;
             break;
           case 'counterpartyName':
+            next.counterpartyName = input.counterpartyName?.trim() || null;
+            // Renaming the counterparty without saying which QuickBooks record
+            // it is now drops the old id: one still pointing at the previous
+            // vendor is a wrong cross-reference, worse than none.
+            if (input.counterpartyId === undefined) {
+              next.counterpartyId = null;
+              next.counterpartyType = null;
+            }
+            break;
+          case 'counterpartyId': {
+            const counterpartyId = input.counterpartyId?.trim() || null;
+            next.counterpartyId = counterpartyId;
+            if (!counterpartyId) next.counterpartyType = null;
+            break;
+          }
+          case 'counterpartyType':
+            next.counterpartyType = input.counterpartyType ?? null;
+            break;
           case 'invoiceNumber':
           case 'issueDate':
           case 'dueDate':
@@ -723,6 +776,73 @@ export class InvoiceScansService {
         'The invoice file could not be scanned. Try again with a clearer file.',
       );
     }
+  }
+
+  /**
+   * Active vendors and customers of QuickBooks, for the counterparty picker.
+   *
+   * Degrades like getQboSuggestions: a connection that is missing or failing
+   * answers `connected: false` with an empty list instead of throwing, because
+   * the form behind this still has to let the name be typed. The failure is not
+   * cached, so a reconnection shows up on the next request.
+   */
+  async listQboCounterparties(): Promise<{
+    connected: boolean;
+    counterparties: QboCounterpartyOption[];
+  }> {
+    const cached = await this.cache?.get<{
+      connected: boolean;
+      counterparties: QboCounterpartyOption[];
+    }>(COUNTERPARTIES_CACHE_KEY);
+    if (cached) return cached;
+
+    try {
+      const realmId = await this.financials.getDefaultRealmId();
+      const select = 'Id, DisplayName, CompanyName, Active';
+      const [vendors, customers] = await Promise.all([
+        this.qboApi.queryAll(realmId, 'Vendor', {
+          select,
+          where: 'Active = true',
+          maxPages: 5,
+        }),
+        this.qboApi.queryAll(realmId, 'Customer', {
+          select,
+          where: 'Active = true',
+          maxPages: 5,
+        }),
+      ]);
+      const result = {
+        connected: true,
+        counterparties: [
+          ...this.toCounterparties(vendors, 'Vendor'),
+          ...this.toCounterparties(customers, 'Customer'),
+        ].sort((a, b) => a.name.localeCompare(b.name)),
+      };
+      await this.cache?.set(
+        COUNTERPARTIES_CACHE_KEY,
+        result,
+        COUNTERPARTIES_CACHE_TTL_MS,
+      );
+      return result;
+    } catch {
+      this.logger.warn('Could not load the QuickBooks counterparty list');
+      return { connected: false, counterparties: [] };
+    }
+  }
+
+  private toCounterparties(
+    records: unknown[],
+    type: QboCounterpartyType,
+  ): QboCounterpartyOption[] {
+    return records
+      .map((value) => this.asRecord(value))
+      .filter((record): record is QboRecord => record !== null)
+      .map((record) => ({
+        id: String(record.Id ?? ''),
+        name: String(record.DisplayName ?? record.CompanyName ?? '').trim(),
+        type,
+      }))
+      .filter((option) => option.id !== '' && option.name !== '');
   }
 
   private async getQboSuggestions(

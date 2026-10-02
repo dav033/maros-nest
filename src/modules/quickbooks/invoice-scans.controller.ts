@@ -29,6 +29,12 @@ export class InvoiceScansController {
     return this.invoiceScans.list();
   }
 
+  /** Declared before `:id` so the literal segment wins the route match. */
+  @Get('counterparties')
+  counterparties() {
+    return this.invoiceScans.listQboCounterparties();
+  }
+
   @Get(':id')
   get(@Param('id', ParseUUIDPipe) id: string) {
     return this.invoiceScans.get(id);

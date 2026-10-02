@@ -65,6 +65,16 @@ export class UpdateInvoiceScanDto {
   @MaxLength(255)
   counterpartyName?: string | null;
 
+  /** Only when the name came from the QuickBooks list; free text sends neither. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  counterpartyId?: string | null;
+
+  @IsOptional()
+  @IsIn(['Vendor', 'Customer'])
+  counterpartyType?: 'Vendor' | 'Customer' | null;
+
   @IsOptional()
   @IsString()
   @MaxLength(100)

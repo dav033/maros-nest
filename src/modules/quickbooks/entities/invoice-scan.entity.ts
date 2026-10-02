@@ -15,6 +15,7 @@ export type InvoiceScanStatus =
 
 export type InvoiceScanRecordType = 'invoice' | 'transaction';
 export type ManualTransactionDirection = 'payment_made' | 'payment_received';
+export type QboCounterpartyType = 'Vendor' | 'Customer';
 
 export interface ExtractedInvoiceData {
   direction: 'outgoing' | 'incoming' | 'unknown';
@@ -25,6 +26,15 @@ export interface ExtractedInvoiceData {
     | 'other'
     | 'unknown';
   counterpartyName: string | null;
+  /**
+   * Set only when the name was picked from the QuickBooks list, which is what
+   * makes the record crossable without re-matching by name. A name typed by
+   * hand — a cash payment to someone not registered in QuickBooks — is a valid
+   * entry and leaves both of these absent. The PDF extractor never fills them:
+   * it reads a printed name, not a QuickBooks id.
+   */
+  counterpartyId?: string | null;
+  counterpartyType?: QboCounterpartyType | null;
   invoiceNumber: string | null;
   issueDate: string | null;
   dueDate: string | null;
