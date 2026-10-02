@@ -1,6 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { CreateLeadDto } from '../../leads/lead-management/dto/create-lead.dto';
+import {
+  LEAD_LOST_REASONS,
+  LEAD_SOURCES,
+  UpdateLeadDto,
+} from '../../leads/lead-management/dto/update-lead.dto';
 import { CreateContactDto } from '../../contacts/contact-management/dto/create-contact.dto';
 import { LeadStatus } from '../../../common/enums/lead-status.enum';
 import { McpToolDeps } from './shared';
@@ -28,6 +33,40 @@ const leadWritableShape = {
     .optional()
     .describe('Manual estimated value of the lead (independent of QuickBooks)'),
   inReview: z.boolean().optional().describe('Whether the lead is in review'),
+  // On the shared shape because CreateLeadDto carries both: the channel is known at intake,
+  // and an agent creating a lead is exactly the caller that knows where it came from.
+  source: z
+    .enum(LEAD_SOURCES)
+    .nullable()
+    .optional()
+    .describe('Acquisition channel'),
+  ownerId: z
+    .number()
+    .nullable()
+    .optional()
+    .describe('User id of the salesperson responsible; null unassigns'),
+};
+
+/**
+ * The two sales fields that only make sense once a lead exists, so only the update tool
+ * offers them: a lead is not born lost, and it has no next follow-up before anyone has
+ * spoken to it. `source` and `ownerId` live on the shared shape instead.
+ *
+ * `lostReason` is the one that cannot be left out: LeadsService refuses a move to LOST
+ * without it (LEAD_LOST_REASON_REQUIRED), so an agent could otherwise see `status` on the
+ * tool, set it to LOST, and get a 422 it had no way to satisfy.
+ */
+const leadSalesShape = {
+  lostReason: z
+    .enum(LEAD_LOST_REASONS)
+    .nullable()
+    .optional()
+    .describe('Why the deal died. Required on the update that moves a lead to LOST'),
+  nextFollowUpAt: z
+    .string()
+    .nullable()
+    .optional()
+    .describe('Date of the next planned contact (YYYY-MM-DD); null clears it'),
 };
 
 export function registerLeadWriteTools(server: McpServer, deps: McpToolDeps) {
@@ -111,6 +150,7 @@ export function registerLeadWriteTools(server: McpServer, deps: McpToolDeps) {
     {
       leadId: z.number().describe('The lead ID to update'),
       ...leadWritableShape,
+      ...leadSalesShape,
       contactId: z
         .number()
         .optional()
@@ -121,7 +161,7 @@ export function registerLeadWriteTools(server: McpServer, deps: McpToolDeps) {
         .describe('Notes (replaces all existing notes)'),
     },
     async ({ leadId, ...fields }: { leadId: number } & Record<string, unknown>) =>
-      deps.leadsService.updateLead(leadId, fields as CreateLeadDto),
+      deps.leadsService.updateLead(leadId, fields as UpdateLeadDto),
   );
 
   registerMcpTool(

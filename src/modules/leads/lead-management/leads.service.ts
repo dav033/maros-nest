@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, EntityManager, Not } from 'typeorm';
 import { Lead } from '../../../entities/lead.entity';
+import { LeadStatusEvent } from '../../../entities/lead-status-event.entity';
 import { Contact } from '../../../entities/contact.entity';
 import { Company } from '../../../entities/company.entity';
 import { Project } from '../../../entities/project.entity';
@@ -58,14 +59,15 @@ export class LeadsService {
   }
 
   /** A small, local-only list used by selectors that must not wait on QuickBooks. */
+  /** See LeadsRepository.findAllForPicker — three columns, no joins, no QuickBooks. */
   async getLeadsForPicker(): Promise<
     Array<{ id: number; name: string; leadNumber: string | null }>
   > {
-    const leads = await this.leadsRepository.findAll();
-    return leads.map((lead) => ({
-      id: lead.id,
-      name: lead.name ?? lead.leadNumber ?? `Lead #${lead.id}`,
-      leadNumber: lead.leadNumber ?? null,
+    const rows = await this.leadsRepository.findAllForPicker();
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name?.trim() || row.lead_number || `Lead #${row.id}`,
+      leadNumber: row.lead_number ?? null,
     }));
   }
 
@@ -387,7 +389,33 @@ export class LeadsService {
         entity,
         manager,
       );
+
+      // A lead can be patched to a null status (the column is nullable — 27 production rows
+      // sit that way), and "moved to nowhere" is not a stage to measure, so it records no
+      // event and does not reseal the clock.
+      const enteredStatus =
+        entity.status && entity.status !== previousStatus ? entity.status : null;
+
+      if (enteredStatus === LeadStatus.LOST && !entity.lostReason) {
+        throw new LeadExceptions.LeadLostReasonRequiredException(id);
+      }
+      if (enteredStatus) {
+        entity.statusChangedAt = new Date();
+      }
+
       await leadRepo.save(entity);
+
+      if (enteredStatus) {
+        // In the same transaction as the lead: a history with gaps measures nothing, since
+        // time-in-stage is read by subtracting consecutive rows.
+        await manager.getRepository(LeadStatusEvent).insert({
+          leadId: entity.id,
+          fromStatus: previousStatus ?? null,
+          toStatus: enteredStatus,
+          changedById: actor?.id ?? null,
+          changedAt: entity.statusChangedAt ?? new Date(),
+        });
+      }
 
       let conversion: { converted: boolean; projectId?: number } = {
         converted: false,

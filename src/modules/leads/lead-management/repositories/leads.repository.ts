@@ -27,6 +27,23 @@ export class LeadsRepository {
       .getMany();
   }
 
+  /**
+   * Three columns for the record pickers, nothing hydrated.
+   *
+   * Deliberately not findAll(): that one left-joins contact, company, projectType and
+   * project and selects every column of each, which is what the lead *list* needs and is
+   * four joins of waste for a selector that shows a name and a number.
+   */
+  async findAllForPicker(): Promise<
+    Array<{ id: number; name: string | null; lead_number: string | null }>
+  > {
+    return this.repo
+      .createQueryBuilder('lead')
+      .select(['lead.id AS id', 'lead.name AS name', 'lead.lead_number AS lead_number'])
+      .orderBy('lead.id', 'DESC')
+      .getRawMany<{ id: number; name: string | null; lead_number: string | null }>();
+  }
+
   async findPipeline(): Promise<Lead[]> {
     // Exclude leads that have an associated project
     // The foreign key is in projects table (lead_id), so we check if a project exists for this lead

@@ -20,6 +20,14 @@ export class LeadMapper {
     if (dto.notes) entity.notes = dto.notes;
     if (dto.attachments) entity.attachments = dto.attachments;
     if (dto.estimate !== undefined) entity.estimate = dto.estimate;
+    // `?? null` and not a bare assignment: the columns are nullable and TypeORM reads
+    // `undefined` as "leave this column alone", which on an INSERT is the same as NULL but
+    // on any future reuse of this mapper would silently skip a clear.
+    if (dto.source !== undefined) entity.source = dto.source ?? null;
+    if (dto.ownerId !== undefined) entity.ownerId = dto.ownerId ?? null;
+    // No status event is written here. A lead being born is not a stage transition, and
+    // lead_status_events.from_status would have nothing honest to record.
+    if (dto.status) entity.statusChangedAt = new Date();
     entity.inReview = dto.inReview ?? false;
     
     // Relations (contact, projectType) are usually handled by the service
@@ -88,6 +96,11 @@ export class LeadMapper {
       attachments: attachments,
       estimate: entity.estimate != null ? Number(entity.estimate) : null,
       inReview: entity.inReview ?? false,
+      ownerId: entity.ownerId ?? null,
+      source: entity.source ?? null,
+      lostReason: entity.lostReason ?? null,
+      nextFollowUpAt: formatDate(entity.nextFollowUpAt),
+      statusChangedAt: entity.statusChangedAt ?? null,
       contact: entity.contact ? {
         id: entity.contact.id,
         name: entity.contact.name,

@@ -69,7 +69,14 @@ export class LeadMutationService {
       patchDto.status !== undefined ||
       patchDto.contactId !== undefined ||
       patchDto.projectTypeId !== undefined ||
-      patchDto.inReview !== undefined
+      patchDto.inReview !== undefined ||
+      // Without these four the notes-only fast path would swallow them: it writes a single
+      // column and returns, so `{ notes, source }` would save the notes and lose the source
+      // with no error anywhere.
+      patchDto.ownerId !== undefined ||
+      patchDto.source !== undefined ||
+      patchDto.lostReason !== undefined ||
+      patchDto.nextFollowUpAt !== undefined
     ) {
       return false;
     }
@@ -151,6 +158,22 @@ export class LeadMutationService {
     }
     if (dto.inReview !== undefined) {
       entity.inReview = dto.inReview;
+    }
+    // `?? null` on all four, never left as undefined: TypeORM skips undefined columns on
+    // save, so assigning it would make "clear this field" a no-op that reports success.
+    // owner_id is not resolved against users here — the FK rejects an id that is not there,
+    // and the column is a plain pointer with no entity to load.
+    if (dto.ownerId !== undefined) {
+      entity.ownerId = dto.ownerId ?? null;
+    }
+    if (dto.source !== undefined) {
+      entity.source = dto.source ?? null;
+    }
+    if (dto.lostReason !== undefined) {
+      entity.lostReason = dto.lostReason ?? null;
+    }
+    if (dto.nextFollowUpAt !== undefined) {
+      entity.nextFollowUpAt = dto.nextFollowUpAt ?? null;
     }
   }
 

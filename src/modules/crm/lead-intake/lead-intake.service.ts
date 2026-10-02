@@ -26,6 +26,10 @@ export class LeadIntakeService {
     const actions: string[] = [];
     let company: Company | null = null;
     let contact: Contact | null = null;
+    // Whether this lead came from somebody already in the CRM. Tracked as a flag rather
+    // than recovered from `actions` afterwards, because those strings are a human-readable
+    // log and matching on them would make the channel depend on their wording.
+    let knownParty = false;
 
     if (dto.companyId) {
       company = await this.companyRepo.findOne({
@@ -33,6 +37,7 @@ export class LeadIntakeService {
       });
       if (company) {
         actions.push(`Found existing company by ID: ${company.id}`);
+        knownParty = true;
       }
     }
 
@@ -42,6 +47,7 @@ export class LeadIntakeService {
       });
       if (company) {
         actions.push(`Found existing company by name: ${company.name}`);
+        knownParty = true;
       }
     }
 
@@ -51,6 +57,7 @@ export class LeadIntakeService {
       });
       if (company) {
         actions.push(`Found existing company by email: ${company.email}`);
+        knownParty = true;
       }
     }
 
@@ -71,6 +78,7 @@ export class LeadIntakeService {
       });
       if (contact) {
         actions.push(`Found existing contact by ID: ${contact.id}`);
+        knownParty = true;
       }
     }
 
@@ -81,6 +89,7 @@ export class LeadIntakeService {
       });
       if (contact) {
         actions.push(`Found existing contact by email: ${contact.email}`);
+        knownParty = true;
       }
     }
 
@@ -119,11 +128,26 @@ export class LeadIntakeService {
 
     const leadType = dto.leadType || LeadType.CONSTRUCTION;
 
+    /**
+     * The channel, recorded here because this is the only place that can know it.
+     *
+     * A declared source wins: the caller knows whether it is a website form or a partner
+     * feed, and this service cannot tell those apart. Absent one, an existing contact or
+     * company means `repeat_client` — the lookups above already established that, and
+     * repeat business was 36% of the pipeline with nothing recording it.
+     *
+     * Nothing is invented when neither applies: a brand new party with no declared channel
+     * leaves `source` NULL. Defaulting to `other` would bury "we never asked" inside a
+     * bucket that is supposed to mean "asked, and it was none of the above".
+     */
+    const source = dto.source ?? (knownParty ? 'repeat_client' : undefined);
+
     const lead = await this.leadsService.createLeadWithExistingContact(
       {
         location: dto.leadLocation,
         projectTypeId: dto.projectTypeId,
         inReview: true,
+        source,
       },
       contact.id,
       leadType,

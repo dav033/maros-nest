@@ -1,6 +1,8 @@
 import { LeadStatus } from '../../../common/enums/lead-status.enum';
 import { Lead } from '../../../entities/lead.entity';
+import { LeadStatusEvent } from '../../../entities/lead-status-event.entity';
 import { Project } from '../../../entities/project.entity';
+import { LeadExceptions } from '../../../common/exceptions';
 import { LeadsService } from './leads.service';
 
 describe('LeadsService.updateLead', () => {
@@ -11,6 +13,7 @@ describe('LeadsService.updateLead', () => {
   let mailObservedCommit: boolean;
   let leadTransactionRepo: Record<string, jest.Mock>;
   let projectTransactionRepo: Record<string, jest.Mock>;
+  let statusEventTransactionRepo: Record<string, jest.Mock>;
   let injectedLeadRepo: Record<string, jest.Mock>;
   let injectedProjectRepo: Record<string, jest.Mock>;
   let mailService: Record<string, jest.Mock>;
@@ -52,10 +55,15 @@ describe('LeadsService.updateLead', () => {
       }),
     };
 
+    statusEventTransactionRepo = {
+      insert: jest.fn().mockResolvedValue({ identifiers: [{ id: 1 }] }),
+    };
+
     const manager = {
       getRepository: jest.fn().mockImplementation((entity) => {
         if (entity === Lead) return leadTransactionRepo;
         if (entity === Project) return projectTransactionRepo;
+        if (entity === LeadStatusEvent) return statusEventTransactionRepo;
         throw new Error(`Unexpected repository: ${entity?.name}`);
       }),
     };
@@ -80,6 +88,7 @@ describe('LeadsService.updateLead', () => {
       isNotesOnlyUpdate: jest.fn().mockReturnValue(false),
       updateEntityFields: jest.fn().mockImplementation((dto, entity: Lead) => {
         if (dto.status !== undefined) entity.status = dto.status;
+        if (dto.lostReason !== undefined) entity.lostReason = dto.lostReason ?? null;
         return Promise.resolve();
       }),
     };
@@ -158,5 +167,122 @@ describe('LeadsService.updateLead', () => {
     expect(transactionCommitted).toBe(false);
     expect(injectedLeadRepo.save).not.toHaveBeenCalled();
     expect(injectedProjectRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('records the status move and stamps status_changed_at', async () => {
+    const before = Date.now();
+
+    await service.updateLead(
+      lead.id,
+      { status: LeadStatus.PROPOSAL_SENT },
+      { id: 7 } as never,
+    );
+
+    expect(statusEventTransactionRepo.insert).toHaveBeenCalledTimes(1);
+    expect(statusEventTransactionRepo.insert).toHaveBeenCalledWith({
+      leadId: 1,
+      fromStatus: LeadStatus.CONTACTED,
+      toStatus: LeadStatus.PROPOSAL_SENT,
+      changedById: 7,
+      changedAt: lead.statusChangedAt,
+    });
+    expect(lead.statusChangedAt?.getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it('records a first move with a null from_status for a lead that never had one', async () => {
+    lead.status = undefined;
+
+    await service.updateLead(lead.id, { status: LeadStatus.CONTACTED });
+
+    expect(statusEventTransactionRepo.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ fromStatus: null, toStatus: LeadStatus.CONTACTED }),
+    );
+  });
+
+  it('attributes the move to nobody when no user is behind the request', async () => {
+    await service.updateLead(lead.id, { status: LeadStatus.FOLLOW_UP });
+
+    expect(statusEventTransactionRepo.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ changedById: null }),
+    );
+  });
+
+  it('writes no status event when the update leaves the status alone', async () => {
+    await service.updateLead(lead.id, { name: 'Renamed lead' });
+
+    expect(statusEventTransactionRepo.insert).not.toHaveBeenCalled();
+    expect(lead.statusChangedAt).toBeUndefined();
+    expect(leadTransactionRepo.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes no status event when the status is re-sent unchanged', async () => {
+    await service.updateLead(lead.id, { status: LeadStatus.CONTACTED });
+
+    expect(statusEventTransactionRepo.insert).not.toHaveBeenCalled();
+    expect(lead.statusChangedAt).toBeUndefined();
+  });
+
+  it('refuses to move a lead to LOST without a lost reason', async () => {
+    await expect(
+      service.updateLead(lead.id, { status: LeadStatus.LOST }),
+    ).rejects.toBeInstanceOf(LeadExceptions.LeadLostReasonRequiredException);
+
+    expect(leadTransactionRepo.save).not.toHaveBeenCalled();
+    expect(statusEventTransactionRepo.insert).not.toHaveBeenCalled();
+    expect(transactionCommitted).toBe(false);
+  });
+
+  it('refuses a move to LOST that explicitly clears the lost reason', async () => {
+    lead.lostReason = 'price';
+
+    await expect(
+      service.updateLead(lead.id, { status: LeadStatus.LOST, lostReason: null }),
+    ).rejects.toBeInstanceOf(LeadExceptions.LeadLostReasonRequiredException);
+
+    expect(leadTransactionRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('moves a lead to LOST when the update supplies a reason', async () => {
+    const result = await service.updateLead(lead.id, {
+      status: LeadStatus.LOST,
+      lostReason: 'competitor',
+    });
+
+    expect(result.conversion).toEqual({ converted: false });
+    expect(lead.lostReason).toBe('competitor');
+    expect(statusEventTransactionRepo.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fromStatus: LeadStatus.CONTACTED,
+        toStatus: LeadStatus.LOST,
+      }),
+    );
+  });
+
+  it('moves a lead to LOST on a reason it already carries', async () => {
+    lead.lostReason = 'no_response';
+
+    await service.updateLead(lead.id, { status: LeadStatus.LOST });
+
+    expect(statusEventTransactionRepo.insert).toHaveBeenCalledTimes(1);
+  });
+
+  // The rule guards transitions only: the 59 leads lost before lost_reason existed have
+  // nobody left to ask, so editing anything else on one must not be blocked by it.
+  it('lets an already-lost lead with no reason be edited', async () => {
+    lead.status = LeadStatus.LOST;
+    lead.lostReason = null;
+
+    await service.updateLead(lead.id, { name: 'Renamed lost lead' });
+
+    expect(leadTransactionRepo.save).toHaveBeenCalledTimes(1);
+    expect(statusEventTransactionRepo.insert).not.toHaveBeenCalled();
+  });
+
+  it('records no event when a status is cleared, since there is no stage to record', async () => {
+    await service.updateLead(lead.id, { status: null as never });
+
+    expect(lead.status).toBeNull();
+    expect(statusEventTransactionRepo.insert).not.toHaveBeenCalled();
+    expect(lead.statusChangedAt).toBeUndefined();
   });
 });
