@@ -4,6 +4,7 @@ import { IsNull, Repository, SelectQueryBuilder } from 'typeorm';
 import { NotePage } from '../../../../entities/note-page.entity';
 import { NotePageFavorite } from '../../../../entities/note-page-favorite.entity';
 import type { NoteActor } from '../services/note-access.service';
+import { noteVisibilitySql } from './note-visibility.sql';
 
 export interface NoteSearchRow {
   id: number;
@@ -27,39 +28,25 @@ export class NotesRepository {
   ) {}
 
   /**
-   * SQL form of the rule NoteAccessService applies to a single loaded page: a page is
-   * visible when it is a team page, when the caller owns it, or when a grant on it or
-   * on any ancestor reaches the caller.
+   * SQL form of the rule NoteAccessService applies to a single loaded page, for a query
+   * whose note_pages alias is `page`, with `:userId` / `:roleId` left for the caller to
+   * bind.
    *
-   * The third arm walks *down* — a grant on a folder covers everything inside it —
-   * which is the mirror image of NoteSharesRepository, where the same relationship is
-   * resolved by walking up from one page. Both must stay in step; the shared rule is
-   * documented once, in NoteAccessService.
+   * The rule itself lives in noteVisibilitySql — one definition shared with the full-text
+   * search, which cannot use the query builder. The third arm walks *down* (a grant on a
+   * folder covers everything inside it), the mirror image of NoteSharesRepository, where
+   * the same relationship is resolved by walking up from one page.
    *
-   * Returns SQL with `:userId` / `:roleId` placeholders for the caller to bind.
+   * Public so NoteReferencesRepository can filter backlinks by the same rule instead of
+   * writing a third copy of it. A backlink list is a list of notes, and a note nobody may
+   * open must not become readable merely because something else points at it.
    */
-  private static visibleCondition(roleId: number | null): string {
-    const subjectMatch =
-      roleId === null
-        ? `s.subject_type = 'user' AND s.subject_id = :userId`
-        : `((s.subject_type = 'user' AND s.subject_id = :userId)
-             OR (s.subject_type = 'role' AND s.subject_id = :roleId))`;
-
-    return `(
-      page.visibility = 'team'
-      OR page.owner_id = :userId
-      OR page.id IN (
-        WITH RECURSIVE granted AS (
-          SELECT s.note_page_id AS id
-          FROM note_page_shares s
-          WHERE ${subjectMatch}
-            AND (s.expires_at IS NULL OR s.expires_at > now())
-          UNION
-          SELECT c.id FROM note_pages c JOIN granted g ON c.parent_id = g.id
-        )
-        SELECT id FROM granted
-      )
-    )`;
+  static visibleCondition(roleId: number | null): string {
+    return noteVisibilitySql({
+      alias: 'page',
+      userId: ':userId',
+      roleId: roleId === null ? null : ':roleId',
+    });
   }
 
   /**
@@ -201,10 +188,20 @@ export class NotesRepository {
   }
 
   /**
-   * Notes attached to a lead/project/contact/company. The visibility filter applies
-   * here too now: attaching a note to an entity used to make it shared by definition,
-   * but visibility is its own column since db/notes-sharing.sql, so an entity note can
-   * be private and must not leak into the entity's panel for everyone.
+   * Notes related to a lead/project/contact/company — the record's Notes panel.
+   *
+   * Reads note_references rather than page.entity_kind/entity_id, so a note pinned to
+   * three records appears under all three instead of only the first. The columns are a
+   * denormalized copy of one of those rows (see NoteReferencesService.syncPrimaryRelation)
+   * and filtering on them would silently hide the rest.
+   *
+   * Pinned relations only: an @mention in the body is a citation, not an attachment, and
+   * folding the two together would fill a lead's panel with every note that ever
+   * mentioned it in passing. Those are listed separately as "mentioned in".
+   *
+   * The visibility filter applies here too: relating a note to an entity used to make it
+   * shared by definition, but visibility is its own column since db/notes-sharing.sql, so
+   * an entity note can be private and must not leak into the entity's panel for everyone.
    */
   async findByEntity(
     entityKind: string,
@@ -212,9 +209,16 @@ export class NotesRepository {
     actor?: NoteActor,
   ): Promise<NotePage[]> {
     const qb = this.baseQuery()
+      .innerJoin(
+        'note_references',
+        'ref',
+        `ref.note_page_id = page.id
+           AND ref.origin = 'relation'
+           AND ref.target_kind = :entityKind
+           AND ref.target_id = :entityId`,
+        { entityKind, entityId },
+      )
       .where('page.deleted_at IS NULL')
-      .andWhere('page.entity_kind = :entityKind', { entityKind })
-      .andWhere('page.entity_id = :entityId', { entityId })
       .orderBy('page.position', 'ASC')
       .addOrderBy('page.id', 'ASC');
     return this.applyVisibility(qb, actor).getMany();
@@ -408,16 +412,26 @@ export class NotesRepository {
   /**
    * Full-text search, filtered by the same visibility rule as every list query.
    *
-   * This is raw SQL rather than the query builder (ts_rank / tsquery have no builder
-   * equivalent), so the rule has to be restated here — the one place it can silently
-   * drift out of step. If a note you were just granted does not turn up in search, this
-   * query is why. `$3::int IS NULL` is how MCP's undefined actor bypasses the filter.
+   * Raw SQL rather than the query builder (ts_rank / tsquery have no builder equivalent),
+   * but no longer a second copy of the rule: noteVisibilitySql renders it for both. If a
+   * note you were just granted does not turn up in search, that function is where to look.
+   *
+   * `$3::int IS NULL` is how MCP's undefined actor bypasses the filter. `$4::int` stays
+   * referenced even when the caller has no role, because an unreferenced parameter makes
+   * Postgres reject the whole bind for supplying more parameters than the statement uses;
+   * comparing against a null role id simply matches nothing, which is the same outcome.
    */
   async search(
     query: string,
     limit: number,
     actor?: NoteActor,
   ): Promise<NoteSearchRow[]> {
+    const visibility = noteVisibilitySql({
+      userId: '$3',
+      roleId: '$4::int',
+      noActorBypass: '$3::int IS NULL',
+    });
+
     return this.repo.query(
       `
       SELECT id, title, icon, parent_id, updated_at,
@@ -425,25 +439,7 @@ export class NotesRepository {
       FROM note_pages
       WHERE deleted_at IS NULL
         AND content_tsv @@ plainto_tsquery('simple', $1)
-        AND (
-          $3::int IS NULL
-          OR visibility = 'team'
-          OR owner_id = $3
-          OR id IN (
-            WITH RECURSIVE granted AS (
-              SELECT s.note_page_id AS id
-              FROM note_page_shares s
-              WHERE (
-                      (s.subject_type = 'user' AND s.subject_id = $3)
-                   OR (s.subject_type = 'role' AND $4::int IS NOT NULL AND s.subject_id = $4)
-                    )
-                AND (s.expires_at IS NULL OR s.expires_at > now())
-              UNION
-              SELECT c.id FROM note_pages c JOIN granted g ON c.parent_id = g.id
-            )
-            SELECT id FROM granted
-          )
-        )
+        AND ${visibility}
       ORDER BY rank DESC, updated_at DESC
       LIMIT $2
       `,

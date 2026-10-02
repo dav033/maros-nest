@@ -7,6 +7,13 @@ import { NotePageShare } from '../../entities/note-page-share.entity';
 import { NotePageLink } from '../../entities/note-page-link.entity';
 import { NotePageLinkView } from '../../entities/note-page-link-view.entity';
 import { NoteTag } from '../../entities/note-tag.entity';
+import { NoteReference } from '../../entities/note-reference.entity';
+import { Lead } from '../../entities/lead.entity';
+import { Project } from '../../entities/project.entity';
+import { Contact } from '../../entities/contact.entity';
+import { Company } from '../../entities/company.entity';
+import { Task } from '../../entities/task.entity';
+import { User } from '../../entities/user.entity';
 import { S3Module } from '../s3/s3.module';
 import { NotesRepository } from './note-management/repositories/notes.repository';
 import { NoteTagsRepository } from './note-management/repositories/note-tags.repository';
@@ -25,6 +32,10 @@ import { NoteShareMapper } from './note-sharing/mappers/note-share.mapper';
 import { NoteShareLinkGuard } from './note-sharing/guards/note-share-link.guard';
 import { PublicRateLimitGuard } from './note-sharing/guards/public-rate-limit.guard';
 import { NoteSharingMaintenanceCron } from './note-sharing/note-sharing-maintenance.cron';
+import { NoteReferencesRepository } from './note-references/repositories/note-references.repository';
+import { NoteReferenceTargetsService } from './note-references/services/note-reference-targets.service';
+import { NoteReferencesService } from './note-references/note-references.service';
+import { NoteReferencesController } from './note-references/note-references.controller';
 
 @Module({
   imports: [
@@ -35,6 +46,16 @@ import { NoteSharingMaintenanceCron } from './note-sharing/note-sharing-maintena
       NotePageLink,
       NotePageLinkView,
       NoteTag,
+      NoteReference,
+      // Read-only, and repositories rather than the owning modules' services: a note can
+      // point at any of these, and injecting six services here would make notes depend on
+      // most of the application. Same call TaskWorkspacesModule makes for the same reason.
+      Lead,
+      Project,
+      Contact,
+      Company,
+      Task,
+      User,
     ]),
     // The public reader signs image URLs through S3Service rather than handing out
     // bucket credentials of its own.
@@ -43,7 +64,7 @@ import { NoteSharingMaintenanceCron } from './note-sharing/note-sharing-maintena
     // re-read its document twenty times.
     CacheModule.register(),
   ],
-  controllers: [NotesController, NotePublicController],
+  controllers: [NotesController, NotePublicController, NoteReferencesController],
   providers: [
     NotesRepository,
     NoteTagsRepository,
@@ -60,7 +81,16 @@ import { NoteSharingMaintenanceCron } from './note-sharing/note-sharing-maintena
     NoteShareLinkGuard,
     PublicRateLimitGuard,
     NoteSharingMaintenanceCron,
+    NoteReferencesRepository,
+    NoteReferenceTargetsService,
+    NoteReferencesService,
   ],
-  exports: [NotesRepository, NotesService, NoteTagsService, NoteAccessService],
+  exports: [
+    NotesRepository,
+    NotesService,
+    NoteTagsService,
+    NoteAccessService,
+    NoteReferencesService,
+  ],
 })
 export class NotesModule {}

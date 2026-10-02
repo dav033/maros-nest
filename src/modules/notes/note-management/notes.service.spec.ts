@@ -31,6 +31,7 @@ function makeService(
   noteTagsRepository: Record<string, jest.Mock> = {},
   noteTreeService: Record<string, jest.Mock> = {},
   sharesRepository: Record<string, jest.Mock> = {},
+  noteReferences: Record<string, jest.Mock> = {},
 ) {
   const shares = {
     // No grants unless a test says otherwise: these cases are about ownership and
@@ -55,6 +56,13 @@ function makeService(
     // a mock that always says yes would pass no matter what the rules did.
     new NoteAccessService(shares as never),
     new NoteMapper(),
+    // Stubbed: these tests are about access and content, and the reference index has its
+    // own suite. A test that cares what was indexed passes its own spy in.
+    {
+      syncInlineFromContent: jest.fn().mockResolvedValue(undefined),
+      setPrimaryRelation: jest.fn().mockResolvedValue(undefined),
+      ...noteReferences,
+    } as never,
   );
 }
 
@@ -512,35 +520,51 @@ describe('NotesService — folders', () => {
   });
 });
 
+/**
+ * The entity link is one row in note_references now, so these tests check that the
+ * request reaches the service that owns that table with the right arguments. What
+ * entity_kind/entity_id end up holding is NoteReferencesService.syncPrimaryRelation's
+ * job and is covered in its own suite.
+ */
 describe('NotesService.setEntityLink', () => {
   let service: NotesService;
-  let notesRepository: Record<string, jest.Mock>;
   let doc: NotePage;
+  let setPrimaryRelation: jest.Mock;
 
   beforeEach(() => {
     doc = page();
-    notesRepository = {
-      findByIdActive: jest.fn().mockResolvedValue(doc),
-      save: jest.fn().mockImplementation((p: NotePage) => Promise.resolve(p)),
-    };
-    service = makeService(notesRepository);
+    setPrimaryRelation = jest.fn().mockResolvedValue(undefined);
+    service = makeService(
+      {
+        findByIdActive: jest.fn().mockResolvedValue(doc),
+        save: jest.fn().mockImplementation((p: NotePage) => Promise.resolve(p)),
+      },
+      {},
+      {},
+      {},
+      { setPrimaryRelation },
+    );
   });
 
   it('links the note to a lead', async () => {
     await service.setEntityLink(1, { entityKind: 'lead', entityId: 42 }, actor(5));
 
-    expect(doc.entityKind).toBe('lead');
-    expect(doc.entityId).toBe(42);
+    expect(setPrimaryRelation).toHaveBeenCalledWith(doc, 'lead', 42, actor(5));
   });
 
-  it('writes real nulls when unlinking, not undefined', async () => {
+  it('passes real nulls when unlinking, not undefined', async () => {
     doc.entityKind = 'lead';
     doc.entityId = 42;
 
     await service.setEntityLink(1, { entityKind: null, entityId: null }, actor(5));
 
-    expect(doc.entityKind).toBeNull();
-    expect(doc.entityId).toBeNull();
+    expect(setPrimaryRelation).toHaveBeenCalledWith(doc, null, null, actor(5));
+  });
+
+  it('ignores a stray entityId when the kind says unlink', async () => {
+    await service.setEntityLink(1, { entityKind: null, entityId: 42 }, actor(5));
+
+    expect(setPrimaryRelation).toHaveBeenCalledWith(doc, null, null, actor(5));
   });
 
   it('leaves ownership and visibility alone when unlinking', async () => {
@@ -556,5 +580,64 @@ describe('NotesService.setEntityLink', () => {
 
     expect(doc.ownerId).toBe(5);
     expect(doc.visibility).toBe('team');
+  });
+
+  it('refuses a user without edit rights before touching the relation', async () => {
+    doc.visibility = 'private';
+    doc.ownerId = 99;
+
+    await expect(
+      service.setEntityLink(1, { entityKind: 'lead', entityId: 42 }, actor(5)),
+    ).rejects.toThrow(NoteAccessDeniedException);
+    expect(setPrimaryRelation).not.toHaveBeenCalled();
+  });
+});
+
+describe('NotesService.updateNoteContent reference indexing', () => {
+  it('reindexes the saved document, so a deleted chip really drops its reference', async () => {
+    const doc = page({ content: { type: 'doc', content: [] } });
+    const syncInlineFromContent = jest.fn().mockResolvedValue(undefined);
+    const service = makeService(
+      {
+        findByIdActive: jest.fn().mockResolvedValue(doc),
+        save: jest.fn().mockImplementation((p: NotePage) => Promise.resolve(p)),
+      },
+      {},
+      {},
+      {},
+      { syncInlineFromContent },
+    );
+
+    const content = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'entityMention', attrs: { kind: 'lead', id: 42 } }] },
+      ],
+    };
+    await service.updateNoteContent(1, { content }, actor(5));
+
+    expect(syncInlineFromContent).toHaveBeenCalledWith(1, content, actor(5));
+  });
+
+  it('does not index a document the save rejected', async () => {
+    const doc = page();
+    doc.updatedAt = new Date('2026-01-01T00:00:00.000Z');
+    const syncInlineFromContent = jest.fn().mockResolvedValue(undefined);
+    const service = makeService(
+      { findByIdActive: jest.fn().mockResolvedValue(doc), save: jest.fn() },
+      {},
+      {},
+      {},
+      { syncInlineFromContent },
+    );
+
+    await expect(
+      service.updateNoteContent(
+        1,
+        { content: {}, expectedUpdatedAt: '2026-01-02T00:00:00.000Z' },
+        actor(5),
+      ),
+    ).rejects.toThrow(NotePageStaleContentException);
+    expect(syncInlineFromContent).not.toHaveBeenCalled();
   });
 });

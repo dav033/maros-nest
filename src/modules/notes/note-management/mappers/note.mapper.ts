@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { NotePage } from '../../../../entities/note-page.entity';
 import { NoteAccess } from '../services/note-access.service';
+import { stripReferenceTargetsForPublic } from '../../../../common/utils/tiptap-references.util';
 
 /**
  * Which pages in a list carry grants or a live public link, resolved in two set queries
@@ -91,6 +92,11 @@ export class NoteMapper {
    * Absent on purpose: internal ids (a numeric id invites walking the range),
    * entityKind/entityId (reveals that a lead exists and which one), ownership,
    * position, favorites, and every email address.
+   *
+   * The same rule has to reach inside `content`: an @mention chip carries a record kind
+   * and id in its attributes, so publishing a document unsanitized would leak through
+   * the body exactly what the field list withholds, and hand out a deep link besides.
+   * stripReferenceTargetsForPublic keeps each chip's text and drops its target.
    */
   toPublicDto(
     entity: NotePage,
@@ -107,7 +113,7 @@ export class NoteMapper {
       title: entity.title,
       icon: entity.icon ?? null,
       kind: entity.kind ?? 'page',
-      content: entity.content ?? {},
+      content: stripReferenceTargetsForPublic(entity.content ?? {}),
       updatedAt: entity.updatedAt,
       author:
         options.showAuthor && entity.lastEditedBy

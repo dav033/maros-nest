@@ -13,6 +13,7 @@ import { InvoiceScansService } from '../../quickbooks/services/invoice-scans.ser
 import { S3Service } from '../../s3/services/s3.service';
 import { TrelloService } from '../../trello/services/trello.service';
 import { NotesService } from '../../notes/note-management/notes.service';
+import { NoteReferencesService } from '../../notes/note-references/note-references.service';
 import { TasksService } from '../../tasks/task-management/tasks.service';
 import { TaskCommentsService } from '../../tasks/task-management/services/task-comments.service';
 import { UsersService } from '../../users/user-management/users.service';
@@ -74,6 +75,7 @@ export type McpToolDeps = {
   s3Service: S3Service;
   trelloService: TrelloService;
   notesService: NotesService;
+  noteReferencesService: NoteReferencesService;
   noteTagsService: NoteTagsService;
   tasksService: TasksService;
   taskCommentsService: TaskCommentsService;

@@ -19,6 +19,7 @@ import {
   NotePageStaleContentException,
 } from '../../../common/exceptions';
 import { extractPlainTextFromTipTapDoc } from '../../../common/utils/tiptap-text.util';
+import { NoteReferencesService } from '../note-references/note-references.service';
 
 const POSITION_STEP = 1000;
 
@@ -32,6 +33,10 @@ export class NotesService {
     private readonly noteTreeService: NoteTreeService,
     private readonly noteAccess: NoteAccessService,
     private readonly noteMapper: NoteMapper,
+    // References are a note's outgoing edges: who it mentions in the body and which
+    // records it is pinned to. Content saves and the entity link both change them, so
+    // they are maintained here rather than left to the client to remember.
+    private readonly noteReferences: NoteReferencesService,
   ) {}
 
   /**
@@ -179,6 +184,12 @@ export class NotesService {
     page.position = maxPosition + POSITION_STEP;
 
     const saved = await this.notesRepository.save(page);
+    // "New note" from a lead's panel arrives with the link already in the DTO. Writing
+    // it through setPrimaryRelation rather than onto the columns alone is what makes the
+    // note appear in that lead's panel at all, now that the panel reads note_references.
+    if (dto.entityKind && dto.entityId != null) {
+      await this.noteReferences.setPrimaryRelation(saved, dto.entityKind, dto.entityId, actor);
+    }
     return this.freshDetail(saved.id, actor);
   }
 
@@ -217,6 +228,10 @@ export class NotesService {
     this.stampEditor(page, actor);
 
     const saved = await this.notesRepository.save(page);
+    // After the save, not before: a document that failed to persist must not leave
+    // references to paragraphs nobody can read. Cheap enough to run on every autosave —
+    // a delete plus a handful of inserts, scoped to this one page.
+    await this.noteReferences.syncInlineFromContent(saved.id, dto.content, actor);
     return this.freshDetail(saved.id, actor);
   }
 
@@ -249,6 +264,11 @@ export class NotesService {
    * Links the note to a lead/project/contact/company, or clears the link when
    * entityKind is null.
    *
+   * Now a thin wrapper over the relation it always was: the note's relations live in
+   * note_references, and entity_kind/entity_id are a denormalized copy of the primary
+   * one. Only that primary is replaced — other pinned relations are left alone, so this
+   * endpoint (and the MCP tool on top of it) cannot silently unpin them.
+   *
    * Unlinking used to have to clear owner_id, because privacy was inferred from
    * "standalone and owned" and dropping the link would have turned the note into
    * someone else's private page. `visibility` is an explicit column since
@@ -260,16 +280,14 @@ export class NotesService {
     if (!page) throw new NoteNotFoundException(id);
     await this.noteAccess.assertCanEdit(page, actor);
 
-    if (dto.entityKind === null) {
-      page.entityKind = null;
-      page.entityId = null;
-    } else {
-      page.entityKind = dto.entityKind;
-      page.entityId = dto.entityId;
-    }
+    await this.noteReferences.setPrimaryRelation(
+      page,
+      dto.entityKind ?? null,
+      dto.entityKind === null ? null : (dto.entityId ?? null),
+      actor,
+    );
 
-    const saved = await this.notesRepository.save(page);
-    return this.freshDetail(saved.id, actor);
+    return this.freshDetail(id, actor);
   }
 
   async moveNote(

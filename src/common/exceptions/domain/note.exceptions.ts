@@ -135,6 +135,24 @@ export class NoteSharingRequiresUserException extends BusinessException {
   }
 }
 
+/** The kind came off the wire; only the seven in NOTE_REFERENCE_KINDS can be pointed at. */
+export class NoteReferenceUnsupportedKindException extends BusinessException {
+  constructor(kind: string) {
+    super(`"${kind}" is not a referenceable record kind`, 'NOTE_REFERENCE_UNSUPPORTED_KIND');
+  }
+}
+
+/**
+ * Pinning a relation to a record that is not there. Inline mentions deliberately do not
+ * raise this: a chip left pointing at a deleted lead is rendered as "(deleted)" rather
+ * than made into an error that blocks saving the note it sits in.
+ */
+export class NoteReferenceTargetNotFoundException extends ResourceNotFoundException {
+  constructor(kind: string, id: number) {
+    super(`Cannot reference ${kind} ${id}: it does not exist`);
+  }
+}
+
 export const NoteExceptions = {
   NoteNotFoundException,
   NoteTagNotFoundException,
@@ -152,4 +170,6 @@ export const NoteExceptions = {
   NoteShareNotFoundException,
   NoteInheritedShareException,
   NoteSharingRequiresUserException,
+  NoteReferenceUnsupportedKindException,
+  NoteReferenceTargetNotFoundException,
 };

@@ -39,6 +39,7 @@ import { AnalyticsProjectsService } from '../analytics/services/analytics-projec
 import { McpActorService } from './mcp-actor.service';
 import { TrelloService } from '../trello/services/trello.service';
 import { NotesService } from '../notes/note-management/notes.service';
+import { NoteReferencesService } from '../notes/note-references/note-references.service';
 import { NoteTagsService } from '../notes/note-management/services/note-tags.service';
 import {
   registerLeadTools,
@@ -73,6 +74,7 @@ import { registerAnalyticsTools } from './tools/analytics';
 import { registerTaskAdvancedTools } from './tools/tasks-advanced';
 import { registerPlatformTools } from './tools/platform';
 import { registerNoteAdvancedTools } from './tools/notes-advanced';
+import { registerNoteReferenceTools } from './tools/note-references';
 import { registerGoogleCalendarTools } from './tools/google-calendar';
 import { registerS3Tools } from './tools/s3';
 import { registerTrelloTools } from './tools/trello';
@@ -97,6 +99,7 @@ export class McpService {
     private readonly s3Service: S3Service,
     private readonly trelloService: TrelloService,
     private readonly notesService: NotesService,
+    private readonly noteReferencesService: NoteReferencesService,
     private readonly noteTagsService: NoteTagsService,
     private readonly tasksService: TasksService,
     private readonly taskCommentsService: TaskCommentsService,
@@ -146,6 +149,7 @@ export class McpService {
       s3Service: this.s3Service,
       trelloService: this.trelloService,
       notesService: this.notesService,
+      noteReferencesService: this.noteReferencesService,
       noteTagsService: this.noteTagsService,
       tasksService: this.tasksService,
       taskCommentsService: this.taskCommentsService,
@@ -201,6 +205,7 @@ export class McpService {
     registerTaskAdvancedTools(server, deps);
     registerPlatformTools(server, deps);
     registerNoteAdvancedTools(server, deps);
+    registerNoteReferenceTools(server, deps);
     registerGoogleCalendarTools(server, deps);
 
     return server;
