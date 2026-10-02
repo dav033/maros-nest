@@ -338,10 +338,18 @@ export function allocateJournalEntryEngine(
   let normalizedLineIndex = 0;
 
   for (const rawLine of rawLines) {
+    // QuickBooks interleaves SubTotalLine rows that the normalizer drops (see
+    // normalizeLine), so they have no counterpart in lineItems: they neither advance the
+    // cursor nor contribute a detail of their own.
+    //
+    // Skipping the whole row is the point. Only advancing the cursor conditionally — which
+    // is what this did before — still let the subtotal row read the *next* real line and
+    // push it as a detail, and then the following row read that same line again. Every
+    // journal entry with a subtotal before a cost line charged that line to the job twice.
+    if (ctx.stringValue(rawLine['DetailType']) === 'SubTotalLine') continue;
+
     const normalizedLine = txn.lineItems[normalizedLineIndex];
-    if (ctx.stringValue(rawLine['DetailType']) !== 'SubTotalLine') {
-      normalizedLineIndex += 1;
-    }
+    normalizedLineIndex += 1;
     if (!normalizedLine) continue;
     if (requireProjectMatch && project && !ctx.lineMatchesProject(normalizedLine, project)) {
       continue;
