@@ -28,6 +28,10 @@ import {
 } from './invoice-scans/invoice-project-number';
 import { InvoiceScanNotificationsService } from './invoice-scans/invoice-scan-notifications.service';
 import {
+  hasDirectionClassificationConflict,
+  resolveQboLookupSides,
+} from './invoice-scans/invoice-qbo-lookup-sides';
+import {
   ExtractedInvoiceData,
   InvoiceScan,
 } from '../entities/invoice-scan.entity';
@@ -724,29 +728,33 @@ export class InvoiceScansService {
       const realmId = await this.financials.getDefaultRealmId();
       const outgoing = invoice.direction === 'outgoing';
       const incoming = invoice.direction === 'incoming';
+      // Not `direction` alone: a proof of payment Maros made is labelled `outgoing` by the
+      // extractor (the money did leave) while being an expense, which sent its counterparty
+      // to be matched against Customers. See resolveQboLookupSides.
+      const sides = resolveQboLookupSides(invoice.direction, invoice.classification);
       const [customers, accounts, services, vendors] = await Promise.all([
-        outgoing || !incoming
+        sides.revenue
           ? this.qboApi.queryAll(realmId, 'Customer', {
               select: 'Id, DisplayName, CompanyName, Active',
               where: 'Active = true',
               maxPages: 5,
             })
           : Promise.resolve([]),
-        incoming || !outgoing
+        sides.expense
           ? this.qboApi.queryAll(realmId, 'Account', {
               select: 'Id, Name, AccountType, Active',
               where: 'Active = true',
               maxPages: 5,
             })
           : Promise.resolve([]),
-        outgoing || !incoming
+        sides.revenue
           ? this.qboApi.queryAll(realmId, 'Item', {
               select: 'Id, Name, Type, Active',
               where: "Type = 'Service' AND Active = true",
               maxPages: 5,
             })
           : Promise.resolve([]),
-        incoming || !outgoing
+        sides.expense
           ? this.qboApi.queryAll(realmId, 'Vendor', {
               select: 'Id, DisplayName, CompanyName, Active',
               where: 'Active = true',
@@ -754,11 +762,12 @@ export class InvoiceScansService {
             })
           : Promise.resolve([]),
       ]);
-      const candidateRecords = outgoing
-        ? customers
-        : incoming
-          ? vendors
-          : [...customers, ...vendors];
+      // Both lists when both were fetched, so a mislabelled document still surfaces the
+      // right counterparty instead of the best wrong one.
+      const candidateRecords = [
+        ...(sides.revenue ? customers : []),
+        ...(sides.expense ? vendors : []),
+      ];
       const matches = this.rankMatches(candidateRecords, invoice.counterpartyName);
       const accountMatches = this.rankAccounts(accounts, invoice.classification);
       const serviceItems = this.rankServiceItems(services, invoice.lineItems);
@@ -766,6 +775,14 @@ export class InvoiceScansService {
       return {
         connected: true,
         suggestionOnly: true,
+        /**
+         * Surfaced so the reviewer knows the extractor contradicted itself about a document
+         * that moves money, rather than silently receiving suggestions from both sides.
+         */
+        directionConflict: hasDirectionClassificationConflict(
+          invoice.direction,
+          invoice.classification,
+        ),
         transactionType: outgoing
           ? 'Invoice'
           : incoming
@@ -787,6 +804,7 @@ export class InvoiceScansService {
       return {
         connected: false,
         suggestionOnly: true,
+        directionConflict: false,
         transactionType: null,
         counterpartyType: null,
         counterparties: [],
