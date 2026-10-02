@@ -12,15 +12,19 @@ import {
   CacheTTL,
 } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
+import { AnalyticsClientsService } from './services/analytics-clients.service';
 import { AnalyticsFinancialService } from './services/analytics-financial.service';
 import { AnalyticsOverviewService } from './services/analytics-overview.service';
 import { AnalyticsPipelineService } from './services/analytics-pipeline.service';
 import { AnalyticsProjectsService } from './services/analytics-projects.service';
+import { AnalyticsStaleLeadsService } from './services/analytics-stale-leads.service';
 import { QuickbooksApiService } from '../quickbooks/services/core/quickbooks-api.service';
 import { ProjectsService } from '../projects/project-management/services/projects.service';
 import { DateRangeQueryDto } from './dto/queries/date-range-query.dto';
 import { RevenueTrendQueryDto } from './dto/queries/revenue-trend-query.dto';
 import { TopClientsQueryDto } from './dto/queries/top-clients-query.dto';
+import { ClientScorecardQueryDto } from './dto/queries/client-scorecard-query.dto';
+import { StaleLeadsQueryDto } from './dto/queries/stale-leads-query.dto';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { LeadTypeQueryDto } from './dto/queries/lead-type-query.dto';
 import { Type } from 'class-transformer';
@@ -51,6 +55,8 @@ export class AnalyticsController {
     private readonly pipelineService: AnalyticsPipelineService,
     private readonly financialService: AnalyticsFinancialService,
     private readonly projectsService: AnalyticsProjectsService,
+    private readonly clientsService: AnalyticsClientsService,
+    private readonly staleLeadsService: AnalyticsStaleLeadsService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
     private readonly quickbooksApiService: QuickbooksApiService,
     private readonly crmProjectsService: ProjectsService,
@@ -246,6 +252,44 @@ export class AnalyticsController {
   @CacheTTL(ANALYTICS_CACHE_TTL_MS)
   getProjectHealth(@Query() query: LeadTypeQueryDto) {
     return this.projectsService.getProjectHealth(query.leadType);
+  }
+
+  /**
+   * GET /analytics/clients/scorecard
+   *
+   * One row per client (contact) covering its whole lead history: counts, close rate over
+   * decided leads, estimated and won value, and the date of its newest lead.
+   *
+   * Query params (optional):
+   * - `limit` — rows to return (1–500, default 50).
+   *
+   * Left on the controller's `dashboard:read` rather than `finance:read`: the amounts are
+   * the CRM's own `leads.estimate`, the same column /analytics/pipeline reports under
+   * `dashboard:read`, not QuickBooks revenue. Whoever is meant to cultivate these clients
+   * is not necessarily whoever is allowed to read the P&L.
+   */
+  @Get('clients/scorecard')
+  @CacheTTL(ANALYTICS_CACHE_TTL_MS)
+  getClientScorecard(@Query() query: ClientScorecardQueryDto) {
+    return this.clientsService.getClientScorecard(query.limit);
+  }
+
+  /**
+   * GET /analytics/leads/stale
+   *
+   * Leads in an undecided status that have been open longer than `days`, plus totals per
+   * age bucket.
+   *
+   * Query params (optional):
+   * - `days` — age threshold, exclusive (1–3650, default 60).
+   *
+   * Ages are derived from `start_date`; see AnalyticsStaleLeadsService for what that does
+   * and does not measure.
+   */
+  @Get('leads/stale')
+  @CacheTTL(ANALYTICS_CACHE_TTL_MS)
+  getStaleLeads(@Query() query: StaleLeadsQueryDto) {
+    return this.staleLeadsService.getStaleLeads(query.days);
   }
 
   /**
