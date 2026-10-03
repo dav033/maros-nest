@@ -352,18 +352,69 @@ export function allocateBillPaymentEngine(
       if (billAllocation.amount === 0) continue;
 
       const allocatedAmount = ctx.money(amountPerBill * billAllocation.ratio);
-      details.push({
-        linkedTxnId: linked.txnId,
-        linkedTxnType: linked.txnType,
-        sourceEntityType: 'Bill',
-        sourceEntityId: bill.entityId,
-        basisAmount: ctx.money(amountPerBill),
-        projectBasisAmount: billAllocation.amount,
+      const allocationMethod =
+        billAllocation.ratio === 1 ? 'linked_bill_full' : 'linked_bill_project_line_ratio';
+
+      /**
+       * La cuenta de gasto de un pago de factura esta en la factura, no en el
+       * pago: las lineas de un BillPayment van contra Cuentas por Pagar, que es
+       * donde la factura quedo registrada. Poner aqui `bill.category` tampoco
+       * sirve, porque la cabecera de una factura es A/P por definicion.
+       *
+       * Antes se ponia esa cabecera, y el efecto era medible: de los 190.586,43
+       * del job 032P-0825, 79.867,69 se agrupaban bajo "Accounts Payable (A/P)"
+       * en vez de repartirse entre materiales, subcontratistas y alquiler de
+       * equipo. El total nunca estuvo mal — el desglose si, y por diez veces en
+       * subcontratistas: 7.785,23 contra los 78.840,63 que dice el Profit and
+       * Loss de QuickBooks.
+       *
+       * Asi que el importe se reparte entre los detalles de la factura, que ya
+       * traen la cuenta de cada linea. Una misma factura con material y con
+       * subcontrata se parte entre las dos.
+       */
+      const billDetails = billAllocation.details.filter(
+        (detail) => detail.allocatedAmount !== 0,
+      );
+
+      if (!billDetails.length) {
+        details.push({
+          linkedTxnId: linked.txnId,
+          linkedTxnType: linked.txnType,
+          sourceEntityType: 'Bill',
+          sourceEntityId: bill.entityId,
+          basisAmount: ctx.money(amountPerBill),
+          projectBasisAmount: billAllocation.amount,
+          allocatedAmount,
+          allocationRatio: billAllocation.ratio,
+          allocationMethod,
+          category: bill.category ?? bill.account,
+        });
+        continue;
+      }
+
+      // El reparto se hace sobre `allocatedAmount` ya redondeado y el ultimo
+      // trozo absorbe el resto, de modo que la suma de los trozos es la misma
+      // cifra que habia antes al centimo: esto cambia a que cuenta se imputa el
+      // dinero, no cuanto.
+      const shares = splitProportionally(
         allocatedAmount,
-        allocationRatio: billAllocation.ratio,
-        allocationMethod:
-          billAllocation.ratio === 1 ? 'linked_bill_full' : 'linked_bill_project_line_ratio',
-        category: bill.category ?? bill.account,
+        billDetails.map((detail) => detail.allocatedAmount),
+        ctx,
+      );
+
+      billDetails.forEach((billDetail, index) => {
+        details.push({
+          linkedTxnId: linked.txnId,
+          linkedTxnType: linked.txnType,
+          sourceEntityType: 'Bill',
+          sourceEntityId: bill.entityId,
+          basisAmount: ctx.money(amountPerBill),
+          projectBasisAmount: billAllocation.amount,
+          allocatedAmount: shares[index],
+          allocationRatio: billAllocation.ratio,
+          allocationMethod,
+          category: billDetail.category ?? bill.category ?? bill.account,
+        });
       });
     }
   }
@@ -468,3 +519,25 @@ export function paymentAllocationLinesEngine(
   ];
 }
 
+/**
+ * Parte `total` en trozos proporcionales a `weights`, y el ultimo absorbe el
+ * resto del redondeo. Devolver trozos que no suman el total es como un desglose
+ * acaba contradiciendo a su propia cifra, que es el fallo que ya costo arreglar
+ * una vez en los buckets del job cost.
+ */
+function splitProportionally(
+  total: number,
+  weights: number[],
+  ctx: Pick<AllocationContext, 'money'>,
+): number[] {
+  const sum = weights.reduce((acc, weight) => acc + weight, 0);
+  if (sum === 0) return weights.map(() => 0);
+
+  const shares = weights.map((weight) => ctx.money((total * weight) / sum));
+  const assigned = shares.reduce((acc, share) => acc + share, 0);
+  const remainder = ctx.money(total - assigned);
+  if (remainder !== 0) {
+    shares[shares.length - 1] = ctx.money(shares[shares.length - 1] + remainder);
+  }
+  return shares;
+}

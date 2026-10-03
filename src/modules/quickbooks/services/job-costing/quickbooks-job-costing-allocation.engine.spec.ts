@@ -648,6 +648,127 @@ describe('allocateBillPaymentEngine', () => {
     expect(result.method).toBe('linked_bill_full');
   });
 
+  /**
+   * El desglose por cuenta de gasto de un pago de factura.
+   *
+   * Las lineas de un BillPayment van contra Cuentas por Pagar: la cuenta de
+   * gasto esta en la factura. Antes se tomaba la cabecera de la factura, que es
+   * A/P tambien, y el efecto era medible en el job 032P-0825: de 190.586,43 de
+   * coste, 79.867,69 se agrupaban bajo "Accounts Payable (A/P)". Subcontratistas
+   * salia 7.785,23 contra los 78.840,63 del Profit and Loss de QuickBooks.
+   */
+  it('takes the expense account from the bill, not from the payment', () => {
+    const { h, ctx } = harness();
+    h.normalizer.normalizeBill.mockReturnValue(
+      txn({
+        entityId: '3323',
+        totalAmount: 6500,
+        category: { value: '7', name: 'Accounts Payable (A/P)' },
+        lineItems: [
+          line({
+            amount: 6500,
+            projectRefs: [onProject],
+            account: { value: '188', name: 'Subcontractors Expense' },
+          }),
+        ],
+      }) as never,
+    );
+
+    const result = allocateBillPaymentEngine(
+      ctx,
+      payment([{ amount: 6500, billIds: ['3323'] }]),
+      txn({ entityType: 'BillPayment', entityId: '99', totalAmount: 6500 }),
+      new Map([['3323', { Id: '3323' }]]),
+      project,
+      true,
+      [],
+      everyLineIsCost,
+    );
+
+    expect(result.amount).toBe(6500);
+    expect(result.details).toHaveLength(1);
+    expect(result.details[0].category).toEqual({
+      value: '188',
+      name: 'Subcontractors Expense',
+    });
+  });
+
+  /** Una factura con material y subcontrata se parte entre las dos cuentas. */
+  it('splits a payment across the two expense accounts of one bill', () => {
+    const { h, ctx } = harness();
+    h.normalizer.normalizeBill.mockReturnValue(
+      txn({
+        entityId: '10',
+        totalAmount: 1000,
+        lineItems: [
+          line({
+            amount: 750,
+            projectRefs: [onProject],
+            account: { value: '185', name: 'Construction Materials Costs' },
+          }),
+          line({
+            amount: 250,
+            projectRefs: [onProject],
+            account: { value: '188', name: 'Subcontractors Expense' },
+          }),
+        ],
+      }) as never,
+    );
+
+    const result = allocateBillPaymentEngine(
+      ctx,
+      payment([{ amount: 1000, billIds: ['10'] }]),
+      txn({ entityType: 'BillPayment', totalAmount: 1000 }),
+      new Map([['10', { Id: '10' }]]),
+      project,
+      true,
+      [],
+      everyLineIsCost,
+    );
+
+    expect(result.amount).toBe(1000);
+    const byAccount = Object.fromEntries(
+      result.details.map((detail) => [detail.category?.value, detail.allocatedAmount]),
+    );
+    expect(byAccount).toEqual({ '185': 750, '188': 250 });
+  });
+
+  /**
+   * Lo que no puede cambiar: el dinero. El reparto decide a que cuenta se imputa,
+   * no cuanto, asi que los trozos tienen que sumar el mismo importe al centimo
+   * aunque la division no sea exacta — un desglose que no suma su propio total es
+   * el fallo que ya costo arreglar una vez en los buckets del job cost.
+   */
+  it('keeps the total to the cent when the split does not divide evenly', () => {
+    const { h, ctx } = harness();
+    h.normalizer.normalizeBill.mockReturnValue(
+      txn({
+        entityId: '10',
+        totalAmount: 100,
+        lineItems: [
+          line({ amount: 33.33, projectRefs: [onProject], account: { value: 'a', name: 'A' } }),
+          line({ amount: 33.33, projectRefs: [onProject], account: { value: 'b', name: 'B' } }),
+          line({ amount: 33.34, projectRefs: [onProject], account: { value: 'c', name: 'C' } }),
+        ],
+      }) as never,
+    );
+
+    const result = allocateBillPaymentEngine(
+      ctx,
+      payment([{ amount: 100, billIds: ['10'] }]),
+      txn({ entityType: 'BillPayment', totalAmount: 100 }),
+      new Map([['10', { Id: '10' }]]),
+      project,
+      true,
+      [],
+      everyLineIsCost,
+    );
+
+    const sum = result.details.reduce((acc, detail) => acc + detail.allocatedAmount, 0);
+    expect(Number(sum.toFixed(2))).toBe(result.amount);
+    expect(result.amount).toBe(100);
+  });
+
   it('follows the payment through to the bill it paid', () => {
     const { h, ctx } = harness();
     const bill = txn({
