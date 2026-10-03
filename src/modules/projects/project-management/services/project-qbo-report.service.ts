@@ -18,12 +18,19 @@ import {
  * (`report_date`) en vez de un reporte de rango (`start_date`/`end_date`), y el
  * alcance real de las cifras que devuelve.
  *
- * `scope` sale de si la documentación pública de la API de Intuit lista el
- * parámetro `customer` para ese reporte: ProfitAndLoss, ProfitAndLossDetail,
- * GeneralLedger, AgedPayables, VendorExpenses, CashFlow y BalanceSheet sí lo
- * listan, así que quedan acotados al cliente del proyecto. VendorBalanceDetail
- * no: solo admite `vendor` y `department`, de modo que devuelve saldos de toda
- * la empresa aunque se le mande `customer`.
+ * `scope` sale de lo que el reporte devuelve de verdad, no de lo que la
+ * documentación de Intuit dice que acepta. Se comprobó pidiendo cada reporte
+ * para dos proyectos con jobs distintos (472 y 241) y comparando la respuesta:
+ * ProfitAndLoss, ProfitAndLossDetail, GeneralLedger, VendorExpenses, CashFlow y
+ * BalanceSheet devuelven cifras distintas, así que el filtro se aplica.
+ *
+ * AgedPayables y VendorBalanceDetail devuelven exactamente lo mismo para
+ * cualquier proyecto —el mismo TOTAL de 231.520,10 y los mismos 15 proveedores—
+ * de modo que son cifras de toda la empresa. VendorBalanceDetail ya se sabía
+ * (solo admite `vendor` y `department`); AgedPayables sí lista `customer` en la
+ * documentación pero lo ignora, y estaba declarado como `project`, así que la
+ * interfaz presentaba la deuda de la empresa entera como si fuera del proyecto
+ * y sin ningún aviso.
  *
  * El filtro se sigue enviando en los ocho (QBO ignora los parámetros que no
  * entiende, y si algún día lo admitiera el reporte ya vendría acotado), pero la
@@ -53,7 +60,7 @@ const QBO_REPORTS: Record<
   [QboReportName.AgedPayables]: {
     qboName: 'AgedPayables',
     pointInTime: true,
-    scope: 'project',
+    scope: 'company',
   },
   [QboReportName.VendorExpenses]: {
     qboName: 'VendorExpenses',

@@ -35,6 +35,31 @@ describe('ProjectQboReportService', () => {
     });
   }
 
+  /**
+   * Comprobado contra QuickBooks pidiendo cada reporte para dos proyectos con
+   * jobs distintos (472 y 241): AgedPayables y VendorBalanceDetail devuelven
+   * respuesta identica —el mismo TOTAL y los mismos 15 proveedores— asi que son
+   * cifras de toda la empresa. AgedPayables estaba declarado como 'project', de
+   * modo que la pantalla ensenaba la deuda de la empresa entera como si fuera
+   * del proyecto y sin el aviso de alcance.
+   */
+  it.each([
+    [QboReportName.AgedPayables, 'company'],
+    [QboReportName.VendorBalanceDetail, 'company'],
+    [QboReportName.ProfitAndLoss, 'project'],
+    [QboReportName.ProfitAndLossDetail, 'project'],
+    [QboReportName.GeneralLedgerDetail, 'project'],
+    [QboReportName.VendorExpenses, 'project'],
+    [QboReportName.CashFlow, 'project'],
+    [QboReportName.BalanceSheet, 'project'],
+  ])('declares %s as %s scope', async (report, scope) => {
+    const { service } = build(projectWithNumber('097-0726', '512'));
+
+    const result = await service.getProjectReport(42, { report, ...RANGE } as never);
+
+    expect(result.scope).toBe(scope);
+  });
+
   it('uses the stored link when the project has one', async () => {
     const { service, report, getProjectJobIds } = build(
       projectWithNumber('097-0726', '512'),
