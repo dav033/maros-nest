@@ -83,3 +83,75 @@ describe('ProjectMapper end_date sealing', () => {
     expect(entity.endDate).toBeUndefined();
   });
 });
+
+/**
+ * El pronostico de coste. Lo que se prueba aqui es la diferencia entre "nadie lo
+ * escribio" y "escribieron cero", y que la fecha solo se sella cuando la cifra
+ * cambia: una fecha que se refresca en cada guardado del proyecto hace pasar por
+ * recien revisado un pronostico de hace tres meses.
+ */
+describe('ProjectMapper cost forecast', () => {
+  const mapper = new ProjectMapper();
+
+  function project(partial: Partial<Project> = {}): Project {
+    return Object.assign(new Project(), partial);
+  }
+
+  it('writes both figures and stamps when they were written', () => {
+    const entity = project();
+
+    mapper.updateEntity(
+      { forecastMaterialCost: 120000, forecastSubcontractorCost: 85000.5 } as UpdateProjectDto,
+      entity,
+    );
+
+    expect(entity.forecastMaterialCost).toBe('120000.00');
+    expect(entity.forecastSubcontractorCost).toBe('85000.50');
+    expect(entity.forecastUpdatedAt).toBeInstanceOf(Date);
+  });
+
+  it('leaves the forecast alone when the update does not mention it', () => {
+    const entity = project({
+      forecastMaterialCost: '120000.00',
+      forecastUpdatedAt: new Date('2026-01-01T00:00:00Z'),
+    });
+
+    mapper.updateEntity({ overview: 'otra cosa' } as UpdateProjectDto, entity);
+
+    expect(entity.forecastMaterialCost).toBe('120000.00');
+    expect(entity.forecastUpdatedAt).toEqual(new Date('2026-01-01T00:00:00Z'));
+  });
+
+  /** `null` borra; 0 es una cifra que alguien escribio. */
+  it('clears the forecast with null and keeps an explicit zero', () => {
+    const entity = project({ forecastMaterialCost: '120000.00' });
+
+    mapper.updateEntity(
+      { forecastMaterialCost: null, forecastSubcontractorCost: 0 } as UpdateProjectDto,
+      entity,
+    );
+
+    expect(entity.forecastMaterialCost).toBeNull();
+    expect(entity.forecastSubcontractorCost).toBe('0.00');
+  });
+
+  it('does not restamp when the figure comes back the same', () => {
+    const stamped = new Date('2026-01-01T00:00:00Z');
+    const entity = project({ forecastMaterialCost: '120000.00', forecastUpdatedAt: stamped });
+
+    // Postgres devuelve numeric como cadena, asi que 120000 y "120000.00" son la
+    // misma cifra escrita de dos formas.
+    mapper.updateEntity({ forecastMaterialCost: 120000 } as UpdateProjectDto, entity);
+
+    expect(entity.forecastUpdatedAt).toEqual(stamped);
+  });
+
+  it('reads the forecast back as a number, and a missing one as null', () => {
+    const dto = mapper.toDto(
+      project({ id: 77, forecastMaterialCost: '105600.23', forecastSubcontractorCost: null }),
+    );
+
+    expect(dto.forecastMaterialCost).toBe(105600.23);
+    expect(dto.forecastSubcontractorCost).toBeNull();
+  });
+});

@@ -29,8 +29,36 @@ export class ProjectMapper {
     if (dto.notes !== undefined) entity.notes = dto.notes;
     if (dto.attachments !== undefined) entity.attachments = dto.attachments;
 
+    this.applyForecast(dto, entity);
+
     const sealed = sealEndDate(previousStatus, entity.projectProgressStatus, entity.endDate, new Date());
     if (sealed) entity.endDate = sealed;
+  }
+
+  /**
+   * El pronostico de coste. `undefined` es "no lo mandaron" y no toca nada;
+   * `null` lo borra. La fecha solo se sella cuando alguna de las dos cifras
+   * cambia de verdad: refrescarla en cada guardado del proyecto haria pasar por
+   * recien revisado un pronostico escrito hace tres meses, que es justo lo que
+   * la fecha viene a delatar.
+   */
+  private applyForecast(dto: UpdateProjectDto, entity: Project): void {
+    const before = [entity.forecastMaterialCost, entity.forecastSubcontractorCost];
+
+    if (dto.forecastMaterialCost !== undefined) {
+      entity.forecastMaterialCost =
+        dto.forecastMaterialCost === null ? null : dto.forecastMaterialCost.toFixed(2);
+    }
+    if (dto.forecastSubcontractorCost !== undefined) {
+      entity.forecastSubcontractorCost =
+        dto.forecastSubcontractorCost === null
+          ? null
+          : dto.forecastSubcontractorCost.toFixed(2);
+    }
+
+    const after = [entity.forecastMaterialCost, entity.forecastSubcontractorCost];
+    const changed = after.some((value, index) => !sameAmount(value, before[index]));
+    if (changed) entity.forecastUpdatedAt = new Date();
   }
 
   toDto(entity: Project): any {
@@ -55,6 +83,13 @@ export class ProjectMapper {
       leadId: entity.lead ? entity.lead.id : undefined,
       client,
       paymentSummary: null,
+      // null de verdad y no 0: la pantalla tiene que poder decir "sin
+      // pronostico" en vez de ensenar un cero que nadie escribio.
+      forecastMaterialCost: toAmount(entity.forecastMaterialCost),
+      forecastSubcontractorCost: toAmount(entity.forecastSubcontractorCost),
+      forecastUpdatedAt: entity.forecastUpdatedAt
+        ? entity.forecastUpdatedAt.toISOString()
+        : null,
     };
 
     // Include lead information if loaded
@@ -86,4 +121,19 @@ export class ProjectMapper {
 
     return dto;
   }
+}
+
+/**
+ * `numeric` vuelve de Postgres como cadena ("105600.23"), y comparar cadenas
+ * daria por cambiado un 1000 reescrito como 1000.00.
+ */
+function sameAmount(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (a == null || b == null) return a == null && b == null;
+  return Number(a) === Number(b);
+}
+
+function toAmount(value: string | null | undefined): number | null {
+  if (value == null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }

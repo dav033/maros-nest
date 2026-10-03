@@ -29,6 +29,7 @@ import { ImportQuickbooksProjectDto } from './dto/import-quickbooks-project.dto'
 import { LinkQuickbooksJobDto } from './dto/link-quickbooks-job.dto';
 import { DeactivateQuickbooksJobDto } from './dto/deactivate-quickbooks-job.dto';
 import { QuickbooksJobDeactivationService } from './services/quickbooks-job-deactivation.service';
+import { ProjectCostBreakdownService } from './services/project-cost-breakdown.service';
 import { ProjectQboReportService } from './services/project-qbo-report.service';
 import { ProjectReceivablesService } from './services/project-receivables.service';
 
@@ -42,6 +43,7 @@ export class ProjectsController {
     private readonly quickbooksProjectImport: QuickbooksProjectImportService,
     private readonly quickbooksJobDeactivation: QuickbooksJobDeactivationService,
     private readonly projectQboReport: ProjectQboReportService,
+    private readonly projectCostBreakdown: ProjectCostBreakdownService,
     private readonly projectReceivables: ProjectReceivablesService,
   ) {}
 
@@ -232,6 +234,18 @@ export class ProjectsController {
     @Body() dto: UpdateEstimateDto,
   ) {
     return this.projectsService.updateProjectEstimate(id, dto.amount);
+  }
+
+  @Get(':id/cost-breakdown')
+  @RequirePermissions('finance:read')
+  @ApiOperation({
+    summary:
+      "What the project has cost so far in materials and subcontractors, with the vendors inside each, against what it is expected to end up costing",
+  })
+  @ApiParam({ name: 'id', type: Number })
+  @ApiResponse({ status: 200, description: 'Returns the per-category cost breakdown' })
+  async getProjectCostBreakdown(@Param('id', ParseIntPipe) id: number) {
+    return this.projectCostBreakdown.getBreakdown(id);
   }
 
   @Get(':id/qbo-report')

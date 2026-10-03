@@ -82,6 +82,36 @@ export class Project {
   @Column({ name: 'paid_at', type: 'date', nullable: true })
   paidAt?: string | null;
 
+  /**
+   * What the team expects this project to end up costing, by category — a judgement, not
+   * a derivation: no QuickBooks figure implies it, which is why it is stored.
+   *
+   * NULL means nobody recorded it. That is not 0 and not "no overrun": a screen that
+   * showed 0 would read as "nothing expected" and turn every unforecast job into an
+   * apparent overrun of its whole cost.
+   */
+  @Column({
+    name: 'forecast_material_cost',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
+  forecastMaterialCost?: string | null;
+
+  @Column({
+    name: 'forecast_subcontractor_cost',
+    type: 'decimal',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
+  forecastSubcontractorCost?: string | null;
+
+  /** When either forecast was last written, so the screen can say how old it is. */
+  @Column({ name: 'forecast_updated_at', type: 'timestamptz', nullable: true })
+  forecastUpdatedAt?: Date | null;
+
   @OneToOne(() => Lead, { nullable: false, cascade: ['insert', 'update'] })
   @JoinColumn({ name: 'lead_id' })
   lead: Lead;
