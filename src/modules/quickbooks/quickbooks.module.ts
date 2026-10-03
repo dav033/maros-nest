@@ -35,6 +35,7 @@ import { InvoiceScansController } from './invoice-scans.controller';
 import { InvoiceScansService } from './services/invoice-scans.service';
 import { S3Module } from '../s3/s3.module';
 import { MailModule } from '../mail/mail.module';
+import { InvoiceCounterpartyWriteService } from './services/invoice-scans/invoice-counterparty-write.service';
 import { InvoiceScanNotificationsService } from './services/invoice-scans/invoice-scan-notifications.service';
 import { InvoiceScanReminderCron } from './cron/invoice-scan-reminder.cron';
 import { Project } from '../../entities/project.entity';
@@ -77,6 +78,7 @@ import { Project } from '../../entities/project.entity';
     QuickbooksTokenRefreshCron,
     ProjectQboEnrichmentService,
     InvoiceScansService,
+    InvoiceCounterpartyWriteService,
     InvoiceScanNotificationsService,
     InvoiceScanReminderCron,
   ],

@@ -15,14 +15,19 @@ import { RequirePermissions } from '../../common/decorators/require-permissions.
 import { AttachInvoiceScanFileDto } from './dto/attach-invoice-scan-file.dto';
 import { CreateManualInvoiceTransactionDto } from './dto/create-manual-invoice-transaction.dto';
 import { CreateInvoiceScanDto } from './dto/create-invoice-scan.dto';
+import { CreateQboCounterpartyDto } from './dto/create-qbo-counterparty.dto';
 import { UpdateInvoiceScanDto } from './dto/update-invoice-scan.dto';
+import { InvoiceCounterpartyWriteService } from './services/invoice-scans/invoice-counterparty-write.service';
 import { InvoiceScansService } from './services/invoice-scans.service';
 
 @ApiTags('Invoice scans')
 @Controller('invoice-scans')
 @RequirePermissions('finance:write')
 export class InvoiceScansController {
-  constructor(private readonly invoiceScans: InvoiceScansService) {}
+  constructor(
+    private readonly invoiceScans: InvoiceScansService,
+    private readonly counterpartyWrite: InvoiceCounterpartyWriteService,
+  ) {}
 
   @Get()
   list() {
@@ -33,6 +38,11 @@ export class InvoiceScansController {
   @Get('counterparties')
   counterparties() {
     return this.invoiceScans.listQboCounterparties();
+  }
+
+  @Post('counterparties')
+  createCounterparty(@Body() body: CreateQboCounterpartyDto) {
+    return this.counterpartyWrite.create(body);
   }
 
   @Get(':id')

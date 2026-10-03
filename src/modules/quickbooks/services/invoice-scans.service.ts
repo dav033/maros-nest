@@ -144,7 +144,7 @@ export interface QboCounterpartyOption {
   type: QboCounterpartyType;
 }
 
-const COUNTERPARTIES_CACHE_KEY = 'invoice-scans:qbo-counterparties';
+export const COUNTERPARTIES_CACHE_KEY = 'invoice-scans:qbo-counterparties';
 /**
  * Ten minutes. The list only moves when somebody creates a vendor or a customer
  * inside QuickBooks, which is rare next to how often it is read: the picker is
