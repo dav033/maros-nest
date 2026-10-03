@@ -117,7 +117,7 @@ describe('InvoiceCounterpartyWriteService', () => {
     expect(h.saved[0].qboVendorMatchedAt).toBeInstanceOf(Date);
   });
 
-  it('creates a customer for money coming in, with no vendor link', async () => {
+  it('creates a customer for money coming in and links it by its own id', async () => {
     const h = harness();
 
     const result = await h.service.create({
@@ -128,9 +128,51 @@ describe('InvoiceCounterpartyWriteService', () => {
     expect(h.qboApi.mutateEntity).toHaveBeenCalledWith('realm-1', 'Customer', {
       DisplayName: 'Anderson Family',
     });
-    expect(result).toMatchObject({ type: 'Customer', linkedToQuickbooks: false });
-    expect(h.saved[0]).toMatchObject({ name: 'Anderson Family', customer: true });
+    expect(result).toMatchObject({ type: 'Customer', linkedToQuickbooks: true });
+    expect(h.saved[0]).toMatchObject({
+      name: 'Anderson Family',
+      customer: true,
+      qboCustomerName: 'Anderson Family',
+    });
+    expect(h.saved[0].qboCustomerId).toBeTruthy();
+    expect(h.saved[0].qboCustomerMatchedAt).toBeInstanceOf(Date);
+  });
+
+  /**
+   * The two ids are different records in QuickBooks and the same company can be both, so a
+   * customer id must never reach the vendor columns — it would surface in the vendor map
+   * (get_qbo_vendor_crm_map) as a supplier that does not exist.
+   */
+  it('keeps the customer id out of the vendor columns', async () => {
+    const h = harness();
+
+    await h.service.create({ name: 'Anderson Family', direction: 'incoming' });
+
     expect(h.saved[0].qboVendorId).toBeUndefined();
+    expect(h.saved[0].qboVendorName).toBeUndefined();
+    expect(h.saved[0].qboVendorMatchConfidence).toBeUndefined();
+  });
+
+  /** Same rule as the vendor side: a link somebody already made is not overwritten. */
+  it('does not rewrite a company already pointing at another customer', async () => {
+    const h = harness({
+      crmCompanies: [
+        {
+          id: 9,
+          name: 'Anderson Family',
+          qboCustomerId: '777',
+          qboCustomerName: 'Anderson Family (old)',
+        },
+      ],
+    });
+
+    const result = await h.service.create({
+      name: 'Anderson Family',
+      direction: 'incoming',
+    });
+
+    expect(result).toMatchObject({ existedInCrm: true, linkedToQuickbooks: false });
+    expect(h.saved[0].qboCustomerId).toBe('777');
   });
 
   it('takes an explicit type over the direction', async () => {

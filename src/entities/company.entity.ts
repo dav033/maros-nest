@@ -70,6 +70,26 @@ export class Company {
   })
   qboVendorLastSyncedAt?: Date;
 
+  /**
+   * The QuickBooks *customer* this company is, kept apart from the vendor link above.
+   *
+   * The same company can be both — a supplier you also sell to — and the two ids are
+   * different records in QuickBooks. Reusing qbo_vendor_id for a customer would put it in
+   * the vendor map as a vendor that does not exist.
+   *
+   * No match-confidence column on purpose: there is no fuzzy customer matcher, so every
+   * link here is a deliberate act and a confidence that could only be 1 is noise. See
+   * db/add-company-qbo-customer-link.sql.
+   */
+  @Column({ name: 'qbo_customer_id', length: 64, nullable: true })
+  qboCustomerId?: string;
+
+  @Column({ name: 'qbo_customer_name', length: 255, nullable: true })
+  qboCustomerName?: string;
+
+  @Column({ name: 'qbo_customer_matched_at', type: 'timestamptz', nullable: true })
+  qboCustomerMatchedAt?: Date;
+
   @OneToMany(() => Contact, (contact) => contact.company)
   contacts: Contact[];
 }

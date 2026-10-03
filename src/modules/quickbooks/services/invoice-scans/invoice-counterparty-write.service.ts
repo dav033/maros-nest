@@ -211,9 +211,13 @@ export class InvoiceCounterpartyWriteService {
    *
    * A vendor gets `qboVendorId` and the SUPPLIER type, which is what makes the
    * company visible to the existing CRM↔QuickBooks vendor matching. A customer
-   * gets `customer: true` and no QuickBooks id: the only link columns on
-   * `companies` are the `qbo_vendor_*` ones, and a customer id stored there
-   * would show up in the vendor map as a vendor that does not exist.
+   * gets `qboCustomerId` and `customer: true`.
+   *
+   * The two ids live in separate columns and never share one: the same company can be a
+   * supplier you also sell to, and they are two different records in QuickBooks. Storing a
+   * customer id in `qbo_vendor_id` would surface it in the vendor map as a vendor that does
+   * not exist, which is why the customer half had nowhere to go until
+   * db/add-company-qbo-customer-link.sql added it.
    */
   private async linkOrCreateCompany(
     counterparty: { id: string; name: string },
@@ -228,8 +232,25 @@ export class InvoiceCounterpartyWriteService {
       // `client` is left alone: nothing in the codebase says what separates it
       // from `customer`, and guessing would put this company in a list it may
       // not belong to.
+
+      // Same rule as the vendor side below: a link already pointing somewhere else is a
+      // decision somebody made, and a creation must not silently rewrite it.
+      const keepsOtherCustomerLink =
+        !!company.qboCustomerId && company.qboCustomerId !== counterparty.id;
+      if (keepsOtherCustomerLink) {
+        this.logger.warn(
+          `CRM company ${company.id} (${company.name}) already points at QuickBooks customer ` +
+            `${company.qboCustomerId}; the link to the new customer ${counterparty.id} was not written.`,
+        );
+        const kept = await this.companies.save(company);
+        return { id: kept.id, existed: true, linked: false };
+      }
+
+      company.qboCustomerId = counterparty.id;
+      company.qboCustomerName = counterparty.name;
+      company.qboCustomerMatchedAt = new Date();
       const saved = await this.companies.save(company);
-      return { id: saved.id, existed, linked: false };
+      return { id: saved.id, existed, linked: true };
     }
 
     const keepsOtherLink =
