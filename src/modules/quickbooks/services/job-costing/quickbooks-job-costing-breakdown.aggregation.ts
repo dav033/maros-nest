@@ -116,10 +116,15 @@ export function buildBreakdownEngine(
         break;
     }
     bucket.transactionCount += 1;
+    // Mismo total que summarizeEngine y buildFullProjectSummary, y por el mismo motivo:
+    // un purchase order abierto es un compromiso, no un coste incurrido, y cuando llegue
+    // la factura entrara por openAp. Sumarlo aqui hacia que los cubos no cuadraran con el
+    // total de la obra: en 032P-0825 sumaban 192.958,97 contra los 190.814,28 del
+    // Profit and Loss, exactamente los 2.144,69 de PO abierto. committedPo sigue
+    // publicandose en su propio campo.
     bucket.totalJobCost =
       bucket.cashOutPaid +
       bucket.openAp +
-      bucket.committedPo +
       bucket.adjustedCosts -
       bucket.vendorCredits;
     buckets.set(key, bucket);

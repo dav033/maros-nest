@@ -226,6 +226,93 @@ describe('allocateTransactionToProjectEngine', () => {
     // 0.1 + 0.2 === 0.30000000000000004 before money() gets to it.
     expect(result.amount).toBe(0.3);
   });
+
+  /**
+   * Change orders are separate QuickBooks customers, and they are named after the job they
+   * extend: the base job is "020P-0725, 2100 NE 15th Street" and its change orders are
+   * "020P-0725, COO1 2100 NE 15th Street" and "020P-0725, CO02 2100 NE 15th Street". The
+   * name test accepts anything starting with the project number and a comma, so falling
+   * back to the name made the base job absorb its change orders' cost — and since each
+   * change order is its own job in the CRM, the same dollars were counted twice.
+   *
+   * Measured against QuickBooks' own Profit and Loss for customer 316 (020P-0725):
+   * the app reported 21,466.21 against the report's 18,763.32 in both Cash and Accrual.
+   * The 2,702.89 gap was four lines belonging to customers 344 and 357 — the change
+   * orders — of which 2,352.89 was whole transactions and 500.00 was one line of a
+   * 1,000.00 purchase split across the base job and CO02.
+   */
+  it('does not charge a change order to the job it extends', () => {
+    const { ctx } = harness();
+    const baseJob: QboResolvedProjectRef = {
+      found: true,
+      projectNumber: '020P-0725',
+      displayName: '020P-0725, 2100 NE 15th Street, Fort Lauderdale, FL 33304',
+      qboCustomerId: '316',
+      refs: [{ value: '316', name: '020P-0725, 2100 NE 15th Street, Fort Lauderdale, FL 33304' }],
+    };
+    const purchase2792 = txn({
+      entityType: 'Purchase',
+      totalAmount: 1000,
+      lineItems: [
+        line({
+          amount: 500,
+          projectRefs: [
+            { value: '316', name: '020P-0725, 2100 NE 15th Street, Fort Lauderdale, FL 33304' },
+          ],
+        }),
+        line({
+          amount: 500,
+          projectRefs: [
+            { value: '357', name: '020P-0725, CO02 2100 NE 15th Street, Fort Lauderdale, FL 33304' },
+          ],
+        }),
+      ],
+    });
+
+    const result = allocateTransactionToProjectEngine(ctx, purchase2792, baseJob, true);
+
+    expect(result.amount).toBe(500);
+    expect(result.details).toHaveLength(1);
+  });
+
+  /**
+   * The inverse mistake would be worse: a ref whose name is the only identity it has must
+   * still land on the job, or every name-only reference silently drops off the cost.
+   * QuickBooks returns these as `name` with no `value`, which is why the normalizer raises
+   * PROJECT_REF_NAME_ONLY for them.
+   */
+  it('still matches a reference that has a name but no id', () => {
+    const { ctx } = harness();
+    const bill = txn({
+      totalAmount: 400,
+      lineItems: [line({ amount: 400, projectRefs: [{ value: '', name: '091-0626 Fence' }] })],
+    });
+
+    const result = allocateTransactionToProjectEngine(ctx, bill, project, true);
+
+    expect(result.amount).toBe(400);
+  });
+
+  /**
+   * And when the job itself could not be resolved to a QuickBooks customer, the name is
+   * all there is on both sides: requiring an id match there would zero out the job.
+   */
+  it('falls back to the name when the job has no QuickBooks id', () => {
+    const { ctx } = harness();
+    const unresolved: QboResolvedProjectRef = {
+      found: false,
+      projectNumber: '091-0626',
+      refs: [{ value: '', name: '091-0626' }],
+    };
+    const bill = txn({
+      totalAmount: 400,
+      lineItems: [line({ amount: 400, projectRefs: [{ value: '900', name: '091-0626' }] })],
+    });
+
+    const result = allocateTransactionToProjectEngine(ctx, bill, unresolved, true);
+
+    expect(result.amount).toBe(400);
+  });
 });
 
 describe('allocateBillOpenApEngine', () => {
@@ -520,9 +607,13 @@ describe('allocateJournalEntryEngine', () => {
   });
 
   /**
-   * QuickBooks interleaves SubTotalLine rows that have no counterpart in the normalized
-   * line list. The engine must not advance its index for them, or every amount after the
-   * first subtotal is read off the wrong line.
+   * QuickBooks interleaves subtotal rows that have no counterpart in the normalized line
+   * list. The engine must not advance its index for them, or every amount after the first
+   * subtotal is read off the wrong line.
+   *
+   * The DetailType here is `SubTotalLineDetail`, which is what QuickBooks actually sends.
+   * These fixtures used to say `'SubTotalLine'`, a value that appears nowhere in the API,
+   * so they passed while the real row was still being counted.
    */
   it('stays aligned when QuickBooks interleaves a subtotal line', () => {
     const { ctx } = harness();
@@ -539,7 +630,7 @@ describe('allocateJournalEntryEngine', () => {
       ctx,
       je([
         { amount: 100, account: 'Labor', posting: 'Debit' },
-        { amount: 0, account: '', posting: '', detailType: 'SubTotalLine' },
+        { amount: 0, account: '', posting: '', detailType: 'SubTotalLineDetail' },
         { amount: 400, account: 'Materials', posting: 'Debit' },
       ]),
       entry,
@@ -566,7 +657,7 @@ describe('allocateJournalEntryEngine', () => {
       ctx,
       je([
         { amount: 100, account: 'Labor', posting: 'Debit' },
-        { amount: 100, account: '', posting: '', detailType: 'SubTotalLine' },
+        { amount: 100, account: '', posting: '', detailType: 'SubTotalLineDetail' },
       ]),
       entry,
       project,

@@ -130,7 +130,14 @@ export class QuickbooksJobCostingUtils {
     const idSet = new Set(
       project.refs.map((projectRef) => projectRef.value).filter(Boolean),
     );
-    if (ref.value && idSet.has(ref.value)) return true;
+    // El nombre solo decide cuando no hay nada mejor con que decidir. Si la obra esta
+    // anclada a customers concretos de QuickBooks y el apunte trae id, ese id manda y no
+    // se cae al nombre: los change orders se dan de alta como customers aparte cuyo
+    // nombre empieza por el mismo numero de obra y una coma ("020P-0725, CO02 ..."), que
+    // es justo lo que nameMatchesProject acepta. Cayendo al nombre, la obra base se
+    // comia el coste de sus change orders y el mismo gasto se contaba dos veces, una en
+    // cada obra. Medido contra el Profit and Loss de 020P-0725: 2.702,89 USD de mas.
+    if (idSet.size && ref.value) return idSet.has(ref.value);
 
     const nameCandidates = [
       project.projectNumber,

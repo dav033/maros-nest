@@ -2,6 +2,7 @@ import {
   QboAiWarning,
   QboNormalizedTransaction,
 } from '../core/quickbooks-normalizer.service';
+import { isSubTotalLine } from '../core/quickbooks-normalizer.utils';
 import {
   ProjectAllocation,
   QboJobCostAllocationDetail,
@@ -338,15 +339,16 @@ export function allocateJournalEntryEngine(
   let normalizedLineIndex = 0;
 
   for (const rawLine of rawLines) {
-    // QuickBooks interleaves SubTotalLine rows that the normalizer drops (see
-    // normalizeLine), so they have no counterpart in lineItems: they neither advance the
-    // cursor nor contribute a detail of their own.
+    // QuickBooks interleaves subtotal rows that the normalizer drops (see normalizeLine),
+    // so they have no counterpart in lineItems: they neither advance the cursor nor
+    // contribute a detail of their own. The predicate is shared with the normalizer
+    // because both must agree on which rows exist, or the cursors drift.
     //
     // Skipping the whole row is the point. Only advancing the cursor conditionally — which
     // is what this did before — still let the subtotal row read the *next* real line and
     // push it as a detail, and then the following row read that same line again. Every
     // journal entry with a subtotal before a cost line charged that line to the job twice.
-    if (ctx.stringValue(rawLine['DetailType']) === 'SubTotalLine') continue;
+    if (isSubTotalLine(ctx.stringValue(rawLine['DetailType']))) continue;
 
     const normalizedLine = txn.lineItems[normalizedLineIndex];
     normalizedLineIndex += 1;

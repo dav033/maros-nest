@@ -48,6 +48,21 @@ export function dedupeWarnings(warnings: QboAiWarning[]): QboAiWarning[] {
   return [...byKey.values()];
 }
 
+/**
+ * QuickBooks closes a sales form with a running-total row whose Amount repeats the whole
+ * document. Counting it alongside the rows it summarises doubles the form: every invoice
+ * and estimate in the file sums to exactly twice its own TotalAmt.
+ *
+ * The row's DetailType is `SubTotalLineDetail`. It used to be matched against
+ * `'SubTotalLine'`, which QuickBooks never sends, so the guard never fired. Shared with
+ * the job-costing allocation engine on purpose: that engine walks the raw rows in step
+ * with the normalized ones, and if the two disagree about which rows exist the cursors
+ * drift and a cost line gets charged twice.
+ */
+export function isSubTotalLine(detailType: string): boolean {
+  return detailType === 'SubTotalLineDetail';
+}
+
 export function normalizeLines(lines: Record<string, unknown>[]): QboNormalizedLine[] {
   const result: QboNormalizedLine[] = [];
   for (const l of lines) {
@@ -59,7 +74,7 @@ export function normalizeLines(lines: Record<string, unknown>[]): QboNormalizedL
 
 function normalizeLine(l: Record<string, unknown>): QboNormalizedLine | null {
   const detailType = s(l['DetailType']);
-  if (detailType === 'SubTotalLine') return null;
+  if (isSubTotalLine(detailType)) return null;
 
   const detail = o(l[detailType]);
   let account: QboRef | undefined;
