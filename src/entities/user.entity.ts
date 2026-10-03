@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { Role } from './role.entity';
 import { UserInvitation } from './user-invitation.entity';
+import { LeadType } from '../common/enums/lead-type.enum';
 
 /** 'external' is someone outside the company, invited to see their own work. */
 export type UserType = 'internal' | 'external';
@@ -88,6 +89,19 @@ export class User {
 
   @Column({ name: 'scoped_contact_id', type: 'int', nullable: true })
   scopedContactId?: number | null;
+
+  /**
+   * Los tipos de lead que este usuario puede ver. `null` es todos, que es el
+   * valor por defecto.
+   *
+   * A diferencia de `scopedCompanyId` y `scopedContactId`, este si filtra: se
+   * aplica en los caminos de lectura de leads y de proyectos (ver
+   * request-scope.ts y applyLeadTypeScope). Un array vacio no se guarda — lo
+   * rechaza un CHECK en la base —, porque "restringido a ningun tipo" es una
+   * pantalla vacia indistinguible de un fallo.
+   */
+  @Column({ name: 'scoped_lead_types', type: 'text', array: true, nullable: true })
+  scopedLeadTypes?: LeadType[] | null;
 
   @Column({ name: 'invited_by_id', type: 'int', nullable: true })
   invitedById?: number | null;

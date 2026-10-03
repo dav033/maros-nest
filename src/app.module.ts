@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { WinstonModule } from 'nest-winston';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -8,6 +8,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { SessionAuthGuard } from './common/guards/session-auth.guard';
+import { RequestScopeInterceptor } from './common/interceptors/request-scope.interceptor';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { getDatabaseConfig } from './config/database.config';
 import { getLoggerConfig } from './config/logger.config';
@@ -85,6 +86,9 @@ import { GoogleCalendarModule } from './modules/google-calendar/google-calendar.
     AppService,
     // Order matters: SessionAuthGuard populates request.user, which
     // PermissionsGuard then checks against the route's @RequirePermissions.
+    // Despues de los guards: el ambito se lee de request.user, que lo pone
+    // SessionAuthGuard. Nest ejecuta los interceptores despues de los guards.
+    { provide: APP_INTERCEPTOR, useClass: RequestScopeInterceptor },
     { provide: APP_GUARD, useClass: SessionAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
   ],

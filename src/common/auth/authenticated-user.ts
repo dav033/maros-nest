@@ -1,6 +1,7 @@
 import type { Request } from 'express';
 import type { UserType } from '../../entities/user.entity';
 import type { Permission } from './permissions';
+import type { LeadType } from '../enums/lead-type.enum';
 
 /**
  * What SessionAuthGuard attaches to the request after resolving the JWT
@@ -20,6 +21,11 @@ export interface AuthenticatedUser {
    * que no esté marcado con @AllowExternal, incluidas las rutas sin permisos.
    */
   userType: UserType;
+  /**
+   * Los tipos de lead que puede ver. `null` es todos, que es lo que tiene quien
+   * no esta restringido — y lo que tienen las seis cuentas de hoy.
+   */
+  scopedLeadTypes: LeadType[] | null;
 }
 
 export type RequestWithUser = Request & { user?: AuthenticatedUser };

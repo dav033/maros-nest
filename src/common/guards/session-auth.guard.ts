@@ -140,6 +140,8 @@ export class SessionAuthGuard implements CanActivate {
         role: { id: 0, name: 'development' },
         permissions: [...PERMISSIONS],
         userType: 'internal',
+        // El actor de desarrollo no esta restringido a ningun tipo.
+        scopedLeadTypes: null,
       };
     } else {
       // Throws UserInactiveException (403) for deactivated accounts; provisions
