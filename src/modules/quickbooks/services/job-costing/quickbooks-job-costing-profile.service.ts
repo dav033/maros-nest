@@ -104,6 +104,7 @@ export class QuickbooksJobCostingProjectProfileService {
       cashOut,
       vendorBreakdown: jobCost.vendorBreakdown,
       categoryBreakdown: jobCost.categoryBreakdown,
+      expenseBreakdown: jobCost.expenseBreakdown,
       attachments: attachmentResult.attachments,
       reports: reportResult.reports,
       coverage: {
@@ -160,6 +161,7 @@ export class QuickbooksJobCostingProjectProfileService {
       cashOut: groupCashOut([]),
       vendorBreakdown: [],
       categoryBreakdown: [],
+      expenseBreakdown: [],
       attachments: {
         total: 0,
         byEntityType: {},

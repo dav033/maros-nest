@@ -19,6 +19,7 @@ import {
   QboCostEntityType,
   QboJobCostClassification,
   QboJobCostBreakdown,
+  QboJobCostExpenseBreakdown,
   QboJobCostingParams,
   QboJobCostSummary,
   QboJobCostTransaction,
@@ -45,6 +46,7 @@ import {
 import {
   BreakdownContext,
   buildBreakdownEngine,
+  buildExpenseBreakdownEngine,
   buildVendorBreakdownEngine,
   enrichVendorBreakdownBucketEngine,
   summarizeEngine,
@@ -139,6 +141,7 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
       transactions,
       vendorBreakdown: vendorBreakdown.breakdown,
       categoryBreakdown: this.buildBreakdown(transactions, 'category'),
+      expenseBreakdown: this.buildExpenseBreakdown(transactions),
       warnings: resultWarnings,
       coverage: {
         entitiesQueried: COST_ENTITIES,
@@ -445,6 +448,18 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
   ): QboJobCostBreakdown[] {
     const context = this as unknown as BreakdownContext;
     return buildBreakdownEngine(context, transactions, by);
+  }
+
+  /**
+   * Por cuenta de gasto y con los proveedores dentro. Aparte de
+   * `categoryBreakdown`, que agrupa por la cabecera de la transaccion: ahi la
+   * cuenta de un pago es el banco del que salio el dinero.
+   */
+  protected buildExpenseBreakdown(
+    transactions: QboJobCostTransaction[],
+  ): QboJobCostExpenseBreakdown[] {
+    const context = this as unknown as BreakdownContext;
+    return buildExpenseBreakdownEngine(context, transactions);
   }
 
   protected async buildVendorBreakdown(

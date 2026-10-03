@@ -111,6 +111,15 @@ export interface QboJobCostSummary {
   totalJobCost: number;
 }
 
+/**
+ * Un bucket por cuenta de gasto, con sus proveedores dentro. La cuenta sale de
+ * la linea de cada transaccion, no de su cabecera — en una cabecera de pago la
+ * cuenta es el banco.
+ */
+export interface QboJobCostExpenseBreakdown extends QboJobCostBreakdown {
+  vendors: QboJobCostBreakdown[];
+}
+
 export interface QboJobCostBreakdown {
   id?: string;
   name: string;
@@ -180,6 +189,12 @@ export interface QboProjectJobCostSummaryResult {
   cashOut: QboProjectCashOut;
   vendorBreakdown: QboJobCostBreakdown[];
   categoryBreakdown: QboJobCostBreakdown[];
+  /**
+   * Por cuenta de gasto, con los proveedores dentro. Es lo que la ficha del
+   * proyecto ensena como material y subcontratistas; `categoryBreakdown` agrupa
+   * por la cabecera de la transaccion, que en un pago es el banco.
+   */
+  expenseBreakdown: QboJobCostExpenseBreakdown[];
   attachments: QboProjectAttachmentSummary;
   reports: QboProjectFinancialReports;
   warnings: QboAiWarning[];
@@ -320,6 +335,8 @@ export interface InternalJobCostResult {
   transactions: QboJobCostTransaction[];
   vendorBreakdown: QboJobCostBreakdown[];
   categoryBreakdown: QboJobCostBreakdown[];
+  /** Por cuenta de gasto, con los proveedores dentro de cada cuenta. */
+  expenseBreakdown: QboJobCostExpenseBreakdown[];
   warnings: QboAiWarning[];
   coverage: QboJobCostCoverage;
 }

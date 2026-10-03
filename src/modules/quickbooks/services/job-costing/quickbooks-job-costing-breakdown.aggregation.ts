@@ -1,6 +1,7 @@
 import { QboAiWarning } from '../core/quickbooks-normalizer.service';
 import {
   QboJobCostBreakdown,
+  QboJobCostExpenseBreakdown,
   QboJobCostSummary,
   QboJobCostTransaction,
   QboVendorCrmEntry,
@@ -198,3 +199,140 @@ export function enrichVendorBreakdownBucketEngine(
   };
 }
 
+
+/**
+ * Desglose por cuenta de gasto, con los proveedores dentro de cada una.
+ *
+ * Esto no es lo mismo que `categoryBreakdown`, y la diferencia es el motivo de
+ * que exista: aquel agrupa transacciones enteras por `txn.category`, que en la
+ * cabecera de un pago es el banco o la tarjeta, de modo que el 032P-0825 sale
+ * repartido entre "L. LOZANO (6750)" y "BUS COMPLETE CHK (5052)" — de donde
+ * salio el dinero, no en que se gasto.
+ *
+ * Este recorre los `allocationDetails`, que llevan la cuenta de cada linea y el
+ * importe ya asignado al proyecto por el motor de reparto. No se reimplementa
+ * la regla de reparto: reimplementarla es como se reintroduce el doble conteo
+ * que costo arreglar en las 82 obras.
+ *
+ * Una transaccion sin detalles cae a su cabecera, que es lo unico que se sabe
+ * de ella; es mejor que descartarla y que el desglose deje de sumar el total.
+ */
+export function buildExpenseBreakdownEngine(
+  ctx: Pick<BreakdownContext, 'money' | 'firstLineCategory'>,
+  transactions: QboJobCostTransaction[],
+): QboJobCostExpenseBreakdown[] {
+  const buckets = new Map<string, QboJobCostExpenseBreakdown>();
+
+  const bucketFor = (ref: { name?: string; value?: string } | undefined) => {
+    const name = ref?.name || ref?.value || 'Sin categoría';
+    const id = ref?.value || undefined;
+    const key = `${id ?? ''}:${name}`;
+    const existing = buckets.get(key);
+    if (existing) return existing;
+    const created: QboJobCostExpenseBreakdown = {
+      ...(id && { id }),
+      name,
+      cashOutPaid: 0,
+      openAp: 0,
+      committedPo: 0,
+      vendorCredits: 0,
+      adjustedCosts: 0,
+      totalJobCost: 0,
+      transactionCount: 0,
+      vendors: [],
+    };
+    buckets.set(key, created);
+    return created;
+  };
+
+  const addAmount = (
+    bucket: QboJobCostExpenseBreakdown | QboJobCostBreakdown,
+    classification: QboJobCostTransaction['classification'],
+    amount: number,
+  ) => {
+    switch (classification) {
+      case 'cash_out_paid':
+        bucket.cashOutPaid += amount;
+        break;
+      case 'open_ap':
+        bucket.openAp += amount;
+        break;
+      case 'commitment':
+        bucket.committedPo += amount;
+        break;
+      case 'credit':
+        bucket.vendorCredits += amount;
+        break;
+      default:
+        bucket.adjustedCosts += amount;
+        break;
+    }
+    bucket.totalJobCost += amount;
+    bucket.transactionCount += 1;
+  };
+
+  for (const txn of transactions) {
+    const vendorName = txn.vendor?.name || txn.vendor?.value || 'Sin proveedor';
+    const vendorId = txn.vendor?.value;
+    const details = txn.allocationDetails.length
+      ? txn.allocationDetails.map((detail) => ({
+          ref: detail.category,
+          amount: detail.allocatedAmount,
+        }))
+      : [
+          {
+            ref: txn.category ?? txn.account ?? ctx.firstLineCategory(txn),
+            amount: txn.allocatedAmount,
+          },
+        ];
+
+    for (const { ref, amount } of details) {
+      if (amount === 0) continue;
+      const bucket = bucketFor(ref);
+      addAmount(bucket, txn.classification, amount);
+
+      const vendorKey = `${vendorId ?? ''}:${vendorName}`;
+      let vendor = bucket.vendors.find(
+        (candidate) => `${candidate.id ?? ''}:${candidate.name}` === vendorKey,
+      );
+      if (!vendor) {
+        vendor = {
+          ...(vendorId && { id: vendorId }),
+          name: vendorName,
+          cashOutPaid: 0,
+          openAp: 0,
+          committedPo: 0,
+          vendorCredits: 0,
+          adjustedCosts: 0,
+          totalJobCost: 0,
+          transactionCount: 0,
+        };
+        bucket.vendors.push(vendor);
+      }
+      addAmount(vendor, txn.classification, amount);
+    }
+  }
+
+  const rounded = [...buckets.values()].map((bucket) => ({
+    ...bucket,
+    cashOutPaid: ctx.money(bucket.cashOutPaid),
+    openAp: ctx.money(bucket.openAp),
+    committedPo: ctx.money(bucket.committedPo),
+    vendorCredits: ctx.money(bucket.vendorCredits),
+    adjustedCosts: ctx.money(bucket.adjustedCosts),
+    totalJobCost: ctx.money(bucket.totalJobCost),
+    vendors: bucket.vendors
+      .map((vendor) => ({
+        ...vendor,
+        cashOutPaid: ctx.money(vendor.cashOutPaid),
+        openAp: ctx.money(vendor.openAp),
+        committedPo: ctx.money(vendor.committedPo),
+        vendorCredits: ctx.money(vendor.vendorCredits),
+        adjustedCosts: ctx.money(vendor.adjustedCosts),
+        totalJobCost: ctx.money(vendor.totalJobCost),
+      }))
+      .sort((a, b) => b.totalJobCost - a.totalJobCost),
+  }));
+
+  return rounded.sort((a, b) => b.totalJobCost - a.totalJobCost);
+}
