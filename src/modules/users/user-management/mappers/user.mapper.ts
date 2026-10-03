@@ -22,6 +22,9 @@ export class UserMapper {
       status: entity.status,
       scopedCompanyId: entity.scopedCompanyId ?? null,
       scopedContactId: entity.scopedContactId ?? null,
+      // `null` es "ve todos los tipos". A diferencia de los dos de arriba, este
+      // si filtra de verdad en las lecturas de leads y de proyectos.
+      scopedLeadTypes: entity.scopedLeadTypes ?? null,
       // Only while the invitation is outstanding; an accepted one is history.
       invitationExpiresAt:
         entity.status === 'invited' ? (pendingInvitation?.expiresAt ?? null) : null,

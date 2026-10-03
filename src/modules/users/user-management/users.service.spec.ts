@@ -8,6 +8,7 @@ import {
   UserNotFoundException,
 } from '../../../common/exceptions';
 import { SYSTEM_ROLE_ADMIN, SYSTEM_ROLE_MEMBER } from '../../../common/auth/permissions';
+import { LeadType } from '../../../common/enums/lead-type.enum';
 
 function makeRole(overrides: Partial<Role> = {}): Role {
   return {
@@ -430,5 +431,70 @@ describe('UsersService.resolveForRequest — identity cache', () => {
 
     // Each attempt went back to the database rather than short-circuiting.
     expect(usersRepo.findByEmail.mock.calls).toHaveLength(2);
+  });
+});
+
+/**
+ * El ambito de tipos de lead. Lo que se prueba aqui es que se guarda, que
+ * `null` lo quita, y sobre todo que la identidad cacheada se invalida: la cache
+ * dura 30 segundos, y un ambito que tarda medio minuto en aplicarse es medio
+ * minuto de datos que no se deberian ver.
+ */
+describe('UsersService.update — ambito por tipo de lead', () => {
+  function harness(user: User) {
+    const saved: User[] = [];
+    const usersRepo = {
+      findById: jest.fn().mockResolvedValue(user),
+      save: jest.fn((value: User) => {
+        saved.push(value);
+        return Promise.resolve(value);
+      }),
+      countActiveByRoleNameExcluding: jest.fn().mockResolvedValue(5),
+    };
+    const service = makeService(usersRepo);
+    const invalidate = jest.spyOn(service, 'invalidateResolvedUser');
+    return { service, usersRepo, saved, invalidate };
+  }
+
+  it('stores the scope and drops the cached identity', async () => {
+    const h = harness(makeUser({ id: 7, scopedLeadTypes: null }));
+
+    await h.service.update(7, { scopedLeadTypes: [LeadType.PLUMBING] }, 1);
+
+    expect(h.saved[0].scopedLeadTypes).toEqual([LeadType.PLUMBING]);
+    expect(h.invalidate).toHaveBeenCalledWith('user@marosconstruction.com');
+  });
+
+  it('removes the restriction with null', async () => {
+    const h = harness(makeUser({ id: 7, scopedLeadTypes: [LeadType.ROOFING] }));
+
+    await h.service.update(7, { scopedLeadTypes: null }, 1);
+
+    expect(h.saved[0].scopedLeadTypes).toBeNull();
+  });
+
+  /** Reordenar los mismos tipos no es un cambio, y no debe tirar la cache. */
+  it('does nothing when the same types come back in another order', async () => {
+    const h = harness(
+      makeUser({ id: 7, scopedLeadTypes: [LeadType.PLUMBING, LeadType.ROOFING] }),
+    );
+
+    await h.service.update(
+      7,
+      { scopedLeadTypes: [LeadType.ROOFING, LeadType.PLUMBING] },
+      1,
+    );
+
+    expect(h.usersRepo.save).not.toHaveBeenCalled();
+    expect(h.invalidate).not.toHaveBeenCalled();
+  });
+
+  /** La misma regla que para el rol: nadie se cambia su propio ambito. */
+  it('refuses to change your own scope', async () => {
+    const h = harness(makeUser({ id: 7, scopedLeadTypes: null }));
+
+    await expect(
+      h.service.update(7, { scopedLeadTypes: [LeadType.PLUMBING] }, 7),
+    ).rejects.toBeInstanceOf(SelfModificationException);
   });
 });

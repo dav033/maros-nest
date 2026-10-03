@@ -21,6 +21,7 @@ import type { AuthenticatedUser } from '../../../common/auth/authenticated-user'
 import { UsersRepository } from './repositories/users.repository';
 import { RolesRepository } from './repositories/roles.repository';
 import { UserInvitationsRepository } from './repositories/user-invitations.repository';
+import { LeadType } from '../../../common/enums/lead-type.enum';
 
 /** Identity proven by the session JWT, before it is matched to a user row. */
 export interface VerifiedIdentity {
@@ -178,7 +179,11 @@ export class UsersService {
    */
   async update(
     id: number,
-    changes: { roleId?: number; isActive?: boolean },
+    changes: {
+      roleId?: number;
+      isActive?: boolean;
+      scopedLeadTypes?: LeadType[] | null;
+    },
     actingUserId: number,
   ): Promise<User> {
     const user = await this.findById(id);
@@ -188,7 +193,11 @@ export class UsersService {
     const changesActive =
       changes.isActive !== undefined && changes.isActive !== user.isActive;
 
-    if (!changesRole && !changesActive) {
+    const changesScope =
+      changes.scopedLeadTypes !== undefined &&
+      !sameLeadTypes(changes.scopedLeadTypes, user.scopedLeadTypes ?? null);
+
+    if (!changesRole && !changesActive && !changesScope) {
       return user;
     }
 
@@ -221,9 +230,17 @@ export class UsersService {
       }
     }
 
+    if (changesScope) {
+      // `null` quita la restriccion; un array vacio no llega hasta aqui porque
+      // lo rechaza el DTO y tambien un CHECK en la base.
+      user.scopedLeadTypes = changes.scopedLeadTypes ?? null;
+    }
+
     const saved = await this.usersRepo.save(user);
-    // A new role or a flipped isActive must bite on the very next request, not
-    // when the 30 s cache entry happens to lapse.
+    // A new role, a flipped isActive or a changed lead-type scope must bite on
+    // the very next request, not when the 30 s cache entry happens to lapse —
+    // un ambito que tarda medio minuto en aplicarse es medio minuto de datos
+    // que no se deberian ver.
     this.invalidateResolvedUser(saved.email);
     return saved;
   }
@@ -335,6 +352,8 @@ export class UsersService {
       role: user.role ? { id: user.role.id, name: user.role.name } : null,
       permissions: this.effectivePermissions(user.role),
       userType: user.userType ?? 'internal',
+      // `null` es "todos los tipos", que es lo que tiene quien no esta restringido.
+      scopedLeadTypes: user.scopedLeadTypes ?? null,
     };
   }
 
@@ -359,4 +378,16 @@ export class UsersService {
   private normalizeEmail(email: string): string {
     return email.trim().toLowerCase();
   }
+}
+
+/** Dos ambitos son el mismo si tienen los mismos tipos, en cualquier orden. */
+function sameLeadTypes(
+  a: LeadType[] | null,
+  b: LeadType[] | null,
+): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.length !== b.length) return false;
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return left.every((value, index) => value === right[index]);
 }

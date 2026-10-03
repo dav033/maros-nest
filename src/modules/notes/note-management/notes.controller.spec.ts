@@ -18,6 +18,7 @@ const TEST_USER_ID = 7;
  */
 function stubCurrentUser(req: RequestWithUser, _res: Response, next: NextFunction) {
   req.user = {
+    scopedLeadTypes: null,
     id: TEST_USER_ID,
     email: 'test@marosconstruction.com',
     userType: 'internal' as const,
