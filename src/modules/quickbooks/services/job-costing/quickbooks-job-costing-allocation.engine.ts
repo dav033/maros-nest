@@ -1,8 +1,10 @@
 import {
   QboAiWarning,
+  QboNormalizedLine,
   QboNormalizedTransaction,
 } from '../core/quickbooks-normalizer.service';
 import { isSubTotalLine } from '../core/quickbooks-normalizer.utils';
+import { QboAccountIndex } from './quickbooks-job-costing-accounts';
 import {
   ProjectAllocation,
   QboJobCostAllocationDetail,
@@ -12,6 +14,14 @@ import {
   TransactionDescriptor,
 } from './quickbooks-job-costing.types';
 
+/**
+ * Decides whether a line's account puts it on the cost side. Passed in rather than read
+ * from the chart of accounts here, because the two kinds of document need opposite
+ * answers when the account cannot be classified: a cost document keeps the line, a
+ * Deposit does not. See QboAccountIndex.
+ */
+export type CostLineFilter = (line: QboNormalizedLine) => boolean;
+
 export type AllocationContext = {
   normalizer: {
     normalizePurchase(raw: Record<string, unknown>): QboNormalizedTransaction;
@@ -20,6 +30,7 @@ export type AllocationContext = {
     normalizeVendorCredit(raw: Record<string, unknown>): QboNormalizedTransaction;
     normalizePurchaseOrder(raw: Record<string, unknown>): QboNormalizedTransaction;
     normalizeJournalEntry(raw: Record<string, unknown>): QboNormalizedTransaction;
+    normalizeDeposit(raw: Record<string, unknown>): QboNormalizedTransaction;
     warning(code: string, message: string): QboAiWarning;
   };
   vendorMatches(
@@ -36,11 +47,13 @@ export type AllocationContext = {
     txn: QboNormalizedTransaction,
     project: QboResolvedProjectRef | undefined,
     requireProjectMatch: boolean,
+    isCostLine: CostLineFilter,
   ): ProjectAllocation;
   allocateBillOpenAp(
     txn: QboNormalizedTransaction,
     project: QboResolvedProjectRef | undefined,
     requireProjectMatch: boolean,
+    isCostLine: CostLineFilter,
   ): ProjectAllocation;
   allocateBillPayment(
     rawPayment: Record<string, unknown>,
@@ -49,12 +62,14 @@ export type AllocationContext = {
     project: QboResolvedProjectRef | undefined,
     requireProjectMatch: boolean,
     warnings: QboAiWarning[],
+    isCostLine: CostLineFilter,
   ): ProjectAllocation;
   allocateJournalEntry(
     raw: Record<string, unknown>,
     txn: QboNormalizedTransaction,
     project: QboResolvedProjectRef | undefined,
     requireProjectMatch: boolean,
+    accounts: QboAccountIndex,
   ): ProjectAllocation;
   transactionMatchesProject(
     txn: QboNormalizedTransaction,
@@ -78,7 +93,10 @@ export type AllocationContext = {
   ratio(value: number, total: number): number;
   emptyAllocation(method: ProjectAllocation['method']): ProjectAllocation;
   asArray(value: unknown): Record<string, unknown>[];
-  lineUsesExplicitCostAccount(line: QboNormalizedTransaction['lineItems'][number]): boolean;
+  lineUsesExplicitCostAccount(
+    line: QboNormalizedTransaction['lineItems'][number],
+    accounts: QboAccountIndex,
+  ): boolean;
   asRecord(value: unknown): Record<string, unknown>;
   extractLinkedTxnList(value: unknown): Array<{ txnId: string; txnType: string }>;
   paymentAllocationLines(
@@ -96,13 +114,15 @@ export function buildTransactionDescriptorsEngine(
   requireProjectMatch: boolean,
   params: QboJobCostingParams,
   warnings: QboAiWarning[],
+  accounts: QboAccountIndex,
 ): TransactionDescriptor[] {
   const descriptors: TransactionDescriptor[] = [];
+  const isCostLine: CostLineFilter = (line) => accounts.countsAsCost(line);
 
   for (const raw of rawBundle.purchases) {
     const normalized = ctx.normalizer.normalizePurchase(raw);
     if (!ctx.vendorMatches(normalized, params)) continue;
-    const allocation = ctx.allocateTransactionToProject(normalized, project, requireProjectMatch);
+    const allocation = ctx.allocateTransactionToProject(normalized, project, requireProjectMatch, isCostLine);
     if (!ctx.shouldIncludeAllocation(allocation, requireProjectMatch)) continue;
     if (!ctx.isPaidPurchase(raw)) {
       warnings.push(
@@ -119,7 +139,7 @@ export function buildTransactionDescriptorsEngine(
   for (const raw of rawBundle.bills) {
     const normalized = ctx.normalizer.normalizeBill(raw);
     if (!ctx.vendorMatches(normalized, params)) continue;
-    const allocation = ctx.allocateBillOpenAp(normalized, project, requireProjectMatch);
+    const allocation = ctx.allocateBillOpenAp(normalized, project, requireProjectMatch, isCostLine);
     if (!ctx.shouldIncludeAllocation(allocation, requireProjectMatch)) continue;
     if ((normalized.openBalance ?? 0) <= 0) continue;
     descriptors.push(ctx.descriptor('Bill', raw, normalized, 'open_ap', allocation));
@@ -135,6 +155,7 @@ export function buildTransactionDescriptorsEngine(
       project,
       requireProjectMatch,
       warnings,
+      isCostLine,
     );
     if (!ctx.shouldIncludeAllocation(allocation, requireProjectMatch)) continue;
     descriptors.push(ctx.descriptor('BillPayment', raw, normalized, 'cash_out_paid', allocation));
@@ -143,7 +164,7 @@ export function buildTransactionDescriptorsEngine(
   for (const raw of rawBundle.vendorCredits) {
     const normalized = ctx.normalizer.normalizeVendorCredit(raw);
     if (!ctx.vendorMatches(normalized, params)) continue;
-    const allocation = ctx.allocateTransactionToProject(normalized, project, requireProjectMatch);
+    const allocation = ctx.allocateTransactionToProject(normalized, project, requireProjectMatch, isCostLine);
     if (!ctx.shouldIncludeAllocation(allocation, requireProjectMatch)) continue;
     descriptors.push(ctx.descriptor('VendorCredit', raw, normalized, 'credit', allocation));
   }
@@ -152,14 +173,14 @@ export function buildTransactionDescriptorsEngine(
     const normalized = ctx.normalizer.normalizePurchaseOrder(raw);
     if (!ctx.vendorMatches(normalized, params)) continue;
     if (ctx.isClosedPurchaseOrder(normalized)) continue;
-    const allocation = ctx.allocateTransactionToProject(normalized, project, requireProjectMatch);
+    const allocation = ctx.allocateTransactionToProject(normalized, project, requireProjectMatch, isCostLine);
     if (!ctx.shouldIncludeAllocation(allocation, requireProjectMatch)) continue;
     descriptors.push(ctx.descriptor('PurchaseOrder', raw, normalized, 'commitment', allocation));
   }
 
   for (const raw of rawBundle.journalEntries) {
     const normalized = ctx.normalizer.normalizeJournalEntry(raw);
-    const allocation = ctx.allocateJournalEntry(raw, normalized, project, requireProjectMatch);
+    const allocation = ctx.allocateJournalEntry(raw, normalized, project, requireProjectMatch, accounts);
     if (!ctx.shouldIncludeAllocation(allocation, requireProjectMatch)) {
       if (ctx.transactionMatchesProject(normalized, project)) {
         warnings.push(
@@ -174,6 +195,26 @@ export function buildTransactionDescriptorsEngine(
     descriptors.push(ctx.descriptor('JournalEntry', raw, normalized, 'adjustment', allocation));
   }
 
+  for (const raw of rawBundle.deposits) {
+    const normalized = ctx.normalizer.normalizeDeposit(raw);
+    if (!ctx.vendorMatches(normalized, params)) continue;
+    // `reversesCost`, not `isCostLine`: a deposit line only comes off the job when the
+    // chart of accounts positively says its account is an expense account. Every other
+    // deposit line is revenue — a customer paying an invoice — and subtracting one would
+    // take real money off the job's cost.
+    const allocation = ctx.allocateTransactionToProject(
+      normalized,
+      project,
+      requireProjectMatch,
+      (line) => accounts.reversesCost(line),
+    );
+    if (!ctx.shouldIncludeAllocation(allocation, requireProjectMatch)) continue;
+    // Netted into cash out rather than put in its own bucket, for the same reason a
+    // Purchase flagged `Credit` is: QuickBooks' Profit and Loss nets the reversal inside
+    // the expense account it came from.
+    descriptors.push(ctx.descriptor('Deposit', raw, normalized, 'cash_out_paid', allocation));
+  }
+
   return descriptors.sort((a, b) =>
     `${a.normalized.txnDate}:${a.normalized.entityType}:${a.normalized.entityId}`.localeCompare(
       `${b.normalized.txnDate}:${b.normalized.entityType}:${b.normalized.entityId}`,
@@ -186,13 +227,28 @@ export function allocateTransactionToProjectEngine(
   txn: QboNormalizedTransaction,
   project: QboResolvedProjectRef | undefined,
   requireProjectMatch: boolean,
+  isCostLine: CostLineFilter,
 ): ProjectAllocation {
   if (!requireProjectMatch || !project) {
     return ctx.fullAllocation(txn.totalAmount, 'full_transaction');
   }
 
+  // The basis stays the whole document, non-cost lines included: a bill that pays for
+  // this job's materials and also moves money to savings is this job's only in the
+  // materials line's proportion, and that proportion is of the whole bill.
   const lineBasis = ctx.lineBasisAmount(txn.lineItems, txn.totalAmount);
-  const matchingLines = txn.lineItems.filter((line) => ctx.lineMatchesProject(line, project));
+  const costLines = txn.lineItems.filter((line) => isCostLine(line));
+
+  // A document whose every line posts somewhere that is not cost is not job cost, and it
+  // must not fall through to charging its header total either. Two live cases, both
+  // tagged to a job and both charged in full before this: Purchase 4493, a returned
+  // $28,800 check posted to the income account "Services" on job 061-0226, and Purchase
+  // 4165, a $1,000 ATM withdrawal to the asset account "Cash on hand" on 050P-0326.
+  if (txn.lineItems.length && !costLines.length) {
+    return ctx.emptyAllocation('no_cost_account_line');
+  }
+
+  const matchingLines = costLines.filter((line) => ctx.lineMatchesProject(line, project));
 
   if (matchingLines.length) {
     const amount = matchingLines.reduce((sum, line) => sum + line.amount, 0);
@@ -224,9 +280,10 @@ export function allocateBillOpenApEngine(
   txn: QboNormalizedTransaction,
   project: QboResolvedProjectRef | undefined,
   requireProjectMatch: boolean,
+  isCostLine: CostLineFilter,
 ): ProjectAllocation {
   if ((txn.openBalance ?? 0) <= 0) return ctx.emptyAllocation('bill_closed');
-  const base = ctx.allocateTransactionToProject(txn, project, requireProjectMatch);
+  const base = ctx.allocateTransactionToProject(txn, project, requireProjectMatch, isCostLine);
   if (base.amount === 0 && requireProjectMatch) return base;
   const openAmount = ctx.money((txn.openBalance ?? 0) * base.ratio);
   return {
@@ -261,6 +318,7 @@ export function allocateBillPaymentEngine(
   project: QboResolvedProjectRef | undefined,
   requireProjectMatch: boolean,
   warnings: QboAiWarning[],
+  isCostLine: CostLineFilter,
 ): ProjectAllocation {
   if (!requireProjectMatch || !project) {
     return ctx.fullAllocation(txn.totalAmount, 'linked_bill_full');
@@ -290,7 +348,7 @@ export function allocateBillPaymentEngine(
         continue;
       }
       const bill = ctx.normalizer.normalizeBill(billRaw);
-      const billAllocation = ctx.allocateTransactionToProject(bill, project, true);
+      const billAllocation = ctx.allocateTransactionToProject(bill, project, true, isCostLine);
       if (billAllocation.amount === 0) continue;
 
       const allocatedAmount = ctx.money(amountPerBill * billAllocation.ratio);
@@ -333,6 +391,7 @@ export function allocateJournalEntryEngine(
   txn: QboNormalizedTransaction,
   project: QboResolvedProjectRef | undefined,
   requireProjectMatch: boolean,
+  accounts: QboAccountIndex,
 ): ProjectAllocation {
   const rawLines = ctx.asArray(raw['Line']);
   const details: QboJobCostAllocationDetail[] = [];
@@ -356,7 +415,7 @@ export function allocateJournalEntryEngine(
     if (requireProjectMatch && project && !ctx.lineMatchesProject(normalizedLine, project)) {
       continue;
     }
-    if (!ctx.lineUsesExplicitCostAccount(normalizedLine)) continue;
+    if (!ctx.lineUsesExplicitCostAccount(normalizedLine, accounts)) continue;
 
     const detail = ctx.asRecord(rawLine['JournalEntryLineDetail']);
     const sign = ctx.stringValue(detail['PostingType']).toLowerCase() === 'credit' ? -1 : 1;

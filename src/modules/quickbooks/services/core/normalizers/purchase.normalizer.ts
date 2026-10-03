@@ -10,6 +10,7 @@ import {
   extractMemo,
   extractRef,
   n,
+  negate,
   normalizeAttachments,
   normalizeLines,
   s,
@@ -27,11 +28,6 @@ import {
  */
 function isRefund(raw: Record<string, unknown>): boolean {
   return raw['Credit'] === true;
-}
-
-/** Guards the zero case: plain negation yields -0, which renders as "-$0.00" in a total. */
-function negate(value: number): number {
-  return value === 0 ? 0 : -value;
 }
 
 export function normalizePurchase(

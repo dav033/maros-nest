@@ -98,6 +98,9 @@ export class QuickbooksJobCostingService extends QuickbooksJobCostingBase {
       if (id) billIndex.set(id, bill);
     }
     await this.loadLinkedBillsForPayments(effectiveRealmId, rawBundle.billPayments, billIndex, []);
+    // Mismo criterio de coste que getProjectCashOut: el listado y la ficha de la obra no
+    // pueden dar cifras distintas por mirar el plan de cuentas solo en una de las dos.
+    const accounts = await this.loadAccountIndex(effectiveRealmId, []);
 
     const summaries = new Map<string, QboJobCostSummary>();
     for (const projectNumber of projectNumbersClean) {
@@ -110,6 +113,7 @@ export class QuickbooksJobCostingService extends QuickbooksJobCostingBase {
         true,
         params,
         [],
+        accounts,
       );
       summaries.set(projectNumber, this.summarize(descriptors));
     }

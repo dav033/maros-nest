@@ -22,7 +22,8 @@ export type QboCostEntityType =
   | 'BillPayment'
   | 'VendorCredit'
   | 'PurchaseOrder'
-  | 'JournalEntry';
+  | 'JournalEntry'
+  | 'Deposit';
 
 export type QboJobCostClassification =
   | 'cash_out_paid'
@@ -291,6 +292,7 @@ export interface RawCostBundle {
   vendorCredits: Record<string, unknown>[];
   purchaseOrders: Record<string, unknown>[];
   journalEntries: Record<string, unknown>[];
+  deposits: Record<string, unknown>[];
 }
 
 export interface ProjectAllocation {
@@ -338,6 +340,7 @@ export const COST_ENTITIES: QboCostEntityType[] = [
   'VendorCredit',
   'PurchaseOrder',
   'JournalEntry',
+  'Deposit',
 ];
 
 export type VendorBreakdownResult = {

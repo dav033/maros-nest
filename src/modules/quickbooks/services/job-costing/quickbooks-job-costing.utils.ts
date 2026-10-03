@@ -16,6 +16,7 @@ import {
   trim,
 } from '../core/qbo-value.utils';
 import { resolveRealmIdOrDefault } from '../core/quickbooks-realm.utils';
+import { QboAccountIndex } from './quickbooks-job-costing-accounts';
 import {
   ProjectAllocation,
   QboJobCostingParams,
@@ -166,7 +167,25 @@ export class QuickbooksJobCostingUtils {
     return allocation.amount !== 0 && allocation.method !== 'no_project_match';
   }
 
-  protected lineUsesExplicitCostAccount(line: QboNormalizedLine): boolean {
+  /**
+   * A journal entry line only moves job cost when it posts to an expense or COGS account.
+   * The chart of accounts answers that outright, so it is asked first: guessing from the
+   * account's name missed every cost account that is not named like one — "Bank Services
+   * Charges", "Permits & City Fees", "Blueprints and Reproduction" are all Classification
+   * "Expense" in the live chart and none of them matches a keyword below.
+   *
+   * The name heuristic survives as the answer for `unknown` only — a deleted account, or
+   * a chart that could not be loaded. Treating `unknown` as "not a cost account" would
+   * make every journal entry adjustment disappear from every job the moment QuickBooks
+   * failed to answer, which is the wrong way to be wrong about money.
+   */
+  protected lineUsesExplicitCostAccount(
+    line: QboNormalizedLine,
+    accounts: QboAccountIndex,
+  ): boolean {
+    const role = accounts.roleOf(line.account?.value ?? line.category?.value ?? '');
+    if (role !== 'unknown') return role === 'cost';
+
     const accountName = this.normalizeName(
       line.account?.name ?? line.category?.name ?? '',
     );

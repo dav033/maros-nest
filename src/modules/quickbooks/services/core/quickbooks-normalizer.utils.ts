@@ -63,6 +63,18 @@ export function isSubTotalLine(detailType: string): boolean {
   return detailType === 'SubTotalLineDetail';
 }
 
+/**
+ * Flips the sign of money that comes back rather than going out. Guards the zero case:
+ * plain negation yields -0, which renders as "-$0.00" in a total.
+ *
+ * Shared by the two entities that record returning money as a positive amount — a
+ * Purchase flagged `Credit` and a Deposit posted against an expense account — so both
+ * net into cost the way QuickBooks' own Profit and Loss nets them.
+ */
+export function negate(value: number): number {
+  return value === 0 ? 0 : -value;
+}
+
 export function normalizeLines(lines: Record<string, unknown>[]): QboNormalizedLine[] {
   const result: QboNormalizedLine[] = [];
   for (const l of lines) {
@@ -111,6 +123,18 @@ function normalizeLine(l: Record<string, unknown>): QboNormalizedLine | null {
       const entityRef = o(entity['EntityRef']);
       if (s(entity['Type']) === 'Customer' || s(entityRef['type']) === 'Customer') {
         customer = extractRef(entityRef) ?? customer;
+      }
+      break;
+    }
+    case 'DepositLineDetail': {
+      account = extractRef(detail['AccountRef']);
+      // Deposit names the other party on the line as `Entity` itself — {value, name,
+      // type: 'CUSTOMER'} — not through JournalEntry's nested `Entity.EntityRef`. A line
+      // whose Entity is a vendor or absent has no project, which is what keeps an
+      // ordinary customer payment from being read as one job's cost reversal.
+      const entity = o(detail['Entity']);
+      if (s(entity['type']).toLowerCase() === 'customer') {
+        customer = extractRef(entity) ?? customer;
       }
       break;
     }

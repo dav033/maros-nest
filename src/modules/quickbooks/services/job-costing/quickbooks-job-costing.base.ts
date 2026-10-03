@@ -28,7 +28,13 @@ import {
   QboVendorCrmEntry,
 } from './quickbooks-job-costing.types';
 import {
+  QboAccountIndex,
+  buildAccountIndex,
+  unknownAccountIndex,
+} from './quickbooks-job-costing-accounts';
+import {
   AllocationContext,
+  CostLineFilter,
   allocateBillOpenApEngine,
   allocateBillPaymentEngine,
   allocateJournalEntryEngine,
@@ -69,6 +75,7 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
     const includeRaw = params.includeRaw ?? false;
     const warnings: QboAiWarning[] = [];
     const rawBundle = await this.fetchCostBundle(realmId, params);
+    const accounts = await this.loadAccountIndex(realmId, warnings);
     const billIndex = new Map<string, Record<string, unknown>>();
 
     for (const bill of rawBundle.bills) {
@@ -85,6 +92,7 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
       options.requireProjectMatch,
       params,
       warnings,
+      accounts,
     );
 
     const attachmentResult = includeAttachments
@@ -156,6 +164,7 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
     requireProjectMatch: boolean,
     params: QboJobCostingParams,
     warnings: QboAiWarning[],
+    accounts: QboAccountIndex,
   ): TransactionDescriptor[] {
     const context = this as unknown as AllocationContext;
     return buildTransactionDescriptorsEngine(
@@ -166,7 +175,44 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
       requireProjectMatch,
       params,
       warnings,
+      accounts,
     );
+  }
+
+  /**
+   * The chart of accounts, which is what says whether a line is cost at all. Only Id and
+   * Classification are needed, and queryAll already read-caches for five minutes — the
+   * same window every other QuickBooks read here uses — so this costs one request per
+   * five minutes rather than one per job. The chart is reference data that changes when
+   * somebody adds an account, and a stale miss is the safe direction anyway: an account
+   * the index has never heard of comes back `unknown`, which leaves every figure where it
+   * was.
+   *
+   * A failure returns the empty index rather than throwing. Job cost that cannot classify
+   * its accounts is the behaviour this code had before the chart existed; job cost that
+   * refuses to answer is worse.
+   */
+  protected async loadAccountIndex(
+    realmId: string,
+    warnings: QboAiWarning[],
+  ): Promise<QboAccountIndex> {
+    try {
+      const accounts = await this.apiService.queryAll(realmId, 'Account', {
+        select: 'Id, Name, Classification',
+        cacheKey: 'job-costing-accounts',
+      });
+      const rows = accounts.map((account) => this.asRecord(account));
+      if (!rows.length) throw new Error('empty chart of accounts');
+      return buildAccountIndex(rows);
+    } catch {
+      warnings.push(
+        this.normalizer.warning(
+          'CHART_OF_ACCOUNTS_UNAVAILABLE',
+          'QuickBooks did not return the chart of accounts, so lines could not be checked against their account type: every line was counted as cost and no deposit was treated as a cost reversal.',
+        ),
+      );
+      return unknownAccountIndex;
+    }
   }
 
   protected descriptor(
@@ -218,6 +264,7 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
       vendorCredits,
       purchaseOrders,
       journalEntries,
+      deposits,
     ] = await Promise.all([
       this.apiService.queryAll(realmId, 'Purchase', options),
       this.apiService.queryAll(realmId, 'Bill', options),
@@ -225,6 +272,7 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
       this.apiService.queryAll(realmId, 'VendorCredit', options),
       this.apiService.queryAll(realmId, 'PurchaseOrder', options),
       this.apiService.queryAll(realmId, 'JournalEntry', options),
+      this.apiService.queryAll(realmId, 'Deposit', options),
     ]);
 
     return {
@@ -234,6 +282,7 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
       vendorCredits: vendorCredits.map((item) => this.asRecord(item)),
       purchaseOrders: purchaseOrders.map((item) => this.asRecord(item)),
       journalEntries: journalEntries.map((item) => this.asRecord(item)),
+      deposits: deposits.map((item) => this.asRecord(item)),
     };
   }
 
@@ -276,6 +325,7 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
     txn: QboNormalizedTransaction,
     project: QboResolvedProjectRef | undefined,
     requireProjectMatch: boolean,
+    isCostLine: CostLineFilter,
   ): ProjectAllocation {
     const context = this as unknown as AllocationContext;
     return allocateTransactionToProjectEngine(
@@ -283,6 +333,7 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
       txn,
       project,
       requireProjectMatch,
+      isCostLine,
     );
   }
 
@@ -290,9 +341,10 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
     txn: QboNormalizedTransaction,
     project: QboResolvedProjectRef | undefined,
     requireProjectMatch: boolean,
+    isCostLine: CostLineFilter,
   ): ProjectAllocation {
     const context = this as unknown as AllocationContext;
-    return allocateBillOpenApEngine(context, txn, project, requireProjectMatch);
+    return allocateBillOpenApEngine(context, txn, project, requireProjectMatch, isCostLine);
   }
 
   protected allocateBillPayment(
@@ -302,6 +354,7 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
     project: QboResolvedProjectRef | undefined,
     requireProjectMatch: boolean,
     warnings: QboAiWarning[],
+    isCostLine: CostLineFilter,
   ): ProjectAllocation {
     const context = this as unknown as AllocationContext;
     return allocateBillPaymentEngine(
@@ -312,6 +365,7 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
       project,
       requireProjectMatch,
       warnings,
+      isCostLine,
     );
   }
 
@@ -320,6 +374,7 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
     txn: QboNormalizedTransaction,
     project: QboResolvedProjectRef | undefined,
     requireProjectMatch: boolean,
+    accounts: QboAccountIndex,
   ): ProjectAllocation {
     const context = this as unknown as AllocationContext;
     return allocateJournalEntryEngine(
@@ -328,6 +383,7 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
       txn,
       project,
       requireProjectMatch,
+      accounts,
     );
   }
 
@@ -371,6 +427,8 @@ export class QuickbooksJobCostingBase extends QuickbooksJobCostingUtils {
         return this.normalizer.normalizePurchaseOrder(raw, attachments);
       case 'JournalEntry':
         return this.normalizer.normalizeJournalEntry(raw, attachments);
+      case 'Deposit':
+        return this.normalizer.normalizeDeposit(raw, attachments);
     }
   }
 

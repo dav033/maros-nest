@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { normalizeAttachable } from './normalizers/attachable.normalizer';
 import { normalizeBill } from './normalizers/bill.normalizer';
 import { normalizeBillPayment } from './normalizers/bill-payment.normalizer';
+import { normalizeDeposit } from './normalizers/deposit.normalizer';
 import { normalizeEstimate } from './normalizers/estimate.normalizer';
 import { normalizeInvoice } from './normalizers/invoice.normalizer';
 import { normalizeJournalEntry } from './normalizers/journal-entry.normalizer';
@@ -90,6 +91,13 @@ export class QuickbooksNormalizerService {
     attachments: Record<string, unknown>[] = [],
   ): QboNormalizedTransaction {
     return normalizeJournalEntry(raw, attachments);
+  }
+
+  normalizeDeposit(
+    raw: Record<string, unknown>,
+    attachments: Record<string, unknown>[] = [],
+  ): QboCashOutTransaction {
+    return normalizeDeposit(raw, attachments);
   }
 
   normalizeVendor(raw: Record<string, unknown>): QboVendorSummary {

@@ -1,5 +1,6 @@
 import {
   AllocationContext,
+  CostLineFilter,
   allocateBillOpenApEngine,
   allocateBillPaymentEngine,
   allocateJournalEntryEngine,
@@ -7,6 +8,10 @@ import {
   paymentAllocationLinesEngine,
 } from './quickbooks-job-costing-allocation.engine';
 import { QuickbooksJobCostingUtils } from './quickbooks-job-costing.utils';
+import {
+  buildAccountIndex,
+  unknownAccountIndex,
+} from './quickbooks-job-costing-accounts';
 import type { QboResolvedProjectRef } from './quickbooks-job-costing.types';
 import type {
   QboAiWarning,
@@ -34,6 +39,7 @@ class AllocationHarness extends QuickbooksJobCostingUtils {
     normalizeVendorCredit: jest.fn(),
     normalizePurchaseOrder: jest.fn(),
     normalizeJournalEntry: jest.fn(),
+    normalizeDeposit: jest.fn(),
     warning: (code: string, message: string): QboAiWarning => ({ code, message }),
   };
 
@@ -48,8 +54,15 @@ class AllocationHarness extends QuickbooksJobCostingUtils {
     txn: QboNormalizedTransaction,
     project: QboResolvedProjectRef | undefined,
     requireProjectMatch: boolean,
+    isCostLine: CostLineFilter,
   ) {
-    return allocateTransactionToProjectEngine(this.ctx, txn, project, requireProjectMatch);
+    return allocateTransactionToProjectEngine(
+      this.ctx,
+      txn,
+      project,
+      requireProjectMatch,
+      isCostLine,
+    );
   }
 
   paymentAllocationLines(rawPayment: Record<string, unknown>, txn: QboNormalizedTransaction) {
@@ -65,6 +78,14 @@ function harness() {
   const h = new AllocationHarness();
   return { h, ctx: h.ctx };
 }
+
+/**
+ * The filter these tests pass when they are asserting arithmetic rather than account
+ * classification: it is what `countsAsCost` answers for a line whose account cannot be
+ * classified, so it keeps every line, which is the behaviour this engine had before the
+ * chart of accounts reached it.
+ */
+const everyLineIsCost: CostLineFilter = (line) => unknownAccountIndex.countsAsCost(line);
 
 // --- fixtures ---------------------------------------------------------------
 
@@ -112,7 +133,7 @@ describe('allocateTransactionToProjectEngine', () => {
   it('charges the whole transaction when no project filter is asked for', () => {
     const { ctx } = harness();
 
-    const result = allocateTransactionToProjectEngine(ctx, txn({ totalAmount: 1200.5 }), project, false);
+    const result = allocateTransactionToProjectEngine(ctx, txn({ totalAmount: 1200.5 }), project, false, everyLineIsCost);
 
     expect(result.amount).toBe(1200.5);
     expect(result.ratio).toBe(1);
@@ -129,7 +150,7 @@ describe('allocateTransactionToProjectEngine', () => {
       ],
     });
 
-    const result = allocateTransactionToProjectEngine(ctx, bill, project, true);
+    const result = allocateTransactionToProjectEngine(ctx, bill, project, true, everyLineIsCost);
 
     expect(result.amount).toBe(300);
     expect(result.basisAmount).toBe(1000);
@@ -150,7 +171,7 @@ describe('allocateTransactionToProjectEngine', () => {
       ],
     });
 
-    const result = allocateTransactionToProjectEngine(ctx, bill, project, true);
+    const result = allocateTransactionToProjectEngine(ctx, bill, project, true, everyLineIsCost);
 
     expect(result.amount).toBe(400);
     expect(result.ratio).toBe(0.4);
@@ -164,7 +185,7 @@ describe('allocateTransactionToProjectEngine', () => {
       lineItems: [line({ amount: 500, projectRefs: [{ value: '', name: '091-0626 Fence' }] })],
     });
 
-    const result = allocateTransactionToProjectEngine(ctx, bill, project, true);
+    const result = allocateTransactionToProjectEngine(ctx, bill, project, true, everyLineIsCost);
 
     expect(result.amount).toBe(500);
   });
@@ -177,7 +198,7 @@ describe('allocateTransactionToProjectEngine', () => {
       lineItems: [line({ amount: 800 })],
     });
 
-    const result = allocateTransactionToProjectEngine(ctx, bill, project, true);
+    const result = allocateTransactionToProjectEngine(ctx, bill, project, true, everyLineIsCost);
 
     expect(result.amount).toBe(800);
     expect(result.method).toBe('project_header_full');
@@ -191,7 +212,7 @@ describe('allocateTransactionToProjectEngine', () => {
       lineItems: [line({ amount: 900, projectRefs: [onOtherJob] })],
     });
 
-    const result = allocateTransactionToProjectEngine(ctx, bill, project, true);
+    const result = allocateTransactionToProjectEngine(ctx, bill, project, true, everyLineIsCost);
 
     expect(result.amount).toBe(0);
     expect(result.method).toBe('no_project_match');
@@ -205,7 +226,7 @@ describe('allocateTransactionToProjectEngine', () => {
   it('reports an unknown amount as unknown, not as zero', () => {
     const { ctx } = harness();
 
-    const result = allocateTransactionToProjectEngine(ctx, txn({ totalAmount: null }), project, false);
+    const result = allocateTransactionToProjectEngine(ctx, txn({ totalAmount: null }), project, false, everyLineIsCost);
 
     expect(result.amount).toBe(0);
     expect(result.method).toBe('full_transaction_amount_unknown');
@@ -221,7 +242,7 @@ describe('allocateTransactionToProjectEngine', () => {
       ],
     });
 
-    const result = allocateTransactionToProjectEngine(ctx, bill, project, true);
+    const result = allocateTransactionToProjectEngine(ctx, bill, project, true, everyLineIsCost);
 
     // 0.1 + 0.2 === 0.30000000000000004 before money() gets to it.
     expect(result.amount).toBe(0.3);
@@ -269,10 +290,225 @@ describe('allocateTransactionToProjectEngine', () => {
       ],
     });
 
-    const result = allocateTransactionToProjectEngine(ctx, purchase2792, baseJob, true);
+    const result = allocateTransactionToProjectEngine(ctx, purchase2792, baseJob, true, everyLineIsCost);
 
     expect(result.amount).toBe(500);
     expect(result.details).toHaveLength(1);
+  });
+
+  /**
+   * Job cost is what the Profit and Loss calls cost, and that is decided by the account a
+   * line posts to. These two live purchases were charged in full to their jobs although
+   * QuickBooks puts neither on the cost side of the report.
+   *
+   * Purchase 4493: a returned deposited check of 28,800 posted to the *income* account
+   * "Services" and tagged to job 061-0226. QuickBooks books it as negative income; the app
+   * reported it as 28,800 of cost.
+   *
+   * Purchase 4165: an ATM withdrawal of 1,000 posted to the *asset* account "Cash on
+   * hand" and tagged to 050P-0326 — checking account to petty cash, not a cost at all.
+   *
+   * Together they were 29,800 of the 64,723.60 those two jobs were overstated by.
+   */
+  describe('a line posted to an account that is not cost', () => {
+    const chart = buildAccountIndex([
+      { Id: '5', Name: 'Services', Classification: 'Revenue' },
+      { Id: '170', Name: 'Cash on hand', Classification: 'Asset' },
+      { Id: '188', Name: '53600 Subcontractors Expense', Classification: 'Expense' },
+    ]);
+    const costLine: CostLineFilter = (l) => chart.countsAsCost(l);
+
+    it.each([
+      ['Purchase 4493, a returned check posted to income', 28800, '5'],
+      ['Purchase 4165, an ATM withdrawal posted to an asset', 1000, '170'],
+    ])('charges nothing for %s', (_label, amount, accountId) => {
+      const { ctx } = harness();
+      const purchase = txn({
+        entityType: 'Purchase',
+        totalAmount: amount,
+        lineItems: [
+          line({ amount, account: { value: accountId }, projectRefs: [onProject] }),
+        ],
+      });
+
+      const result = allocateTransactionToProjectEngine(ctx, purchase, project, true, costLine);
+
+      expect(result.amount).toBe(0);
+      expect(result.method).toBe('no_cost_account_line');
+    });
+
+    it('still charges the cost lines of a document that mixes both', () => {
+      const { ctx } = harness();
+      const purchase = txn({
+        entityType: 'Purchase',
+        totalAmount: 1500,
+        lineItems: [
+          line({ amount: 1000, account: { value: '188' }, projectRefs: [onProject] }),
+          line({ amount: 500, account: { value: '170' }, projectRefs: [onProject] }),
+        ],
+      });
+
+      const result = allocateTransactionToProjectEngine(ctx, purchase, project, true, costLine);
+
+      expect(result.amount).toBe(1000);
+      // The basis stays the whole document: the open balance of a bill like this is only
+      // this job's in the cost line's proportion of the entire bill, not of its cost part.
+      expect(result.basisAmount).toBe(1500);
+    });
+
+    /**
+     * The inverse failure, and the one that matters more: an account the chart cannot
+     * classify must not make real cost disappear. `countsAsCost` only excludes a line it
+     * positively knows is not cost.
+     */
+    it.each([
+      ['an account missing from the chart', { value: '999999' }],
+      ['no account at all', undefined],
+    ])('keeps a cost line with %s', (_label, account) => {
+      const { ctx } = harness();
+      const purchase = txn({
+        entityType: 'Purchase',
+        totalAmount: 400,
+        lineItems: [line({ amount: 400, ...(account && { account }), projectRefs: [onProject] })],
+      });
+
+      const result = allocateTransactionToProjectEngine(ctx, purchase, project, true, costLine);
+
+      expect(result.amount).toBe(400);
+    });
+
+    it('keeps every line when the chart of accounts could not be read at all', () => {
+      const { ctx } = harness();
+      const purchase = txn({
+        entityType: 'Purchase',
+        totalAmount: 28800,
+        lineItems: [line({ amount: 28800, account: { value: '5' }, projectRefs: [onProject] })],
+      });
+
+      const result = allocateTransactionToProjectEngine(
+        ctx,
+        purchase,
+        project,
+        true,
+        (l) => unknownAccountIndex.countsAsCost(l),
+      );
+
+      expect(result.amount).toBe(28800);
+    });
+
+    it('leaves a document with no lines on its header total, as before', () => {
+      const { ctx } = harness();
+      const purchase = txn({
+        entityType: 'Purchase',
+        totalAmount: 250,
+        lineItems: [],
+        projectRefs: [onProject],
+      });
+
+      const result = allocateTransactionToProjectEngine(ctx, purchase, project, true, costLine);
+
+      expect(result.amount).toBe(250);
+      expect(result.method).toBe('project_header_full');
+    });
+  });
+
+  /**
+   * A Deposit is money arriving, and the normalizer has already negated it. Only the lines
+   * posting to an expense account are cost reversals, so the engine asks `reversesCost`,
+   * which answers yes only when the chart positively says the account is an expense one.
+   *
+   * Deposit 4387 in the live file: 34,923.60 against "60400 Bank Services Charges", tagged
+   * to job 061-0226, cancelling a 36,000 charge on the same account so that QuickBooks'
+   * Profit and Loss shows 1,076.40. Deposit was never queried, so the app reported 36,000.
+   */
+  describe('a deposit line', () => {
+    const chart = buildAccountIndex([
+      { Id: '1150040003', Name: '60400 Bank Services Charges', Classification: 'Expense' },
+      { Id: '5', Name: 'Services', Classification: 'Revenue' },
+    ]);
+    const reversal: CostLineFilter = (l) => chart.reversesCost(l);
+
+    it('comes off the job when it posts to an expense account', () => {
+      const { ctx } = harness();
+      const deposit4387 = txn({
+        entityType: 'Deposit',
+        totalAmount: -34923.6,
+        lineItems: [
+          line({
+            amount: -34923.6,
+            detailType: 'DepositLineDetail',
+            account: { value: '1150040003' },
+            projectRefs: [onProject],
+          }),
+        ],
+      });
+
+      const result = allocateTransactionToProjectEngine(ctx, deposit4387, project, true, reversal);
+
+      expect(result.amount).toBe(-34923.6);
+    });
+
+    it('is left alone when it is a customer payment against an income account', () => {
+      const { ctx } = harness();
+      const payment = txn({
+        entityType: 'Deposit',
+        totalAmount: -28800,
+        lineItems: [
+          line({
+            amount: -28800,
+            detailType: 'DepositLineDetail',
+            account: { value: '5' },
+            projectRefs: [onProject],
+          }),
+        ],
+      });
+
+      const result = allocateTransactionToProjectEngine(ctx, payment, project, true, reversal);
+
+      expect(result.amount).toBe(0);
+      expect(result.method).toBe('no_cost_account_line');
+    });
+
+    /** Deposit 4386: 36,000 of customer payment whose line names no account. */
+    it('is left alone when its line names no account', () => {
+      const { ctx } = harness();
+      const deposit4386 = txn({
+        entityType: 'Deposit',
+        totalAmount: -36000,
+        lineItems: [
+          line({ amount: -36000, detailType: 'DepositLineDetail', projectRefs: [onProject] }),
+        ],
+      });
+
+      const result = allocateTransactionToProjectEngine(ctx, deposit4386, project, true, reversal);
+
+      expect(result.amount).toBe(0);
+    });
+
+    it('reverses nothing when the chart of accounts could not be read', () => {
+      const { ctx } = harness();
+      const deposit4387 = txn({
+        entityType: 'Deposit',
+        totalAmount: -34923.6,
+        lineItems: [
+          line({
+            amount: -34923.6,
+            account: { value: '1150040003' },
+            projectRefs: [onProject],
+          }),
+        ],
+      });
+
+      const result = allocateTransactionToProjectEngine(
+        ctx,
+        deposit4387,
+        project,
+        true,
+        (l) => unknownAccountIndex.reversesCost(l),
+      );
+
+      expect(result.amount).toBe(0);
+    });
   });
 
   /**
@@ -288,7 +524,7 @@ describe('allocateTransactionToProjectEngine', () => {
       lineItems: [line({ amount: 400, projectRefs: [{ value: '', name: '091-0626 Fence' }] })],
     });
 
-    const result = allocateTransactionToProjectEngine(ctx, bill, project, true);
+    const result = allocateTransactionToProjectEngine(ctx, bill, project, true, everyLineIsCost);
 
     expect(result.amount).toBe(400);
   });
@@ -309,7 +545,7 @@ describe('allocateTransactionToProjectEngine', () => {
       lineItems: [line({ amount: 400, projectRefs: [{ value: '900', name: '091-0626' }] })],
     });
 
-    const result = allocateTransactionToProjectEngine(ctx, bill, unresolved, true);
+    const result = allocateTransactionToProjectEngine(ctx, bill, unresolved, true, everyLineIsCost);
 
     expect(result.amount).toBe(400);
   });
@@ -324,6 +560,7 @@ describe('allocateBillOpenApEngine', () => {
       txn({ totalAmount: 1000, openBalance: 0 }),
       project,
       true,
+      everyLineIsCost,
     );
 
     expect(result.amount).toBe(0);
@@ -339,7 +576,7 @@ describe('allocateBillOpenApEngine', () => {
       lineItems: [line({ amount: 1000 })],
     });
 
-    const result = allocateBillOpenApEngine(ctx, bill, project, true);
+    const result = allocateBillOpenApEngine(ctx, bill, project, true, everyLineIsCost);
 
     expect(result.amount).toBe(400);
     expect(result.method).toBe('open_ap_full');
@@ -361,7 +598,7 @@ describe('allocateBillOpenApEngine', () => {
       ],
     });
 
-    const result = allocateBillOpenApEngine(ctx, bill, project, true);
+    const result = allocateBillOpenApEngine(ctx, bill, project, true, everyLineIsCost);
 
     // 30% of the bill is this job's, and 500 is still open: 150.
     expect(result.amount).toBe(150);
@@ -378,7 +615,7 @@ describe('allocateBillOpenApEngine', () => {
       lineItems: [line({ amount: 1000, projectRefs: [onOtherJob] })],
     });
 
-    const result = allocateBillOpenApEngine(ctx, bill, project, true);
+    const result = allocateBillOpenApEngine(ctx, bill, project, true, everyLineIsCost);
 
     expect(result.amount).toBe(0);
     expect(result.method).toBe('no_project_match');
@@ -404,6 +641,7 @@ describe('allocateBillPaymentEngine', () => {
       project,
       false,
       [],
+      everyLineIsCost,
     );
 
     expect(result.amount).toBe(500);
@@ -428,6 +666,7 @@ describe('allocateBillPaymentEngine', () => {
       project,
       true,
       [],
+      everyLineIsCost,
     );
 
     expect(result.amount).toBe(400);
@@ -460,6 +699,7 @@ describe('allocateBillPaymentEngine', () => {
       project,
       true,
       [],
+      everyLineIsCost,
     );
 
     expect(result.amount).toBe(300);
@@ -489,6 +729,7 @@ describe('allocateBillPaymentEngine', () => {
       project,
       true,
       [],
+      everyLineIsCost,
     );
 
     // 1000 over two bills is 500 each; only bill 10 is this job's.
@@ -508,6 +749,7 @@ describe('allocateBillPaymentEngine', () => {
       project,
       true,
       warnings,
+      everyLineIsCost,
     );
 
     expect(result.amount).toBe(0);
@@ -530,6 +772,7 @@ describe('allocateBillPaymentEngine', () => {
       project,
       true,
       [],
+      everyLineIsCost,
     );
 
     expect(result.amount).toBe(0);
@@ -560,6 +803,7 @@ describe('allocateJournalEntryEngine', () => {
       entry,
       project,
       false,
+      unknownAccountIndex,
     );
 
     expect(result.amount).toBe(250);
@@ -581,6 +825,7 @@ describe('allocateJournalEntryEngine', () => {
       entry,
       project,
       false,
+      unknownAccountIndex,
     );
 
     expect(result.amount).toBe(-250);
@@ -600,6 +845,7 @@ describe('allocateJournalEntryEngine', () => {
       entry,
       project,
       false,
+      unknownAccountIndex,
     );
 
     expect(result.amount).toBe(0);
@@ -636,6 +882,7 @@ describe('allocateJournalEntryEngine', () => {
       entry,
       project,
       false,
+      unknownAccountIndex,
     );
 
     expect(result.amount).toBe(500);
@@ -643,6 +890,92 @@ describe('allocateJournalEntryEngine', () => {
     // The regression: the line after the subtotal used to be pushed twice, so this was
     // 900 across three details and the job was charged for 400 it never incurred.
     expect(result.details.map((detail) => detail.allocatedAmount)).toEqual([100, 400]);
+  });
+
+  /**
+   * Which journal lines are cost used to be guessed from the account's *name* — it had to
+   * contain "expense", "cogs", "materials", "subcontract", "labor"… The chart of accounts
+   * answers it outright, so it is asked first, and it disagrees with the name both ways.
+   *
+   * Live examples of the two mistakes: "60400 Bank Services Charges" and
+   * "51901 Permits & City Fees" are Classification "Expense" and match no keyword, so
+   * they were skipped; an income account with "Expenses" in its name matched every time.
+   */
+  describe('deciding which journal lines are cost', () => {
+    const chart = buildAccountIndex([
+      { Id: '1150040003', Name: '60400 Bank Services Charges', Classification: 'Expense' },
+      { Id: '77', Name: 'Reimbursed Expenses', Classification: 'Revenue' },
+    ]);
+
+    it('counts a cost account whose name does not look like one', () => {
+      const { ctx } = harness();
+      const entry = txn({
+        entityType: 'JournalEntry',
+        totalAmount: null,
+        lineItems: [
+          line({
+            amount: 300,
+            account: { value: '1150040003', name: '60400 Bank Services Charges' },
+          }),
+        ],
+      });
+
+      const result = allocateJournalEntryEngine(
+        ctx,
+        je([{ amount: 300, account: '60400 Bank Services Charges', posting: 'Debit' }]),
+        entry,
+        project,
+        false,
+        chart,
+      );
+
+      expect(result.amount).toBe(300);
+    });
+
+    it('skips an income account that merely has "Expenses" in its name', () => {
+      const { ctx } = harness();
+      const entry = txn({
+        entityType: 'JournalEntry',
+        totalAmount: null,
+        lineItems: [line({ amount: 300, account: { value: '77', name: 'Reimbursed Expenses' } })],
+      });
+
+      const result = allocateJournalEntryEngine(
+        ctx,
+        je([{ amount: 300, account: 'Reimbursed Expenses', posting: 'Debit' }]),
+        entry,
+        project,
+        false,
+        chart,
+      );
+
+      expect(result.amount).toBe(0);
+      expect(result.method).toBe('journal_not_explicit_cost');
+    });
+
+    /**
+     * And with no chart to ask, the name heuristic is still the answer — not "no". Letting
+     * an outage drop every journal adjustment from every job is the wrong way to be wrong.
+     */
+    it('falls back to the account name when the chart could not be read', () => {
+      const { ctx } = harness();
+      const entry = txn({
+        entityType: 'JournalEntry',
+        totalAmount: null,
+        lineItems: [line({ amount: 300, account: { value: '1', name: 'Job Expense' } })],
+      });
+
+      const result = allocateJournalEntryEngine(
+        ctx,
+        je([{ amount: 300, account: 'Job Expense', posting: 'Debit' }]),
+        entry,
+        project,
+        false,
+        unknownAccountIndex,
+      );
+
+      expect(result.amount).toBe(300);
+    });
   });
 
   it('ignores a trailing subtotal with no line after it', () => {
@@ -662,6 +995,7 @@ describe('allocateJournalEntryEngine', () => {
       entry,
       project,
       false,
+      unknownAccountIndex,
     );
 
     expect(result.amount).toBe(100);
@@ -688,6 +1022,7 @@ describe('allocateJournalEntryEngine', () => {
       entry,
       project,
       true,
+      unknownAccountIndex,
     );
 
     expect(result.amount).toBe(100);
