@@ -3,6 +3,8 @@ import { Project } from '../../../../entities/project.entity';
 import { Lead } from '../../../../entities/lead.entity';
 import { QuickbooksJobCostingService } from '../../../quickbooks/services/job-costing/quickbooks-job-costing.service';
 import { ProjectCostBreakdownService } from './project-cost-breakdown.service';
+import { LeadType } from '../../../../common/enums/lead-type.enum';
+import { runWithRequestScope } from '../../../../common/auth/request-scope';
 
 /**
  * Comprobado contra el job 032P-0825 (cliente 472) llamando al endpoint real:
@@ -182,5 +184,34 @@ describe('ProjectCostBreakdownService', () => {
     const { service } = harness({ project: null });
 
     await expect(service.getBreakdown(999)).rejects.toThrow(/not found/i);
+  });
+
+  /**
+   * El ambito del usuario tambien cierra las lecturas por id. Se responde "no
+   * existe" y no "no puedes": decir que existe pero que no se puede ver ya
+   * revela que existe, y este endpoint devuelve el coste de la obra.
+   */
+  it('hides a project of another lead type behind a not-found', async () => {
+    const { service, getProjectJobCostSummary } = harness();
+
+    await expect(
+      runWithRequestScope({ scopedLeadTypes: [LeadType.ROOFING] }, () =>
+        service.getBreakdown(77),
+      ),
+    ).rejects.toThrow(/not found/i);
+    // Y no se llega a preguntar a QuickBooks por una obra que no se puede ver.
+    expect(getProjectJobCostSummary).not.toHaveBeenCalled();
+  });
+
+  it('answers normally when the project is inside the scope', async () => {
+    const { service } = harness();
+
+    // El 032P-0825 es plomeria por el prefijo P de su numero.
+    const result = await runWithRequestScope(
+      { scopedLeadTypes: [LeadType.PLUMBING] },
+      () => service.getBreakdown(77),
+    );
+
+    expect(result.projectId).toBe(77);
   });
 });

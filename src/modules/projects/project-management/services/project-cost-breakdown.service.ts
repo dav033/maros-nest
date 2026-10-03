@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Project } from '../../../../entities/project.entity';
 import { ResourceNotFoundException } from '../../../../common/exceptions/resource-not-found.exception';
 import { QuickbooksJobCostingService } from '../../../quickbooks/services/job-costing/quickbooks-job-costing.service';
+import { canSeeLeadNumber } from '../../../../common/auth/request-scope';
 import type {
   QboJobCostBreakdown,
   QboJobCostExpenseBreakdown,
@@ -97,7 +98,9 @@ export class ProjectCostBreakdownService {
       where: { id: projectId },
       relations: ['lead'],
     });
-    if (!project) {
+    // Igual que el reporte: fuera del ambito no existe, y aqui se devuelve el
+    // coste de la obra.
+    if (!project || !canSeeLeadNumber(project.lead?.leadNumber)) {
       throw new ResourceNotFoundException(
         `Project not found with id: ${projectId}`,
       );

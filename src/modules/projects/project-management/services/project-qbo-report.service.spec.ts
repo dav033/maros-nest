@@ -2,6 +2,8 @@ import { Project } from '../../../../entities/project.entity';
 import { Lead } from '../../../../entities/lead.entity';
 import { QboReportName } from '../dto/qbo-report-query.dto';
 import { ProjectQboReportService } from './project-qbo-report.service';
+import { LeadType } from '../../../../common/enums/lead-type.enum';
+import { runWithRequestScope } from '../../../../common/auth/request-scope';
 
 /**
  * Lo que rompia el boton "Llevame al reporte": el servicio solo miraba
@@ -144,5 +146,39 @@ describe('ProjectQboReportService', () => {
       } as never),
     ).rejects.toThrow(/Project not found/);
     expect(report).not.toHaveBeenCalled();
+  });
+
+  /**
+   * El ambito cierra tambien este endpoint, que devuelve las cifras de
+   * QuickBooks de la obra. "No existe" y no "no puedes".
+   */
+  it('hides a project of another lead type behind a not-found', async () => {
+    const { service, report } = build(projectWithNumber('097-0726', '512'));
+
+    await expect(
+      runWithRequestScope({ scopedLeadTypes: [LeadType.PLUMBING] }, () =>
+        service.getProjectReport(42, {
+          report: QboReportName.ProfitAndLossDetail,
+          ...RANGE,
+        } as never),
+      ),
+    ).rejects.toThrow(/not found/i);
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  it('answers when the project is inside the scope', async () => {
+    const { service } = build(projectWithNumber('097-0726', '512'));
+
+    // 097-0726 no lleva prefijo, asi que es construccion.
+    const result = await runWithRequestScope(
+      { scopedLeadTypes: [LeadType.CONSTRUCTION] },
+      () =>
+        service.getProjectReport(42, {
+          report: QboReportName.ProfitAndLossDetail,
+          ...RANGE,
+        } as never),
+    );
+
+    expect(result.qboCustomerId).toBe('512');
   });
 });

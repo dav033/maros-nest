@@ -30,6 +30,7 @@ import type { AuthenticatedUser } from '../../../common/auth/authenticated-user'
 import { toTaskActor } from '../../tasks/task-management/services/task-actor';
 import { Optional } from '@nestjs/common';
 import { TaskWorkspaceAssignmentService } from '../../task-workspaces/services/task-workspace-assignment.service';
+import { canSeeLeadNumber } from '../../../common/auth/request-scope';
 
 @Injectable()
 export class LeadsService {
@@ -88,7 +89,9 @@ export class LeadsService {
 
   async getLeadById(id: number, options: { includeQbo?: boolean } = {}): Promise<any> {
     const entity = await this.leadsRepository.findByIdWithRelations(id);
-    if (!entity) {
+    // Fuera del ambito se responde "no existe" y no "no puedes": decir que
+    // existe pero que no se puede ver ya revela que existe.
+    if (!entity || !canSeeLeadNumber(entity.leadNumber)) {
       throw new LeadExceptions.LeadNotFoundException(id);
     }
     const dto = this.leadMapper.toDto(entity);
@@ -103,7 +106,7 @@ export class LeadsService {
     options: { includeQbo?: boolean } = {},
   ): Promise<any> {
     const lead = await this.leadsRepository.findByIdWithRelations(id);
-    if (!lead) {
+    if (!lead || !canSeeLeadNumber(lead.leadNumber)) {
       throw new LeadExceptions.LeadNotFoundException(id);
     }
 

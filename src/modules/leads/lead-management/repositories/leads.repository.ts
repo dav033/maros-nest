@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not } from 'typeorm';
+import { Repository, Not, SelectQueryBuilder } from 'typeorm';
 import { Lead } from '../../../../entities/lead.entity';
 import { Project } from '../../../../entities/project.entity';
 import { LeadType } from '../../../../common/enums/lead-type.enum';
@@ -8,6 +8,7 @@ import {
   filterLeadsByType,
   leadNumberSqlFilter,
 } from '../../../../common/utils/lead-type.utils';
+import { applyLeadTypeScope } from '../../../../common/auth/request-scope';
 
 @Injectable()
 export class LeadsRepository {
@@ -16,15 +17,27 @@ export class LeadsRepository {
     private readonly repo: Repository<Lead>,
   ) {}
 
+  /**
+   * El ambito de tipos de lead del usuario que pregunta, aplicado al final de
+   * la consulta.
+   *
+   * Al final y no al principio porque en TypeORM `.where()` reemplaza las
+   * condiciones anteriores: aplicar el ambito antes de un `.where()` lo
+   * borraria sin avisar. Un usuario sin restriccion no cambia nada.
+   */
+  private scoped(qb: SelectQueryBuilder<Lead>): SelectQueryBuilder<Lead> {
+    return applyLeadTypeScope(qb, 'lead.lead_number');
+  }
+
   async findAll(): Promise<Lead[]> {
-    return this.repo
+    const qb = this.repo
       .createQueryBuilder('lead')
       .leftJoinAndSelect('lead.contact', 'contact')
       .leftJoinAndSelect('contact.company', 'company')
       .leftJoinAndSelect('lead.projectType', 'projectType')
       .leftJoinAndSelect('lead.project', 'project')
-      .orderBy('lead.id', 'DESC')
-      .getMany();
+      .orderBy('lead.id', 'DESC');
+    return this.scoped(qb).getMany();
   }
 
   /**
@@ -37,26 +50,30 @@ export class LeadsRepository {
   async findAllForPicker(): Promise<
     Array<{ id: number; name: string | null; lead_number: string | null }>
   > {
-    return this.repo
+    const qb = this.repo
       .createQueryBuilder('lead')
       .select(['lead.id AS id', 'lead.name AS name', 'lead.lead_number AS lead_number'])
-      .orderBy('lead.id', 'DESC')
-      .getRawMany<{ id: number; name: string | null; lead_number: string | null }>();
+      .orderBy('lead.id', 'DESC');
+    return this.scoped(qb).getRawMany<{
+      id: number;
+      name: string | null;
+      lead_number: string | null;
+    }>();
   }
 
   async findPipeline(): Promise<Lead[]> {
     // Exclude leads that have an associated project
     // The foreign key is in projects table (lead_id), so we check if a project exists for this lead
     // Also exclude leads that are in review (inReview = true)
-    return this.repo
+    const qb = this.repo
       .createQueryBuilder('lead')
       .leftJoinAndSelect('lead.contact', 'contact')
       .leftJoinAndSelect('contact.company', 'company')
       .leftJoinAndSelect('lead.projectType', 'projectType')
       .leftJoin(Project, 'project', 'project.lead_id = lead.id')
       .where('project.id IS NULL')
-      .andWhere('lead.in_review = false')
-      .getMany();
+      .andWhere('lead.in_review = false');
+    return this.scoped(qb).getMany();
   }
 
   async findByLeadType(type: LeadType): Promise<Lead[]> {
@@ -73,23 +90,33 @@ export class LeadsRepository {
       qb.andWhere(filter.clause, filter.parameters);
     }
 
-    return qb.orderBy('lead.id', 'DESC').getMany();
+    // El ambito se suma al tipo pedido: pedir roofing con ambito de plomeria
+    // no devuelve nada, que es lo correcto.
+    return this.scoped(qb).orderBy('lead.id', 'DESC').getMany();
   }
 
   async findInReview(): Promise<Lead[]> {
     // Obtener todos los leads que están en revisión (inReview = true)
     // Excluir leads que tienen un proyecto asociado
-    return this.repo
+    const qb = this.repo
       .createQueryBuilder('lead')
       .leftJoinAndSelect('lead.contact', 'contact')
       .leftJoinAndSelect('contact.company', 'company')
       .leftJoinAndSelect('lead.projectType', 'projectType')
       .leftJoin(Project, 'project', 'project.lead_id = lead.id')
       .where('lead.in_review = true')
-      .andWhere('project.id IS NULL')
-      .getMany();
+      .andWhere('project.id IS NULL');
+    return this.scoped(qb).getMany();
   }
 
+  /**
+   * Deliberadamente SIN el ambito del usuario.
+   *
+   * Esto alimenta la numeracion de leads. Filtrarlo haria que un usuario
+   * restringido a plomeria no viese los numeros de construccion y generase uno
+   * ya usado: un filtro de visibilidad convertido en duplicados en la base.
+   * Aqui no se devuelve nada al usuario, solo se calcula el siguiente numero.
+   */
   async findAllLeadNumbersByType(leadType: LeadType): Promise<string[]> {
     const allLeads = await this.repo
       .createQueryBuilder('lead')
@@ -152,14 +179,14 @@ export class LeadsRepository {
   }
 
   async findByStatus(status: string): Promise<Lead[]> {
-    return this.repo
+    const qb = this.repo
       .createQueryBuilder('lead')
       .leftJoinAndSelect('lead.contact', 'contact')
       .leftJoinAndSelect('contact.company', 'company')
       .leftJoinAndSelect('lead.projectType', 'projectType')
       .leftJoinAndSelect('lead.project', 'project')
-      .where('lead.status = :status', { status })
-      .getMany();
+      .where('lead.status = :status', { status });
+    return this.scoped(qb).getMany();
   }
 
   async getStatusCounts(
@@ -179,7 +206,7 @@ export class LeadsRepository {
     const rows: Array<{
       status: string | null;
       count: string;
-    }> = await qb.getRawMany();
+    }> = await this.scoped(qb).getRawMany();
 
     return rows.map((row) => ({
       status: row.status ?? 'UNKNOWN',
@@ -202,7 +229,7 @@ export class LeadsRepository {
     }
 
     const rows: Array<{ status: string | null; leadNumber: string | null }> =
-      await qb.getRawMany();
+      await this.scoped(qb).getRawMany();
 
     return rows.map((row) => ({
       status: row.status ?? 'UNKNOWN',
@@ -216,42 +243,47 @@ export class LeadsRepository {
     if (filter) {
       qb.andWhere(filter.clause, filter.parameters);
     }
-    return qb.getCount();
+    return this.scoped(qb).getCount();
   }
 
   async findByContactId(contactId: number): Promise<Lead[]> {
-    return this.repo
+    const qb = this.repo
       .createQueryBuilder('lead')
       .leftJoinAndSelect('lead.contact', 'contact')
       .leftJoinAndSelect('contact.company', 'company')
       .leftJoinAndSelect('lead.projectType', 'projectType')
       .leftJoinAndSelect('lead.project', 'project')
-      .where('contact.id = :contactId', { contactId })
-      .getMany();
+      .where('contact.id = :contactId', { contactId });
+    return this.scoped(qb).getMany();
   }
 
   async findByContactName(name: string): Promise<Lead[]> {
-    return this.repo
+    const qb = this.repo
       .createQueryBuilder('lead')
       .leftJoinAndSelect('lead.contact', 'contact')
       .leftJoinAndSelect('contact.company', 'company')
       .leftJoinAndSelect('lead.projectType', 'projectType')
       .leftJoinAndSelect('lead.project', 'project')
-      .where('LOWER(contact.name) LIKE LOWER(:name)', { name: `%${name}%` })
-      .getMany();
+      .where('LOWER(contact.name) LIKE LOWER(:name)', { name: `%${name}%` });
+    return this.scoped(qb).getMany();
   }
 
   async searchByName(name: string): Promise<Lead[]> {
-    return this.repo
+    // Los tres criterios van dentro de UNA condicion entre parentesis. Con tres
+    // `orWhere` sueltos, el `andWhere` del ambito se pegaria solo al ultimo —
+    // "a OR b OR (c AND ambito)" por precedencia de SQL — y los dos primeros se
+    // escaparian del filtro.
+    const qb = this.repo
       .createQueryBuilder('lead')
       .leftJoinAndSelect('lead.contact', 'contact')
       .leftJoinAndSelect('contact.company', 'company')
       .leftJoinAndSelect('lead.projectType', 'projectType')
       .leftJoinAndSelect('lead.project', 'project')
-      .where('LOWER(lead.name) LIKE LOWER(:name)', { name: `%${name}%` })
-      .orWhere('LOWER(lead.location) LIKE LOWER(:name)', { name: `%${name}%` })
-      .orWhere('lead.leadNumber LIKE :num', { num: `%${name}%` })
-      .getMany();
+      .where(
+        '(LOWER(lead.name) LIKE LOWER(:name) OR LOWER(lead.location) LIKE LOWER(:name) OR lead.leadNumber LIKE :num)',
+        { name: `%${name}%`, num: `%${name}%` },
+      );
+    return this.scoped(qb).getMany();
   }
 
   async findByIdWithRelations(id: number): Promise<Lead | null> {

@@ -7,6 +7,7 @@ import { QuickbooksApiService } from '../../../quickbooks/services/core/quickboo
 import { QuickbooksFinancialsService } from '../../../quickbooks/services/financials/quickbooks-financials.service';
 import { resolveRealmIdOrDefault } from '../../../quickbooks/services/core/quickbooks-realm.utils';
 import { ProjectNotLinkedToQboException } from '../exceptions/project-not-linked-to-qbo.exception';
+import { canSeeLeadNumber } from '../../../../common/auth/request-scope';
 import {
   QboAccountingMethod,
   QboReportName,
@@ -104,7 +105,9 @@ export class ProjectQboReportService {
       where: { id: projectId },
       relations: ['lead'],
     });
-    if (!project) {
+    // Un proyecto fuera del ambito del usuario no existe para el, y este
+    // endpoint devuelve dinero.
+    if (!project || !canSeeLeadNumber(project.lead?.leadNumber)) {
       throw new ResourceNotFoundException(
         `Project not found with id: ${projectId}`,
       );

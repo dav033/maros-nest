@@ -23,6 +23,7 @@ import { S3Service } from '../../../s3/services/s3.service';
 import { MailService } from '../../../mail/services/mail.service';
 import { TaskWorkspaceAssignmentService } from '../../../task-workspaces/services/task-workspace-assignment.service';
 import { Optional } from '@nestjs/common';
+import { canSeeLeadNumber } from '../../../../common/auth/request-scope';
 
 /** Same window the analytics dashboard uses (ANALYTICS_CACHE_TTL_MS). */
 const FINANCIALS_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -445,7 +446,9 @@ export class ProjectsService extends BaseService<any, number, Project> {
       where: { id },
       relations: ['lead', 'lead.contact', 'lead.projectType'],
     });
-    if (!entity) {
+    // Fuera del ambito se responde "no existe" y no "no puedes": decir que
+    // existe pero que no se puede ver ya revela que existe.
+    if (!entity || !canSeeLeadNumber(entity.lead?.leadNumber)) {
       throw new ResourceNotFoundException(`Project not found with id: ${id}`);
     }
 
@@ -464,7 +467,7 @@ export class ProjectsService extends BaseService<any, number, Project> {
       relations: ['lead', 'lead.contact', 'lead.contact.company', 'lead.projectType'],
     });
 
-    if (!project) {
+    if (!project || !canSeeLeadNumber(project.lead?.leadNumber)) {
       throw new ResourceNotFoundException(`Project not found with id: ${id}`);
     }
 

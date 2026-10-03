@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, SelectQueryBuilder } from 'typeorm';
 import { Project } from '../../../../entities/project.entity';
 import { ProjectProgressStatus } from '../../../../common/enums/project-progress-status.enum';
 import { LeadType } from '../../../../common/enums/lead-type.enum';
 import { leadNumberSqlFilter } from '../../../../common/utils/lead-type.utils';
+import {
+  applyLeadTypeScope,
+  currentLeadTypeScope,
+} from '../../../../common/auth/request-scope';
 
 /** One unhydrated project row for the aging report, values as the driver returns them. */
 export interface ReceivableCandidateRow {
@@ -38,8 +42,17 @@ export class ProjectsRepository {
    * SQL is the kind of thing that drifts and starts hiding debt. This narrows the scan
    * (idx_projects_completed_aging); it does not judge.
    */
+  /**
+   * El ambito de tipos de lead del usuario. Un proyecto se filtra por el lead
+   * al que pertenece, asi que la consulta tiene que traer el join con `lead`
+   * antes de llamar a esto.
+   */
+  private scoped(qb: SelectQueryBuilder<Project>): SelectQueryBuilder<Project> {
+    return applyLeadTypeScope(qb, 'lead.lead_number');
+  }
+
   async findCompletedCollectionCandidates(): Promise<ReceivableCandidateRow[]> {
-    return this.repo
+    const qb = this.repo
       .createQueryBuilder('project')
       .innerJoin('project.lead', 'lead')
       .select('project.id', 'id')
@@ -55,8 +68,8 @@ export class ProjectsRepository {
       .andWhere(
         '(project.billedAmount IS NULL OR project.collectedAmount IS NULL OR project.collectedAmount < project.billedAmount)',
       )
-      .orderBy('project.id', 'ASC')
-      .getRawMany<ReceivableCandidateRow>();
+      .orderBy('project.id', 'ASC');
+    return this.scoped(qb).getRawMany<ReceivableCandidateRow>();
   }
 
   async getStatusCounts(
@@ -68,15 +81,21 @@ export class ProjectsRepository {
       .addSelect('COUNT(project.id)', 'count')
       .groupBy('project.projectProgressStatus');
 
-    if (leadType) {
+    // El join hace falta tanto si piden un tipo como si el usuario esta
+    // restringido: sin el, el filtro del ambito apuntaria a una tabla que no
+    // esta en la consulta.
+    if (leadType || currentLeadTypeScope()) {
       qb.innerJoin('project.lead', 'lead');
+    }
+    if (leadType) {
       const filter = leadNumberSqlFilter(leadType, 'lead.lead_number', 'leadNumberPattern');
       if (filter) {
         qb.andWhere(filter.clause, filter.parameters);
       }
     }
 
-    const rows: Array<{ status: string | null; count: string }> = await qb.getRawMany();
+    const rows: Array<{ status: string | null; count: string }> =
+      await this.scoped(qb).getRawMany();
 
     return rows.map((row) => ({
       status: row.status ?? 'UNKNOWN',
@@ -85,7 +104,10 @@ export class ProjectsRepository {
   }
 
   async countAll(leadType?: LeadType): Promise<number> {
-    if (!leadType) {
+    // El atajo sin query builder solo vale para quien no esta restringido: con
+    // un ambito puesto, `repo.count()` contaria los proyectos de todos los
+    // tipos y el numero contradiria a la lista que se ensena al lado.
+    if (!leadType && !currentLeadTypeScope()) {
       return this.repo.count();
     }
     const qb = this.repo
@@ -95,7 +117,7 @@ export class ProjectsRepository {
     if (filter) {
       qb.andWhere(filter.clause, filter.parameters);
     }
-    return qb.getCount();
+    return this.scoped(qb).getCount();
   }
 
   async findAnalyticsProjectSeed(
@@ -126,7 +148,7 @@ export class ProjectsRepository {
       qb.andWhere(filter.clause, filter.parameters);
     }
 
-    const rows = await qb.getRawMany<{
+    const rows = await this.scoped(qb).getRawMany<{
       id: number | string;
       projectProgressStatus?: string | null;
       leadNumber?: string | null;
@@ -153,16 +175,15 @@ export class ProjectsRepository {
   }
 
   async findProjectsWithLeadAndContact(): Promise<Project[]> {
-    return this.repo.createQueryBuilder('project')
+    const qb = this.repo.createQueryBuilder('project')
       .innerJoinAndSelect('project.lead', 'lead')
-      .leftJoinAndSelect('lead.contact', 'contact')
-      .getMany();
+      .leftJoinAndSelect('lead.contact', 'contact');
+    return this.scoped(qb).getMany();
   }
 
   async countProjectsWithLead(): Promise<number> {
-    return this.repo.createQueryBuilder('project')
-      .innerJoin('project.lead', 'lead')
-      .getCount();
+    const qb = this.repo.createQueryBuilder('project').innerJoin('project.lead', 'lead');
+    return this.scoped(qb).getCount();
   }
 
   async findByLeadId(leadId: number): Promise<Project[]> {
