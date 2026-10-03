@@ -27,6 +27,8 @@ import { QuickbooksProjectImportService } from './services/quickbooks-project-im
 import { ImportQuickbooksBatchDto } from './dto/import-quickbooks-batch.dto';
 import { ImportQuickbooksProjectDto } from './dto/import-quickbooks-project.dto';
 import { LinkQuickbooksJobDto } from './dto/link-quickbooks-job.dto';
+import { DeactivateQuickbooksJobDto } from './dto/deactivate-quickbooks-job.dto';
+import { QuickbooksJobDeactivationService } from './services/quickbooks-job-deactivation.service';
 import { ProjectQboReportService } from './services/project-qbo-report.service';
 import { ProjectReceivablesService } from './services/project-receivables.service';
 
@@ -38,6 +40,7 @@ export class ProjectsController {
   constructor(
     private readonly projectsService: ProjectsService,
     private readonly quickbooksProjectImport: QuickbooksProjectImportService,
+    private readonly quickbooksJobDeactivation: QuickbooksJobDeactivationService,
     private readonly projectQboReport: ProjectQboReportService,
     private readonly projectReceivables: ProjectReceivablesService,
   ) {}
@@ -65,6 +68,27 @@ export class ProjectsController {
   @ApiResponse({ status: 201, description: 'Returns one result per decision: created, linked, already_imported or rejected with a reason' })
   async importQuickbooksJobsBatch(@Body() dto: ImportQuickbooksBatchDto) {
     return this.quickbooksProjectImport.importBatch(dto);
+  }
+
+  // Pide finance:write, no finance:read: esto escribe en la contabilidad, no en
+  // el CRM, asi que es mas grave que importar y no puede bastar con poder leer
+  // las cifras. Declarada antes de @Get(':id') como el resto de las rutas de
+  // quickbooks-import: Nest resuelve por orden de declaracion.
+  @Post('quickbooks-import/deactivate-job')
+  @RequirePermissions('finance:write', 'projects:write')
+  @ApiOperation({
+    summary:
+      'Deactivate a QuickBooks job (sets Active: false on the Customer). QuickBooks has no delete for a Customer; its transactions and history are kept.',
+  })
+  @ApiResponse({ status: 201, description: 'Returns the job with active=false, or alreadyInactive=true when nothing was written' })
+  @ApiResponse({ status: 400, description: 'Missing confirm: true, or QuickBooks rejected the write (its message is passed through verbatim)' })
+  @ApiResponse({ status: 404, description: 'The QuickBooks job could not be read' })
+  @ApiResponse({ status: 409, description: 'The job has an open balance, or a CRM project is still linked to it' })
+  async deactivateQuickbooksJob(
+    @Body() dto: DeactivateQuickbooksJobDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.quickbooksJobDeactivation.deactivateJob(dto, user?.email);
   }
 
   @Put(':id/qbo-link')

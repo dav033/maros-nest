@@ -19,6 +19,7 @@ import { S3Module } from '../s3/s3.module';
 import { MailModule } from '../mail/mail.module';
 import { TaskWorkspacesModule } from '../task-workspaces/task-workspaces.module';
 import { QuickbooksProjectImportService } from './project-management/services/quickbooks-project-import.service';
+import { QuickbooksJobDeactivationService } from './project-management/services/quickbooks-job-deactivation.service';
 import { ProjectQboReportService } from './project-management/services/project-qbo-report.service';
 import { ProjectReceivablesService } from './project-management/services/project-receivables.service';
 import { QboConnection } from '../quickbooks/entities/qbo-connection.entity';
@@ -47,6 +48,7 @@ import { ProjectQboLinkEvent } from './project-management/entities/project-qbo-l
     ProjectMapper,
     ProjectTypeMapper,
     QuickbooksProjectImportService,
+    QuickbooksJobDeactivationService,
     ProjectQboReportService,
     ProjectReceivablesService,
   ],
