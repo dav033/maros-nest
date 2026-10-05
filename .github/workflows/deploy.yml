@@ -1,0 +1,51 @@
+name: Deploy Maros API
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: maros-api-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy to the VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Deploy this commit over the restricted SSH command
+        shell: bash
+        env:
+          MAROS_DEPLOY_HOST: ${{ vars.MAROS_DEPLOY_HOST }}
+          MAROS_DEPLOY_KNOWN_HOSTS: ${{ vars.MAROS_DEPLOY_KNOWN_HOSTS }}
+          MAROS_DEPLOY_KEY: ${{ secrets.MAROS_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$MAROS_DEPLOY_HOST"
+          test -n "$MAROS_DEPLOY_KNOWN_HOSTS"
+          test -n "$MAROS_DEPLOY_KEY"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          key_file="$RUNNER_TEMP/maros-deploy-key"
+          known_hosts_file="$RUNNER_TEMP/maros-deploy-known-hosts"
+          trap 'rm -f "$key_file" "$known_hosts_file"' EXIT
+          printf '%s\n' "$MAROS_DEPLOY_KEY" > "$key_file"
+          chmod 600 "$key_file"
+          printf '%s\n' "$MAROS_DEPLOY_KNOWN_HOSTS" > "$known_hosts_file"
+          chmod 600 "$known_hosts_file"
+
+          ssh -T \
+            -i "$key_file" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts_file" \
+            -o ConnectTimeout=10 \
+            -o ServerAliveInterval=30 \
+            "maros-deploy@${MAROS_DEPLOY_HOST}" \
+            "deploy-maros-nest ${GITHUB_SHA}"
