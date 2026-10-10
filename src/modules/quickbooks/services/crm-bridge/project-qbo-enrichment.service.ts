@@ -102,6 +102,11 @@ export class ProjectQboEnrichmentService {
           const enriched = jobCosts
             ? {
                 ...financial,
+                cashJobCost: jobCosts.cashOutPaid,
+                cashProfit: money((Number(financial.paidAmount) || 0) - jobCosts.cashOutPaid),
+                cashBacklog: money(
+                  (Number(financial.estimatedAmount) || 0) - (Number(financial.paidAmount) || 0),
+                ),
                 totalJobCost: jobCosts.totalJobCost,
                 grossProfit: money((Number(financial.invoicedAmount) || 0) - jobCosts.totalJobCost),
                 cashOutPaid: jobCosts.cashOutPaid,

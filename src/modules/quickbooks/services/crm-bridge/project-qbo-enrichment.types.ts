@@ -29,6 +29,12 @@ export interface QboEnrichmentError {
 export interface QboProjectSummary
   extends Omit<ProjectFinancials, 'projectNumber'> {
   projectNumber: string;
+  /** Cash-basis job cost: paid purchases and bill payments only. */
+  cashJobCost?: number;
+  /** Cash received minus cash job cost. */
+  cashProfit?: number;
+  /** Estimate reference minus cash received. */
+  cashBacklog?: number;
   totalJobCost?: number;
   grossProfit?: number;
   cashOutPaid?: number;
