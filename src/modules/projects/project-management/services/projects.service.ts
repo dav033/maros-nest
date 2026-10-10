@@ -749,8 +749,11 @@ export class ProjectsService extends BaseService<any, number, Project> {
       ]),
     );
 
+    // Maros commonly stores the customer's estimate as a "Proposal" file.
+    // Treat that existing name as an estimate so conversion does not ask users
+    // to upload a second copy just to send it.
     const match = keys.find((key) =>
-      /estimate/i.test(this.extractFileName(key)),
+      /(?:estimate|proposal)/i.test(this.extractFileName(key)),
     );
 
     if (!match) {

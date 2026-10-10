@@ -317,3 +317,93 @@ describe('ProjectsService.updateProjectEstimate', () => {
     expect(leadRepo.update).not.toHaveBeenCalled();
   });
 });
+
+describe('ProjectsService estimate email', () => {
+  const buildService = (options: { attachments?: string[]; sendFails?: boolean } = {}) => {
+    const project = {
+      id: 707,
+      attachments: options.attachments ?? [],
+      lead: {
+        leadNumber: '707-0726',
+        name: 'Maros Customer',
+        attachments: [],
+      },
+    };
+    const projectRepo = { findOne: jest.fn().mockResolvedValue(project) };
+    const s3Service = {
+      getObjectBuffer: jest.fn().mockResolvedValue({
+        fileName: 'Proposal.pdf',
+        buffer: Buffer.from('pdf'),
+        contentType: 'application/pdf',
+      }),
+    };
+    const mailService = {
+      sendMail: options.sendFails
+        ? jest.fn().mockRejectedValue(new Error('SMTP service does not respond'))
+        : jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new ProjectsService(
+      {} as never,
+      projectRepo as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      s3Service as never,
+      mailService as never,
+      {} as never,
+    );
+
+    return { service, s3Service, mailService };
+  };
+
+  it('recognizes a Proposal file attached to the converted lead', async () => {
+    const { service } = buildService({
+      attachments: ['documents/Proposal - 707.pdf'],
+    });
+
+    await expect(service.findEstimateFile(707)).resolves.toEqual({
+      found: true,
+      key: 'documents/Proposal - 707.pdf',
+      fileName: 'Proposal - 707.pdf',
+    });
+  });
+
+  it('attaches the Proposal file when sending without an explicit attachment key', async () => {
+    const { service, s3Service, mailService } = buildService({
+      attachments: ['documents/Proposal - 707.pdf'],
+    });
+
+    await expect(
+      service.sendEstimateEmail(707, {
+        recipients: ['customer@example.com'],
+        includeAttachment: true,
+      }),
+    ).resolves.toMatchObject({ sent: true, attached: true });
+
+    expect(s3Service.getObjectBuffer).toHaveBeenCalledWith(
+      'documents/Proposal - 707.pdf',
+    );
+    expect(mailService.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: ['customer@example.com'],
+        attachments: [expect.objectContaining({ filename: 'Proposal.pdf' })],
+      }),
+    );
+  });
+
+  it('propagates provider failures instead of reporting a successful send', async () => {
+    const { service, mailService } = buildService({
+      attachments: ['documents/Proposal - 707.pdf'],
+      sendFails: true,
+    });
+
+    await expect(
+      service.sendEstimateEmail(707, {
+        recipients: ['customer@example.com'],
+        includeAttachment: true,
+      }),
+    ).rejects.toThrow('SMTP service does not respond');
+    expect(mailService.sendMail).toHaveBeenCalledTimes(1);
+  });
+});

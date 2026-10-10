@@ -156,7 +156,7 @@ export function registerInvoiceScanTools(server: McpServer, deps: McpToolDeps) {
   registerMcpTool(
     server,
     'attach_invoice_scan_file',
-    'Adjunta un documento a un registro que ya existe (típicamente una transacción manual guardada sin archivo). Devuelve una URL firmada de subida: el archivo hay que subirlo ahí con un PUT. No se escanea; los valores escritos a mano siguen valiendo.',
+    'Prepara la subida de un documento para un registro existente (típicamente una transacción manual). Devuelve id, key y URL firmada. Sube el archivo con PUT y luego confirma la referencia con complete_invoice_scan_file_attachment. No se escanea; los valores escritos a mano siguen valiendo.',
     {
       id: uuid.describe('ID del document scan'),
       fileName: z.string().max(255).describe('Nombre del archivo'),
@@ -178,7 +178,34 @@ export function registerInvoiceScanTools(server: McpServer, deps: McpToolDeps) {
       fileName: string;
       contentType: string;
       sizeBytes: number;
-    }) => deps.invoiceScansService.attachFile(id, file),
+    }) => deps.invoiceScansService.prepareFileAttachment(id, file),
+  );
+
+  registerMcpTool(
+    server,
+    'complete_invoice_scan_file_attachment',
+    'Confirma un documento después de subirlo a S3 con la URL de attach_invoice_scan_file. El servidor comprueba que el objeto existe y que tamaño y tipo coinciden.',
+    {
+      id: uuid.describe('ID del document scan devuelto al preparar la subida'),
+      key: z.string().min(1).max(1024).describe('Key devuelta al preparar la subida'),
+      fileName: z.string().max(255).describe('Nombre del archivo'),
+      contentType: z
+        .enum(ATTACHMENT_TYPES)
+        .describe('Tipo MIME: JPG, PNG, WebP o PDF'),
+      sizeBytes: z
+        .number()
+        .int()
+        .min(1)
+        .max(MAX_ATTACHMENT_BYTES)
+        .describe('Tamaño en bytes, máximo 5 MB'),
+    },
+    async ({ id, ...file }: {
+      id: string;
+      key: string;
+      fileName: string;
+      contentType: string;
+      sizeBytes: number;
+    }) => deps.invoiceScansService.completeFileAttachment(id, file),
   );
 
   registerMcpTool(

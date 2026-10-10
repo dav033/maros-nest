@@ -13,6 +13,7 @@ import type { AuthenticatedUser } from '../../common/auth/authenticated-user';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/require-permissions.decorator';
 import { AttachInvoiceScanFileDto } from './dto/attach-invoice-scan-file.dto';
+import { CompleteInvoiceScanAttachmentDto } from './dto/complete-invoice-scan-attachment.dto';
 import { CreateManualInvoiceTransactionDto } from './dto/create-manual-invoice-transaction.dto';
 import { CreateInvoiceScanDto } from './dto/create-invoice-scan.dto';
 import { CreateQboCounterpartyDto } from './dto/create-qbo-counterparty.dto';
@@ -81,9 +82,17 @@ export class InvoiceScansController {
   attach(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: AttachInvoiceScanFileDto,
+  ) {
+    return this.invoiceScans.prepareFileAttachment(id, body);
+  }
+
+  @Post(':id/attachment/complete')
+  completeAttachment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: CompleteInvoiceScanAttachmentDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.invoiceScans.attachFile(id, body, user);
+    return this.invoiceScans.completeFileAttachment(id, body, user);
   }
 
   @Get(':id/download')

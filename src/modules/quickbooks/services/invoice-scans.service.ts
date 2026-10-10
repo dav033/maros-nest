@@ -17,6 +17,7 @@ import { randomUUID } from 'crypto';
 import { IsNull, Not, Repository } from 'typeorm';
 import type { AuthenticatedUser } from '../../../common/auth/authenticated-user';
 import { AttachInvoiceScanFileDto } from '../dto/attach-invoice-scan-file.dto';
+import { CompleteInvoiceScanAttachmentDto } from '../dto/complete-invoice-scan-attachment.dto';
 import { CreateManualInvoiceTransactionDto } from '../dto/create-manual-invoice-transaction.dto';
 import { CreateInvoiceScanDto } from '../dto/create-invoice-scan.dto';
 import { UpdateInvoiceScanDto } from '../dto/update-invoice-scan.dto';
@@ -572,16 +573,11 @@ export class InvoiceScansService {
     return { url, fileName };
   }
 
-  /**
-   * Adjunta un documento a un registro existente (una transacción manual que se
-   * guardó sin archivo). Devuelve la URL de subida; el archivo no se escanea,
-   * los valores escritos a mano son los que valen.
-   */
-  async attachFile(
+  /** Creates a signed upload without persisting a file reference yet. */
+  async prepareFileAttachment(
     id: string,
     input: AttachInvoiceScanFileDto,
-    actor?: Pick<AuthenticatedUser, 'id'>,
-  ): Promise<InvoiceScanView & { uploadUrl: string }> {
+  ): Promise<{ id: string; key: string; uploadUrl: string }> {
     const scan = await this.findScan(id);
     if (scan.status === 'processing') {
       throw new ConflictException(
@@ -605,16 +601,73 @@ export class InvoiceScansService {
       fileName: input.fileName,
       contentType: input.contentType,
       sizeBytes: input.sizeBytes,
-      prefix: 'invoice-scans',
+      prefix: `invoice-scans/${id}`,
     });
 
-    scan.fileKey = upload.key;
-    scan.fileName = input.fileName;
-    scan.contentType = input.contentType;
-    if (actor?.id) scan.updatedBy = actor.id;
+    return { id, key: upload.key, uploadUrl: upload.url };
+  }
 
-    const saved = await this.scans.save(scan);
-    return { ...this.toPublicScan(saved), uploadUrl: upload.url };
+  /** Persists attachment metadata only after the direct S3 upload is confirmed. */
+  async completeFileAttachment(
+    id: string,
+    input: CompleteInvoiceScanAttachmentDto,
+    actor?: Pick<AuthenticatedUser, 'id'>,
+  ): Promise<InvoiceScanView> {
+    const scan = await this.findScan(id);
+    if (scan.status === 'processing') {
+      throw new ConflictException(
+        'This document is being scanned; try again in a moment.',
+      );
+    }
+    if (scan.fileKey) {
+      if (scan.fileKey === input.key) return this.toPublicScan(scan);
+      throw new ConflictException(
+        'This record already has a document attached.',
+      );
+    }
+
+    const maxUploadBytes = this.s3.getUploadRules().maxUploadBytes;
+    if (input.sizeBytes < 1 || input.sizeBytes > maxUploadBytes) {
+      throw new BadRequestException(
+        `The file must be smaller than ${Math.floor(maxUploadBytes / 1024 / 1024)} MB.`,
+      );
+    }
+
+    const expectedPrefix = `${this.s3.getUploadRules().basePrefix}invoice-scans/${id}/`;
+    if (!input.key.startsWith(expectedPrefix)) {
+      throw new BadRequestException(
+        'The uploaded file does not belong to this transaction.',
+      );
+    }
+
+    const metadata = await this.s3.getObjectMetadata(input.key);
+    if (
+      metadata.contentLength !== input.sizeBytes ||
+      metadata.contentType?.toLowerCase() !== input.contentType
+    ) {
+      throw new BadRequestException(
+        'The uploaded file does not match the declared file details.',
+      );
+    }
+
+    const result = await this.scans.update(
+      { id, fileKey: IsNull(), status: Not('processing') },
+      {
+        fileKey: input.key,
+        fileName: input.fileName,
+        contentType: input.contentType,
+        updatedBy: actor?.id ?? null,
+      },
+    );
+    if (!result.affected) {
+      const current = await this.findScan(id);
+      if (current.fileKey === input.key) return this.toPublicScan(current);
+      throw new ConflictException(
+        'This record changed while the file was uploading. Refresh and try again.',
+      );
+    }
+
+    return this.toPublicScan(await this.findScan(id));
   }
 
   /** El nombre con el que el navegador guarda el archivo. */

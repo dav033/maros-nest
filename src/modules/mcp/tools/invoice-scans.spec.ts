@@ -34,7 +34,8 @@ function registerTools() {
     getDownloadUrl: jest.fn().mockResolvedValue({ url: 'u', fileName: 'f.pdf' }),
     createManualTransaction: jest.fn().mockResolvedValue({ id: 'new' }),
     update: jest.fn().mockResolvedValue({ id: 'x' }),
-    attachFile: jest.fn().mockResolvedValue({ id: 'x', uploadUrl: 'u' }),
+    prepareFileAttachment: jest.fn().mockResolvedValue({ id: 'x', key: 'k', uploadUrl: 'u' }),
+    completeFileAttachment: jest.fn().mockResolvedValue({ id: 'x', hasFile: true }),
     scan: jest.fn().mockResolvedValue({ id: 'x' }),
     remove: jest.fn().mockResolvedValue({ id: 'x', deleted: true }),
   };
@@ -54,11 +55,12 @@ function parse(schema: ZodRawShape, args: unknown) {
 }
 
 describe('registerInvoiceScanTools', () => {
-  it('registers the eight document-scan tools', () => {
+  it('registers the document-scan tools, including both attachment phases', () => {
     const { tools } = registerTools();
 
     expect([...tools.keys()].sort()).toEqual([
       'attach_invoice_scan_file',
+      'complete_invoice_scan_file_attachment',
       'create_manual_transaction',
       'delete_invoice_scan',
       'get_invoice_scan',
@@ -181,7 +183,37 @@ describe('registerInvoiceScanTools', () => {
 
       await tools.get('attach_invoice_scan_file')!.handler({ id: ID, ...file });
 
-      expect(invoiceScansService.attachFile).toHaveBeenCalledWith(ID, file);
+      expect(invoiceScansService.prepareFileAttachment).toHaveBeenCalledWith(ID, file);
+    });
+
+    it('validates and forwards the finalization metadata', async () => {
+      const { tools, invoiceScansService } = registerTools();
+      const args = {
+        id: ID,
+        key: 'mcp/attachments/invoice-scans/scan/receipt.pdf',
+        ...file,
+      };
+
+      await tools.get('complete_invoice_scan_file_attachment')!.handler(args);
+
+      expect(invoiceScansService.completeFileAttachment).toHaveBeenCalledWith(ID, {
+        key: args.key,
+        fileName: file.fileName,
+        contentType: file.contentType,
+        sizeBytes: file.sizeBytes,
+      });
+    });
+
+    it('rejects a missing upload key before finalization reaches the service', () => {
+      const { tools, invoiceScansService } = registerTools();
+
+      expect(
+        parse(tools.get('complete_invoice_scan_file_attachment')!.schema, {
+          id: ID,
+          ...file,
+        }).success,
+      ).toBe(false);
+      expect(invoiceScansService.completeFileAttachment).not.toHaveBeenCalled();
     });
 
     it.each([

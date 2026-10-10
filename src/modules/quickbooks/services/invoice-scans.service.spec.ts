@@ -77,6 +77,7 @@ interface Harness {
     findOne: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
+    update: jest.Mock;
     delete: jest.Mock;
   };
   s3: Record<string, jest.Mock>;
@@ -106,6 +107,10 @@ function harness(opts: {
       savedStatuses.push(value.status);
       return Promise.resolve(value);
     }),
+    update: jest.fn().mockImplementation((_criteria, patch) => {
+      Object.assign(scan, patch);
+      return Promise.resolve({ affected: 1 });
+    }),
     delete: jest.fn().mockResolvedValue({ affected: 1 }),
   };
   const s3 = {
@@ -113,7 +118,10 @@ function harness(opts: {
       contentLength: 100,
       contentType: scan.contentType,
     }),
-    getUploadRules: jest.fn().mockReturnValue({ maxUploadBytes: 5 * 1024 * 1024 }),
+    getUploadRules: jest.fn().mockReturnValue({
+      basePrefix: 'mcp/attachments/',
+      maxUploadBytes: 5 * 1024 * 1024,
+    }),
     getObjectBuffer: jest.fn().mockResolvedValue({
       buffer: opts.buffer ?? Buffer.from('invoice-photo'),
       contentType: scan.contentType,
@@ -123,10 +131,10 @@ function harness(opts: {
     getPresignedGetUrl: jest
       .fn()
       .mockResolvedValue({ url: 'https://signed/download' }),
-    getPresignedPutUrl: jest.fn().mockResolvedValue({
-      key: 'mcp/attachments/invoice-scans/receipt.pdf',
+    getPresignedPutUrl: jest.fn().mockImplementation(({ prefix, fileName }) => ({
+      key: `mcp/attachments/${prefix}/${fileName}`,
       url: 'https://signed/put',
-    }),
+    })),
   };
   const qboApi = {
     queryAll: jest.fn((realmId: string, entity: string) => {
@@ -650,30 +658,136 @@ describe('InvoiceScansService', () => {
     });
   });
 
-  describe('attachFile', () => {
+  describe('prepareFileAttachment and completeFileAttachment', () => {
     const file = {
       fileName: 'receipt.pdf',
       contentType: 'application/pdf',
       sizeBytes: 2048,
     };
+    const key = `mcp/attachments/invoice-scans/${SCAN_ID}/receipt.pdf`;
 
-    it('attaches a document to a manual transaction and returns the upload URL', async () => {
+    it('prepares an upload scoped to the transaction without persisting a file reference', async () => {
       const h = harness({ scan: { fileKey: null, recordType: 'transaction', status: 'needs_review' } });
 
-      const result = await h.service.attachFile(SCAN_ID, file, { id: 11 });
+      const result = await h.service.prepareFileAttachment(SCAN_ID, file);
 
-      expect(result.uploadUrl).toBe('https://signed/put');
-      expect(result.hasFile).toBe(true);
-      expect(result.fileName).toBe('receipt.pdf');
-      expect(result.contentType).toBe('application/pdf');
-      expect(result.updatedBy).toBe(11);
+      expect(result).toEqual({ id: SCAN_ID, key, uploadUrl: 'https://signed/put' });
+      expect(h.s3.getPresignedPutUrl).toHaveBeenCalledWith(
+        expect.objectContaining({ prefix: `invoice-scans/${SCAN_ID}` }),
+      );
+      expect(h.scans.save).not.toHaveBeenCalled();
+      expect(h.scans.update).not.toHaveBeenCalled();
+      expect(h.scan.fileKey).toBeNull();
     });
 
-    it('refuses to attach a second document', async () => {
+    it('finalizes only an uploaded object whose key belongs to the transaction', async () => {
+      const h = harness({ scan: { fileKey: null, recordType: 'transaction', status: 'needs_review' } });
+      h.s3.getObjectMetadata.mockResolvedValue({
+        contentLength: file.sizeBytes,
+        contentType: file.contentType,
+      });
+
+      const result = await h.service.completeFileAttachment(
+        SCAN_ID,
+        { ...file, key },
+        { id: 11 },
+      );
+
+      expect(h.s3.getObjectMetadata).toHaveBeenCalledWith(key);
+      expect(h.scans.update).toHaveBeenCalledWith(
+        expect.objectContaining({ id: SCAN_ID }),
+        expect.objectContaining({
+          fileKey: key,
+          fileName: file.fileName,
+          contentType: file.contentType,
+          updatedBy: 11,
+        }),
+      );
+      expect(result.hasFile).toBe(true);
+      expect(result.fileName).toBe(file.fileName);
+    });
+
+    it('leaves the transaction retryable when the uploaded metadata does not match', async () => {
+      const h = harness({ scan: { fileKey: null, recordType: 'transaction', status: 'needs_review' } });
+      h.s3.getObjectMetadata.mockResolvedValue({
+        contentLength: 17,
+        contentType: file.contentType,
+      });
+
+      await expect(
+        h.service.completeFileAttachment(SCAN_ID, { ...file, key }),
+      ).rejects.toThrow('does not match');
+
+      expect(h.scans.update).not.toHaveBeenCalled();
+      expect(h.scan.fileKey).toBeNull();
+    });
+
+    it('treats a repeated finalize for the same key as idempotent', async () => {
+      const h = harness({
+        scan: {
+          fileKey: key,
+          fileName: file.fileName,
+          contentType: file.contentType,
+        },
+      });
+
+      const result = await h.service.completeFileAttachment(SCAN_ID, { ...file, key });
+
+      expect(result.hasFile).toBe(true);
+      expect(h.s3.getObjectMetadata).not.toHaveBeenCalled();
+      expect(h.scans.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a key scoped to a different transaction', async () => {
+      const h = harness({ scan: { fileKey: null, recordType: 'transaction' } });
+      const otherKey = 'mcp/attachments/invoice-scans/another-id/receipt.pdf';
+
+      await expect(
+        h.service.completeFileAttachment(SCAN_ID, { ...file, key: otherKey }),
+      ).rejects.toThrow('does not belong to this transaction');
+
+      expect(h.s3.getObjectMetadata).not.toHaveBeenCalled();
+      expect(h.scans.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses to prepare a second document', async () => {
       const h = harness({ scan: { status: 'needs_review' } });
-      await expect(h.service.attachFile(SCAN_ID, file, { id: 11 })).rejects.toThrow(
+      await expect(h.service.prepareFileAttachment(SCAN_ID, file)).rejects.toThrow(
         'already has a document',
       );
+    });
+
+    it('does not persist a reference when the object is missing from S3', async () => {
+      const h = harness({ scan: { fileKey: null, recordType: 'transaction', status: 'needs_review' } });
+      h.s3.getObjectMetadata.mockRejectedValue(new Error('S3 object not found'));
+
+      await expect(
+        h.service.completeFileAttachment(SCAN_ID, { ...file, key }),
+      ).rejects.toThrow('S3 object not found');
+
+      expect(h.scans.update).not.toHaveBeenCalled();
+      expect(h.scan.fileKey).toBeNull();
+    });
+
+    it('returns the attachment when a concurrent request already finalized the same key', async () => {
+      const h = harness({ scan: { fileKey: null, recordType: 'transaction', status: 'needs_review' } });
+      h.s3.getObjectMetadata.mockResolvedValue({
+        contentLength: file.sizeBytes,
+        contentType: file.contentType,
+      });
+      h.scans.update.mockImplementationOnce(() => {
+        Object.assign(h.scan, {
+          fileKey: key,
+          fileName: file.fileName,
+          contentType: file.contentType,
+        });
+        return Promise.resolve({ affected: 0 });
+      });
+
+      const result = await h.service.completeFileAttachment(SCAN_ID, { ...file, key });
+
+      expect(result.hasFile).toBe(true);
+      expect(h.scans.update).toHaveBeenCalledTimes(1);
     });
   });
 
