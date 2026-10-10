@@ -95,6 +95,23 @@ export class LeadsRepository {
     return this.scoped(qb).orderBy('lead.id', 'DESC').getMany();
   }
 
+  async findConvertedByLeadType(type: LeadType): Promise<Lead[]> {
+    const qb = this.repo
+      .createQueryBuilder('lead')
+      .leftJoinAndSelect('lead.contact', 'contact')
+      .leftJoinAndSelect('contact.company', 'company')
+      .leftJoinAndSelect('lead.projectType', 'projectType')
+      .leftJoinAndSelect('lead.project', 'project')
+      .where('project.id IS NOT NULL');
+
+    const filter = leadNumberSqlFilter(type, 'lead.lead_number', 'leadNumberPattern');
+    if (filter) {
+      qb.andWhere(filter.clause, filter.parameters);
+    }
+
+    return this.scoped(qb).orderBy('lead.id', 'DESC').getMany();
+  }
+
   async findInReview(): Promise<Lead[]> {
     // Obtener todos los leads que están en revisión (inReview = true)
     // Excluir leads que tienen un proyecto asociado

@@ -4,18 +4,20 @@ import { Server } from 'node:http';
 import request from 'supertest';
 import { LeadStatus } from '../../../common/enums/lead-status.enum';
 import { LeadType } from '../../../common/enums/lead-type.enum';
+import { REQUIRED_PERMISSIONS_KEY } from '../../../common/decorators/require-permissions.decorator';
 import { LeadsController } from './leads.controller';
 import { LeadsService } from './leads.service';
 
 describe('LeadsController validation', () => {
   let app: INestApplication;
   let server: Server;
-  let leadsService: { updateLead: jest.Mock; getLeadsByType: jest.Mock };
+  let leadsService: { updateLead: jest.Mock; getLeadsByType: jest.Mock; getConvertedLeadsByType: jest.Mock };
 
   beforeEach(async () => {
     leadsService = {
       updateLead: jest.fn().mockResolvedValue({ id: 1 }),
       getLeadsByType: jest.fn().mockResolvedValue([]),
+      getConvertedLeadsByType: jest.fn().mockResolvedValue([]),
     };
     const moduleRef = await Test.createTestingModule({
       controllers: [LeadsController],
@@ -98,5 +100,25 @@ describe('LeadsController validation', () => {
       LeadType.CONSTRUCTION,
       { includeQbo: true },
     );
+  });
+
+  it('requires a valid type for converted leads', async () => {
+    await request(server).get('/leads/converted').expect(400);
+    await request(server).get('/leads/converted?type=INVALID').expect(400);
+    expect(leadsService.getConvertedLeadsByType).not.toHaveBeenCalled();
+
+    await request(server)
+      .get(`/leads/converted?type=${LeadType.PLUMBING}`)
+      .expect(200);
+    expect(leadsService.getConvertedLeadsByType).toHaveBeenCalledWith(
+      LeadType.PLUMBING,
+      { includeQbo: true },
+    );
+  });
+
+  it('keeps the controller read permission on the converted endpoint', () => {
+    expect(Reflect.getMetadata(REQUIRED_PERMISSIONS_KEY, LeadsController)).toEqual([
+      'leads:read',
+    ]);
   });
 });

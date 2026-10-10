@@ -63,6 +63,16 @@ export class LeadsController {
     return this.leadsService.getLeadsByType(type, { includeQbo: true });
   }
 
+  @Get('converted')
+  @ApiOperation({ summary: 'Get project-linked leads by type' })
+  @ApiQuery({ name: 'type', enum: LeadType })
+  @ApiResponse({ status: 200, description: 'Returns converted leads filtered by type' })
+  async getConvertedLeadsByType(
+    @Query('type', new ParseEnumPipe(LeadType)) type: LeadType,
+  ) {
+    return this.leadsService.getConvertedLeadsByType(type, { includeQbo: true });
+  }
+
   @Get('review')
   @ApiOperation({ summary: 'Get leads in review' })
   @ApiResponse({ status: 200, description: 'Returns leads with inReview = true' })

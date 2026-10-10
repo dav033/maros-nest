@@ -98,6 +98,21 @@ describe('LeadsRepository, el ámbito por tipo de lead', () => {
     ]);
   });
 
+  it('findConvertedByLeadType requires a project and applies type and request scope', async () => {
+    const h = harness();
+
+    await runWithRequestScope(SCOPE, () =>
+      h.repository.findConvertedByLeadType(LeadType.PLUMBING),
+    );
+
+    const where = (h.repo.createQueryBuilder as jest.Mock).mock.results[0].value.where as jest.Mock;
+    expect(where).toHaveBeenCalledWith('project.id IS NOT NULL');
+    expect(scopeClauses(h.captured)).toHaveLength(2);
+    expect(h.captured[0].parameters).toEqual({
+      leadNumberPattern: '^[0-9]+P-[0-9]+([^0-9].*)?$',
+    });
+  });
+
   it('adds nothing for a user with no restriction', async () => {
     const h = harness();
 

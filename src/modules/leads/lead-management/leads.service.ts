@@ -83,6 +83,13 @@ export class LeadsService {
     return this.mapLeadList(this.leadsRepository.findByLeadType(type), options);
   }
 
+  async getConvertedLeadsByType(
+    type: LeadType,
+    options: { includeQbo?: boolean } = {},
+  ): Promise<any[]> {
+    return this.mapLeadList(this.leadsRepository.findConvertedByLeadType(type), options);
+  }
+
   async getLeadsInReview(options: { includeQbo?: boolean } = {}): Promise<any[]> {
     return this.mapLeadList(this.leadsRepository.findInReview(), options);
   }
