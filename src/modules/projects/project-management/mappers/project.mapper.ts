@@ -121,6 +121,40 @@ export class ProjectMapper {
 
     return dto;
   }
+
+  /** Versioned list read model consumed by the cache-first project detail route. */
+  toListV2Dto(entity: Project): any {
+    const dto = this.toDto(entity);
+    if (!entity.lead) return dto;
+
+    dto.lead = {
+      ...dto.lead,
+      inReview: entity.lead.inReview,
+      estimate:
+        entity.lead.estimate != null ? Number(entity.lead.estimate) : null,
+      contact: entity.lead.contact
+        ? {
+            ...dto.lead?.contact,
+            occupation: entity.lead.contact.occupation,
+            address: entity.lead.contact.address,
+            addressLink: entity.lead.contact.addressLink,
+            company: entity.lead.contact.company
+              ? {
+                  id: entity.lead.contact.company.id,
+                  name: entity.lead.contact.company.name,
+                  address: entity.lead.contact.company.address,
+                  type: entity.lead.contact.company.type,
+                  serviceId: entity.lead.contact.company.serviceId,
+                  isCustomer: entity.lead.contact.company.customer,
+                  isClient: entity.lead.contact.company.client,
+                }
+              : null,
+          }
+        : null,
+    };
+
+    return dto;
+  }
 }
 
 /**

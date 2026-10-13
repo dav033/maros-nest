@@ -131,11 +131,18 @@ export class ProjectsController {
     return this.quickbooksProjectImport.unlinkProject(id, user?.email);
   }
 
+  @Get('v2/all')
+  @ApiOperation({ summary: 'Get project list v2 with the linked lead detail context' })
+  @ApiResponse({ status: 200, description: 'Returns projects with lead, contact, company, and estimate read fields' })
+  async getProjectsV2() {
+    return this.projectsService.findAllV2();
+  }
+
   @Get('all')
   @ApiOperation({ summary: 'Get all projects' })
   @ApiResponse({ status: 200, description: 'Returns all projects with their associated leads' })
-  async getProjects(@CurrentUser() user: AuthenticatedUser) {
-    return this.projectsService.findAll(user);
+  async getProjects() {
+    return this.projectsService.findAll();
   }
 
   @Get(':id/payments')

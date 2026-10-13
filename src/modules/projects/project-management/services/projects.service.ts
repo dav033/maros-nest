@@ -225,17 +225,28 @@ export class ProjectsService extends BaseService<any, number, Project> {
    * separately via `findAllFinancials` and merged in by the client once it
    * arrives, so a slow/degraded QuickBooks never blocks the project list.
    */
-  async findAll(_user?: AuthenticatedUser): Promise<any[]> {
+  async findAll(): Promise<any[]> {
+    return this.findAllUsing('findAll', (entity) => this.projectMapper.toDto(entity));
+  }
+
+  async findAllV2(): Promise<any[]> {
+    return this.findAllUsing('findAllV2', (entity) => this.projectMapper.toListV2Dto(entity));
+  }
+
+  private async findAllUsing<T>(
+    label: string,
+    mapProject: (entity: Project) => T,
+  ): Promise<T[]> {
     const startTime = Date.now();
 
     const entities = await this.projectRepo.find({
       relations: ['lead', 'lead.contact', 'lead.contact.company', 'lead.projectType'],
     });
 
-    const dtos = entities.map((entity) => this.projectMapper.toDto(entity));
+    const dtos = entities.map(mapProject);
 
     const duration = Date.now() - startTime;
-    this.logger.log(`Projects findAll completed in ${duration}ms`);
+    this.logger.log(`Projects ${label} completed in ${duration}ms`);
 
     return dtos;
   }
@@ -320,11 +331,11 @@ export class ProjectsService extends BaseService<any, number, Project> {
           : null),
     }));
     const enrichedCount = entries.filter((entry) => entry.financial !== null).length;
-    const errorCount = entries.filter((entry) => Boolean((entry.qbo as any)?.error)).length;
-    const scheduleCount = entries.filter((entry) => Boolean((entry.financial as any)?.paymentSchedule)).length;
+    const errorCount = entries.filter((entry) => Boolean(entry.qbo?.error)).length;
+    const scheduleCount = entries.filter((entry) => Boolean(entry.financial?.paymentSchedule)).length;
     const enrichedProjectNumbers = entries
       .filter((entry) => entry.financial !== null)
-      .map((entry) => (entry.financial as any)?.projectNumber)
+      .map((entry) => entry.financial?.projectNumber)
       .filter((value): value is string => typeof value === 'string');
     this.logger.log(
       `Projects findAllFinancials completed in ${duration}ms (${enrichedCount}/${entries.length} enriched, ${scheduleCount} schedules, ${errorCount} errors; sample ${enrichedProjectNumbers.slice(0, 8).join(', ')})`,
