@@ -43,6 +43,8 @@ export class S3Service {
       },
       endpoint: this.config.endpoint || undefined,
       forcePathStyle: this.config.forcePathStyle,
+      // Presigned PUTs have no body at signing time; omit the SDK's empty-body CRC32.
+      requestChecksumCalculation: 'WHEN_REQUIRED',
     });
   }
 
