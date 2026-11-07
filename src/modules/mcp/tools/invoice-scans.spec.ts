@@ -40,11 +40,16 @@ function registerTools() {
     remove: jest.fn().mockResolvedValue({ id: 'x', deleted: true }),
   };
 
+  const invoiceSearchService = {
+    search: jest.fn().mockResolvedValue({ results: [], missing: [] }),
+  };
+
   registerInvoiceScanTools(server as unknown as McpServer, {
     invoiceScansService,
+    invoiceSearchService,
   } as unknown as McpToolDeps);
 
-  return { tools, invoiceScansService };
+  return { tools, invoiceScansService, invoiceSearchService };
 }
 
 const ID = '8c81e542-2141-4ba4-b4f4-fb442eb2fafe';
@@ -67,8 +72,74 @@ describe('registerInvoiceScanTools', () => {
       'get_invoice_scan_download_url',
       'list_invoice_scans',
       'rescan_invoice_scan',
+      'search_invoices',
       'update_invoice_scan',
     ]);
+  });
+
+  describe('search_invoices', () => {
+    it('forwards projects, vendors and dates to the search service', async () => {
+      const { tools, invoiceSearchService } = registerTools();
+      const tool = tools.get('search_invoices')!;
+      const args = {
+        projects: ['064P'],
+        vendors: ['Lion', 'Bond', 'Home Depot'],
+        date_from: '2026-09-01',
+        date_to: '2026-09-30',
+      };
+
+      expect(parse(tool.schema, args).success).toBe(true);
+      await tool.handler(args);
+
+      expect(invoiceSearchService.search).toHaveBeenCalledWith({
+        projects: ['064P'],
+        vendors: ['Lion', 'Bond', 'Home Depot'],
+        dateFrom: '2026-09-01',
+        dateTo: '2026-09-30',
+      });
+    });
+
+    it('treats vendors and dates as optional', async () => {
+      const { tools, invoiceSearchService } = registerTools();
+      const tool = tools.get('search_invoices')!;
+
+      await tool.handler({ projects: ['064P-0826'] });
+
+      expect(invoiceSearchService.search).toHaveBeenCalledWith({
+        projects: ['064P-0826'],
+        vendors: [],
+        dateFrom: undefined,
+        dateTo: undefined,
+      });
+    });
+
+    it.each([
+      ['no projects', { projects: [] }],
+      ['a wildcard in the project', { projects: ['064%'] }],
+      ['an injection attempt', { projects: ["064P' OR 1=1 --"] }],
+      ['too many projects', { projects: Array.from({ length: 21 }, (_, i) => `0${i}P`) }],
+      ['a blank vendor', { projects: ['064P'], vendors: [' '] }],
+      ['a bad date', { projects: ['064P'], date_from: '09/01/2026' }],
+    ])('rejects %s before touching the service', (_label, args) => {
+      const { tools } = registerTools();
+
+      expect(parse(tools.get('search_invoices')!.schema, args).success).toBe(false);
+    });
+
+    it('refuses a date range that is backwards', async () => {
+      const { tools, invoiceSearchService } = registerTools();
+      const tool = tools.get('search_invoices')!;
+
+      const result = (await tool.handler({
+        projects: ['064P'],
+        date_from: '2026-10-01',
+        date_to: '2026-09-01',
+      })) as { isError?: boolean; content: Array<{ text: string }> };
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toMatch(/date_from/);
+      expect(invoiceSearchService.search).not.toHaveBeenCalled();
+    });
   });
 
   describe('create_manual_transaction', () => {

@@ -21,6 +21,8 @@ import { registerMcpTool } from './tool-registration';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const uuid = z.string().uuid();
+/** `064P` or `064P-0826`: letters, digits and dashes only, so it is safe as a LIKE prefix. */
+const PROJECT_NUMBER = /^[0-9A-Za-z]{2,10}(-[0-9A-Za-z]{2,10})?$/;
 
 const isoDate = z.string().regex(ISO_DATE, 'Debe ser una fecha YYYY-MM-DD');
 
@@ -51,6 +53,47 @@ export function registerInvoiceScanTools(server: McpServer, deps: McpToolDeps) {
     'Document scans: todo lo pendiente de revisar (hasta 200, más reciente primero) más los últimos 50 ya marcados como ingresados en QuickBooks. Incluye facturas escaneadas y transacciones manuales.',
     {},
     async () => deps.invoiceScansService.list(),
+  );
+
+  registerMcpTool(
+    server,
+    'search_invoices',
+    'Busca facturas en el índice de document scans (sin recorrer Drive). Recibe uno o varios proyectos (064P o 064P-0826), proveedores opcionales (Lion, Bond, Home Depot) y un rango de fechas opcional. Devuelve, por cada pareja proyecto/proveedor, los documentos con enlace a Maros, número, fecha, importe y estado, y lista en `missing` las parejas sin documento junto con candidatos sin proyecto asignado. Solo lectura.',
+    {
+      projects: z
+        .array(z.string().trim().regex(PROJECT_NUMBER, 'Número de proyecto inválido, p. ej. 064P o 064P-0826'))
+        .min(1)
+        .max(20)
+        .describe('Números de proyecto, cortos (064P) o completos (064P-0826)'),
+      vendors: z
+        .array(z.string().trim().min(2).max(80))
+        .max(20)
+        .optional()
+        .describe('Proveedores como los llama la gente; vacío = todos'),
+      date_from: isoDate.optional().describe('Desde (fecha de la factura), YYYY-MM-DD'),
+      date_to: isoDate.optional().describe('Hasta (fecha de la factura), YYYY-MM-DD'),
+    },
+    async ({
+      projects,
+      vendors,
+      date_from,
+      date_to,
+    }: {
+      projects: string[];
+      vendors?: string[];
+      date_from?: string;
+      date_to?: string;
+    }) => {
+      if (date_from && date_to && date_from > date_to) {
+        throw new Error('date_from no puede ser posterior a date_to');
+      }
+      return deps.invoiceSearchService.search({
+        projects,
+        vendors: vendors ?? [],
+        dateFrom: date_from,
+        dateTo: date_to,
+      });
+    },
   );
 
   registerMcpTool(

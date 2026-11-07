@@ -37,6 +37,7 @@ import { S3Module } from '../s3/s3.module';
 import { MailModule } from '../mail/mail.module';
 import { InvoiceCounterpartyWriteService } from './services/invoice-scans/invoice-counterparty-write.service';
 import { InvoiceScanNotificationsService } from './services/invoice-scans/invoice-scan-notifications.service';
+import { InvoiceSearchService } from './services/invoice-scans/invoice-search.service';
 import { InvoiceScanReminderCron } from './cron/invoice-scan-reminder.cron';
 import { Project } from '../../entities/project.entity';
 
@@ -80,12 +81,14 @@ import { Project } from '../../entities/project.entity';
     InvoiceScansService,
     InvoiceCounterpartyWriteService,
     InvoiceScanNotificationsService,
+    InvoiceSearchService,
     InvoiceScanReminderCron,
   ],
   exports: [
     TokenCryptoService,
     QuickbooksConnectionStatusService,
     InvoiceScansService,
+    InvoiceSearchService,
     QuickbooksAuthService,
     QuickbooksApiService,
     QuickbooksFinancialsService,
