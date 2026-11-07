@@ -13,6 +13,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { ManagedFilesModule } from '../managed-files/managed-files.module';
 import { ReportsModule } from '../reports/reports.module';
 import { GoogleCalendarModule } from '../google-calendar/google-calendar.module';
+import { GoogleWorkspaceModule } from '../google-workspace/google-workspace.module';
 import { McpController } from './mcp.controller';
 import { McpService } from './mcp.service';
 import { McpAuthGuard } from './guards/mcp-auth.guard';
@@ -34,6 +35,7 @@ import { McpActorService } from './mcp-actor.service';
     ManagedFilesModule,
     ReportsModule,
     GoogleCalendarModule,
+    GoogleWorkspaceModule,
   ],
   controllers: [McpController],
   providers: [McpService, McpAuthGuard, McpActorService],

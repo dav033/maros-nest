@@ -29,6 +29,7 @@ import { TaskWorkspacesService } from '../../task-workspaces/services/task-works
 import { TaskWorkspaceFoldersService } from '../../task-workspaces/services/task-workspace-folders.service';
 import { TaskWorkspaceAssignmentService } from '../../task-workspaces/services/task-workspace-assignment.service';
 import { GoogleCalendarService } from '../../google-calendar/google-calendar.service';
+import { GoogleWorkspaceService } from '../../google-workspace/google-workspace.service';
 import { TaskDependenciesService } from '../../tasks/task-management/services/task-dependencies.service';
 import { CompanyServicesService } from '../../companies/company-services/services/company-services.service';
 import { NotificationsService } from '../../notifications/notifications.service';
@@ -88,6 +89,7 @@ export type McpToolDeps = {
   managedFilesService: ManagedFilesService;
   restorationVisitService: ReportsService;
   googleCalendarService: GoogleCalendarService;
+  googleWorkspaceService: GoogleWorkspaceService;
   taskTemplatesService: TaskTemplatesService;
   taskWorkspacesService: TaskWorkspacesService;
   taskWorkspaceFolders: TaskWorkspaceFoldersService;

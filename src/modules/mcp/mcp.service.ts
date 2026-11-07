@@ -28,6 +28,7 @@ import { TaskWorkspacesService } from '../task-workspaces/services/task-workspac
 import { TaskWorkspaceFoldersService } from '../task-workspaces/services/task-workspace-folders.service';
 import { TaskWorkspaceAssignmentService } from '../task-workspaces/services/task-workspace-assignment.service';
 import { GoogleCalendarService } from '../google-calendar/google-calendar.service';
+import { GoogleWorkspaceService } from '../google-workspace/google-workspace.service';
 import { TaskDependenciesService } from '../tasks/task-management/services/task-dependencies.service';
 import { CompanyServicesService } from '../companies/company-services/services/company-services.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -77,6 +78,7 @@ import { registerPlatformTools } from './tools/platform';
 import { registerNoteAdvancedTools } from './tools/notes-advanced';
 import { registerNoteReferenceTools } from './tools/note-references';
 import { registerGoogleCalendarTools } from './tools/google-calendar';
+import { registerGoogleWorkspaceTools } from './tools/google-workspace';
 import { registerS3Tools } from './tools/s3';
 import { registerTrelloTools } from './tools/trello';
 import { registerNoteTools } from './tools/notes';
@@ -112,6 +114,7 @@ export class McpService {
     private readonly managedFilesService: ManagedFilesService,
     private readonly restorationVisitService: ReportsService,
     private readonly googleCalendarService: GoogleCalendarService,
+    private readonly googleWorkspaceService: GoogleWorkspaceService,
     private readonly taskTemplatesService: TaskTemplatesService,
     private readonly taskWorkspacesService: TaskWorkspacesService,
     private readonly taskWorkspaceFolders: TaskWorkspaceFoldersService,
@@ -163,6 +166,7 @@ export class McpService {
       managedFilesService: this.managedFilesService,
       restorationVisitService: this.restorationVisitService,
       googleCalendarService: this.googleCalendarService,
+      googleWorkspaceService: this.googleWorkspaceService,
       taskTemplatesService: this.taskTemplatesService,
       taskWorkspacesService: this.taskWorkspacesService,
       taskWorkspaceFolders: this.taskWorkspaceFolders,
@@ -210,6 +214,7 @@ export class McpService {
     registerNoteAdvancedTools(server, deps);
     registerNoteReferenceTools(server, deps);
     registerGoogleCalendarTools(server, deps);
+    registerGoogleWorkspaceTools(server, deps);
 
     return server;
   }

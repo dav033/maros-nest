@@ -8,6 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { google } from 'googleapis';
+import { GOOGLE_CONNECT_SCOPES } from './google-scopes';
 import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
 import type { AuthenticatedUser } from '../../common/auth/authenticated-user';
@@ -38,7 +39,6 @@ type GoogleCalendarMeetingResponse = Pick<
   | 'attendees'
 > & { isOrganizer: boolean };
 
-const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events.owned';
 const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 
 @Injectable()
@@ -70,7 +70,8 @@ export class GoogleCalendarService {
     return this.newOAuthClient().generateAuthUrl({
       access_type: 'offline',
       prompt: 'consent select_account',
-      scope: ['openid', 'email', CALENDAR_SCOPE],
+      scope: [...GOOGLE_CONNECT_SCOPES],
+      include_granted_scopes: true,
       state,
     });
   }
@@ -335,7 +336,8 @@ export class GoogleCalendarService {
     }
   }
 
-  private async getAuthorizedClient(userId: number): Promise<InstanceType<typeof google.auth.OAuth2>> {
+  /** OAuth client for this person's connected account, refreshing the token when it is about to expire. */
+  async getAuthorizedClient(userId: number): Promise<InstanceType<typeof google.auth.OAuth2>> {
     const connection = await this.connections.findOneBy({ userId });
     if (!connection) throw new BadRequestException('Connect Google Calendar first.');
 

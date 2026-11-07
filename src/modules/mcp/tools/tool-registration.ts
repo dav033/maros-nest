@@ -8,7 +8,7 @@ const logger = new Logger('McpTool');
 
 type ToolErrorPayload = {
   status: 'error';
-  code: 'qbo_connection_required' | 'tool_execution_failed';
+  code: 'qbo_connection_required' | 'google_reconnect_required' | 'tool_execution_failed';
   tool: string;
   message: string;
   suggestions?: string[];
@@ -33,6 +33,18 @@ function buildErrorPayload(tool: string, error: unknown): ToolErrorPayload {
       message: 'QuickBooks no está conectado o necesita autorización.',
       suggestions: [
         'Conecta QuickBooks nuevamente antes de consultar información financiera.',
+      ],
+    };
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes('GOOGLE_RECONNECT_REQUIRED')) {
+    return {
+      status: 'error',
+      code: 'google_reconnect_required',
+      tool,
+      message: message.replace('GOOGLE_RECONNECT_REQUIRED: ', ''),
+      suggestions: [
+        'Esa persona debe reconectar Google desde Maros y aprobar los permisos de Gmail y Drive.',
       ],
     };
   }
