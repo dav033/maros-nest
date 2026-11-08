@@ -6,6 +6,7 @@ import { S3Module } from '../s3/s3.module';
 import { AttachmentSourceService } from './attachment-source.service';
 import { DriveFilesService } from './drive-files.service';
 import { GmailDraftsService } from './gmail-drafts.service';
+import { GmailInvoiceImportService } from './gmail-invoice-import.service';
 import { GoogleWorkspaceAuthService } from './google-workspace-auth.service';
 import { GoogleWorkspaceService } from './google-workspace.service';
 
@@ -14,6 +15,7 @@ import { GoogleWorkspaceService } from './google-workspace.service';
   providers: [
     GoogleWorkspaceAuthService,
     GmailDraftsService,
+    GmailInvoiceImportService,
     DriveFilesService,
     AttachmentSourceService,
     GoogleWorkspaceService,

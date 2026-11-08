@@ -5,12 +5,18 @@ import { DriveFilesService } from './drive-files.service';
 
 jest.mock('googleapis', () => ({ google: { drive: jest.fn() } }));
 
-const auth = { clientWithScope: jest.fn().mockResolvedValue({}) };
+const READONLY = 'https://www.googleapis.com/auth/drive.readonly';
+const FILE_ONLY = 'https://www.googleapis.com/auth/drive.file';
+const auth = {
+  clientWithScope: jest.fn().mockResolvedValue({}),
+  clientWithAnyScope: jest.fn().mockResolvedValue({ client: {}, granted: READONLY }),
+};
 const MB = 1024 * 1024;
 
 beforeEach(() => {
   jest.clearAllMocks();
   auth.clientWithScope.mockResolvedValue({});
+  auth.clientWithAnyScope.mockResolvedValue({ client: {}, granted: READONLY });
 });
 
 function mockDriveFiles(handlers: {
@@ -43,7 +49,7 @@ describe('DriveFilesService.download', () => {
 
     const file = await service().download(7, 'file-id-123456', 5 * MB);
 
-    expect(auth.clientWithScope).toHaveBeenCalledWith(7, 'https://www.googleapis.com/auth/drive.file');
+    expect(auth.clientWithAnyScope).toHaveBeenCalledWith(7, [READONLY, FILE_ONLY]);
     expect(file).toMatchObject({ fileName: 'waiver.pdf', contentType: 'application/pdf' });
     expect(file.content.toString()).toBe('%PDF');
     expect(get.mock.calls[1][0]).toMatchObject({ fileId: 'file-id-123456', alt: 'media' });
@@ -62,10 +68,17 @@ describe('DriveFilesService.download', () => {
     expect(file).toMatchObject({ fileName: 'Credit form.pdf', contentType: 'application/pdf' });
   });
 
-  it('explains that Maros only sees its own files when Drive answers 404', async () => {
+  it('with only drive.file, a 404 explains that Maros sees just its own files and how to widen it', async () => {
+    auth.clientWithAnyScope.mockResolvedValue({ client: {}, granted: FILE_ONLY });
     mockDriveFiles({ get: jest.fn().mockRejectedValue({ code: 404 }) });
 
-    await expect(service().download(7, 'someone-elses-file', 5 * MB)).rejects.toThrow(/solo accede a los que él mismo guardó/);
+    await expect(service().download(7, 'someone-elses-file', 5 * MB)).rejects.toThrow(/solo accede a los que él mismo guardó.*Reconecta Google/s);
+  });
+
+  it('with drive.readonly, a 404 simply means the file does not exist or is not shared', async () => {
+    mockDriveFiles({ get: jest.fn().mockRejectedValue({ code: 404 }) });
+
+    await expect(service().download(7, 'missing-file-id', 5 * MB)).rejects.toThrow(/No existe ese archivo de Drive/);
   });
 
   it.each([
@@ -152,5 +165,52 @@ describe('AttachmentSourceService with Drive files', () => {
 
     await expect(sources(download).resolveAll(7, specs)).rejects.toBeInstanceOf(BadRequestException);
     expect(download).not.toHaveBeenCalled();
+  });
+});
+
+describe('DriveFilesService.search', () => {
+  const service = () => new DriveFilesService(auth as never);
+
+  it('builds an escaped, read-only query and reports whole-Drive visibility', async () => {
+    const list = jest.fn().mockResolvedValue({
+      data: { files: [{ id: 'a1', name: 'Waiver 064P.pdf', mimeType: 'application/pdf', size: '2048', modifiedTime: '2026-11-01T10:00:00Z', webViewLink: 'https://drive/a1' }] },
+    });
+    mockDriveFiles({ list });
+
+    const result = await service().search(7, {
+      nameContains: "O'Brien waiver",
+      mimeType: 'application/pdf',
+      folderId: 'folderid123456',
+      modifiedAfter: '2026-11-01',
+      limit: 20,
+    });
+
+    const call = list.mock.calls[0][0];
+    expect(call.q).toContain("name contains 'O\\'Brien waiver'");
+    expect(call.q).toContain("mimeType = 'application/pdf'");
+    expect(call.q).toContain("'folderid123456' in parents");
+    expect(call.q).toContain("modifiedTime > '2026-11-01'");
+    expect(call.q).toContain('trashed = false');
+    expect(call).toMatchObject({ pageSize: 20, orderBy: 'modifiedTime desc' });
+    expect(result).toEqual({
+      visibility: 'all',
+      files: [{ id: 'a1', name: 'Waiver 064P.pdf', mimeType: 'application/pdf', sizeBytes: 2048, modifiedTime: '2026-11-01T10:00:00Z', url: 'https://drive/a1' }],
+    });
+  });
+
+  it('says so when the connection only sees the files Maros saved', async () => {
+    auth.clientWithAnyScope.mockResolvedValue({ client: {}, granted: FILE_ONLY });
+    mockDriveFiles({ list: jest.fn().mockResolvedValue({ data: { files: [] } }) });
+
+    expect((await service().search(7, { limit: 5 })).visibility).toBe('app_files_only');
+  });
+
+  it('cannot be turned into a different query by quotes in the name', async () => {
+    const list = jest.fn().mockResolvedValue({ data: { files: [] } });
+    mockDriveFiles({ list });
+
+    await service().search(7, { nameContains: "x' or trashed = true or name contains '", limit: 5 });
+
+    expect(list.mock.calls[0][0].q).toContain("name contains 'x\\' or trashed = true or name contains \\''");
   });
 });

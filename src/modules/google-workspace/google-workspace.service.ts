@@ -1,7 +1,8 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { AuthenticatedUser } from '../../common/auth/authenticated-user';
 import { AttachmentSourceService, AttachmentSpec } from './attachment-source.service';
-import { DriveFilesService, DriveUploadResult } from './drive-files.service';
+import { DriveFilesService, DriveSearchInput, DriveSearchResult, DriveUploadResult } from './drive-files.service';
+import { GmailInvoiceImportService, ImportInput, ImportReport } from './gmail-invoice-import.service';
 import { DraftResult, GmailDraftsService } from './gmail-drafts.service';
 import { buildInvoiceFileName } from './invoice-file-name';
 import {
@@ -60,7 +61,19 @@ export class GoogleWorkspaceService {
     private readonly drafts: GmailDraftsService,
     private readonly drive: DriveFilesService,
     private readonly attachments: AttachmentSourceService,
+    private readonly gmailImport: GmailInvoiceImportService,
   ) {}
+
+  /** Read-only Drive search as that person (whole Drive with drive.readonly). */
+  searchDriveFiles(user: AuthenticatedUser, input: DriveSearchInput): Promise<DriveSearchResult> {
+    return this.drive.search(user.id, input);
+  }
+
+  /** Reads the emails of ONE Gmail label and stores their invoice attachments in Drive. */
+  async importGmailInvoices(user: AuthenticatedUser, input: ImportInput): Promise<ImportReport> {
+    this.requirePermission(user, 'finance:write', 'importar facturas desde Gmail');
+    return this.gmailImport.importLabel(user.id, input);
+  }
 
   async createDraftWithAttachment(user: AuthenticatedUser, input: CreateDraftInput): Promise<DraftResult> {
     const specs = input.attachments ?? [];

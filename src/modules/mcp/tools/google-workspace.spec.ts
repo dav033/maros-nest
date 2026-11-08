@@ -18,6 +18,8 @@ function setup() {
     createDraftWithAttachment: jest.fn().mockResolvedValue({ draftId: 'd' }),
     saveReportToDrive: jest.fn().mockResolvedValue({ id: 'f' }),
     saveInvoiceToReceipts: jest.fn().mockResolvedValue({ id: 'f' }),
+    searchDriveFiles: jest.fn().mockResolvedValue({ visibility: 'all', files: [] }),
+    importGmailInvoices: jest.fn().mockResolvedValue({ saved: [], duplicates: 0, skipped: [] }),
   };
   registerGoogleWorkspaceTools(server as unknown as McpServer, { mcpActor, googleWorkspaceService } as unknown as McpToolDeps);
   return { tools, mcpActor, googleWorkspaceService, person };
@@ -27,11 +29,13 @@ const parse = (schema: ZodRawShape, args: unknown) => z.object(schema).safeParse
 const ID = '8c81e542-2141-4ba4-b4f4-fb442eb2fafe';
 
 describe('registerGoogleWorkspaceTools', () => {
-  it('registers the three tools', () => {
+  it('registers the five tools', () => {
     expect([...setup().tools.keys()].sort()).toEqual([
       'create_draft_with_attachment',
+      'import_gmail_invoices_to_receipts',
       'save_invoice_to_receipts',
       'save_report_to_drive',
+      'search_drive_files',
     ]);
   });
 
@@ -166,6 +170,56 @@ describe('registerGoogleWorkspaceTools', () => {
 
       expect(result.isError).toBe(true);
       expect(googleWorkspaceService.saveInvoiceToReceipts).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('search_drive_files', () => {
+    it('acts as the named person, applies the default limit and forwards filters', async () => {
+      const { tools, googleWorkspaceService, person } = setup();
+      const tool = tools.get('search_drive_files')!;
+      const args = { userId: 7, nameContains: 'waiver', mimeType: 'application/pdf', modifiedAfter: '2026-11-01' };
+
+      expect(parse(tool.schema, args).success).toBe(true);
+      await tool.handler(args);
+
+      expect(googleWorkspaceService.searchDriveFiles).toHaveBeenCalledWith(person, { nameContains: 'waiver', mimeType: 'application/pdf', modifiedAfter: '2026-11-01', limit: 20 });
+    });
+
+    it.each([
+      ['a blank search text', { nameContains: ' ' }],
+      ['a bad mime type', { mimeType: "application/pdf' or '1'='1" }],
+      ['a malformed folder id', { folderId: "x' in parents or 'a" }],
+      ['a bad date', { modifiedAfter: 'yesterday' }],
+      ['a limit over 50', { limit: 500 }],
+    ])('rejects %s', (_label, override) => {
+      const { tools } = setup();
+
+      expect(parse(tools.get('search_drive_files')!.schema, { userId: 7, ...override }).success).toBe(false);
+    });
+  });
+
+  describe('import_gmail_invoices_to_receipts', () => {
+    it('forwards the label with a default of 10 messages', async () => {
+      const { tools, googleWorkspaceService, person } = setup();
+      const tool = tools.get('import_gmail_invoices_to_receipts')!;
+
+      expect(parse(tool.schema, { userId: 7, label: 'Invoices', sinceDays: 30 }).success).toBe(true);
+      await tool.handler({ userId: 7, label: 'Invoices', sinceDays: 30 });
+
+      expect(googleWorkspaceService.importGmailInvoices).toHaveBeenCalledWith(person, { label: 'Invoices', sinceDays: 30, maxMessages: 10 });
+    });
+
+    it.each([
+      ['no label', { label: undefined }],
+      ['a blank label', { label: '  ' }],
+      ['a label with a line break', { label: 'a\nb' }],
+      ['more than 25 messages', { maxMessages: 26 }],
+      ['zero messages', { maxMessages: 0 }],
+      ['more than a year', { sinceDays: 400 }],
+    ])('rejects %s', (_label, override) => {
+      const { tools } = setup();
+
+      expect(parse(tools.get('import_gmail_invoices_to_receipts')!.schema, { userId: 7, label: 'Invoices', ...override }).success).toBe(false);
     });
   });
 });

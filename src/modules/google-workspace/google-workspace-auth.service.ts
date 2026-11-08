@@ -15,6 +15,24 @@ export type GoogleOAuthClient = InstanceType<typeof google.auth.OAuth2>;
 export class GoogleWorkspaceAuthService {
   constructor(private readonly calendar: GoogleCalendarService) {}
 
+  /** Same as clientWithScope, but any one of `scopes` is enough; says which one the token has. */
+  async clientWithAnyScope(
+    userId: number,
+    scopes: string[],
+  ): Promise<{ client: GoogleOAuthClient; granted: string }> {
+    const client = await this.calendar.getAuthorizedClient(userId);
+    const accessToken = client.credentials.access_token;
+    const info = accessToken ? await client.getTokenInfo(accessToken).catch(() => null) : null;
+    const granted = info ? scopes.find((scope) => info.scopes.includes(scope)) : undefined;
+    if (!granted) {
+      throw new BadRequestException(
+        'GOOGLE_RECONNECT_REQUIRED: this Google connection does not include the Gmail or Drive access this needs. ' +
+          'Reconnect Google from Maros and approve the new permissions.',
+      );
+    }
+    return { client, granted };
+  }
+
   async clientWithScope(userId: number, scope: string): Promise<GoogleOAuthClient> {
     const client = await this.calendar.getAuthorizedClient(userId);
     const accessToken = client.credentials.access_token;

@@ -10,13 +10,17 @@ function setup() {
   const drafts = { createDraft: jest.fn().mockResolvedValue({ draftId: 'd1' }) };
   const drive = {
     upload: jest.fn().mockResolvedValue({ id: 'f1', url: 'https://drive/f1', alreadyExisted: false }),
+    search: jest.fn().mockResolvedValue({ visibility: 'all', files: [] }),
   };
   const attachments = {
     resolveAll: jest.fn().mockResolvedValue([]),
     loadInvoiceFile: jest.fn(),
   };
-  const service = new GoogleWorkspaceService(drafts as never, drive as never, attachments as never);
-  return { service, drafts, drive, attachments };
+  const gmailImport = {
+    importLabel: jest.fn().mockResolvedValue({ saved: [], duplicates: 0, skipped: [] }),
+  };
+  const service = new GoogleWorkspaceService(drafts as never, drive as never, attachments as never, gmailImport as never);
+  return { service, drafts, drive, attachments, gmailImport };
 }
 
 describe('createDraftWithAttachment', () => {
@@ -204,5 +208,30 @@ describe('saveReportToDrive dating and overwrite safety', () => {
 
     expect(drive.upload.mock.calls[0][1].name).toMatch(/^jfb-cobros-\d{4}-\d{2}-\d{2}\.pdf$/);
     expect(drive.upload.mock.calls[1][1].name).toBe('jfb-cobros.pdf');
+  });
+});
+
+describe('searchDriveFiles and importGmailInvoices', () => {
+  it('searches Drive as the acting person', async () => {
+    const { service, drive } = setup();
+
+    await service.searchDriveFiles(user([]), { nameContains: 'waiver', limit: 20 });
+
+    expect(drive.search).toHaveBeenCalledWith(7, { nameContains: 'waiver', limit: 20 });
+  });
+
+  it('imports a label as the acting person when they have finance:write', async () => {
+    const { service, gmailImport } = setup();
+
+    await service.importGmailInvoices(user(['finance:write']), { label: 'Invoices', maxMessages: 10 });
+
+    expect(gmailImport.importLabel).toHaveBeenCalledWith(7, { label: 'Invoices', maxMessages: 10 });
+  });
+
+  it('refuses the import without finance:write before reading any mail', async () => {
+    const { service, gmailImport } = setup();
+
+    await expect(service.importGmailInvoices(user(['finance:read']), { label: 'Invoices', maxMessages: 10 })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(gmailImport.importLabel).not.toHaveBeenCalled();
   });
 });

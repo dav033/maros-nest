@@ -74,7 +74,45 @@ const attachment = z.discriminatedUnion('kind', [
   }),
 ]);
 
+const isoDateTime = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/, 'Fecha o fecha-hora ISO, p. ej. 2026-11-01');
+
 export function registerGoogleWorkspaceTools(server: McpServer, deps: McpToolDeps) {
+  registerMcpTool(
+    server,
+    'search_drive_files',
+    'Busca archivos en el Google Drive de esa persona (solo lectura, no modifica nada). Filtros opcionales: nombre que contiene un texto, tipo MIME, carpeta por id y modificados desde una fecha. Devuelve id, nombre, tipo, tamaño y enlace. `visibility` dice si la búsqueda cubrió TODO el Drive o solo los archivos que Maros guardó (en ese caso, la persona debe reconectar Google). Los ids sirven para adjuntar en create_draft_with_attachment.',
+    {
+      userId,
+      nameContains: z.string().trim().min(1).max(100).refine(noLineBreaks, 'Sin saltos de línea').optional(),
+      mimeType: z.string().regex(/^[\w.+-]+\/[\w.+-]+$/, 'Tipo MIME inválido').max(100).optional(),
+      folderId: driveFileId.optional().describe('Id de una carpeta de Drive'),
+      modifiedAfter: isoDateTime.optional(),
+      limit: z.number().int().min(1).max(50).default(20),
+    },
+    async ({ userId: id, ...input }: { userId: number; nameContains?: string; mimeType?: string; folderId?: string; modifiedAfter?: string; limit?: number }) => {
+      const user = await deps.mcpActor.userAs(id);
+      return deps.googleWorkspaceService.searchDriveFiles(user, { ...input, limit: input.limit ?? 20 });
+    },
+  );
+
+  registerMcpTool(
+    server,
+    'import_gmail_invoices_to_receipts',
+    'Lee los correos de UNA etiqueta de Gmail de esa persona y guarda los adjuntos de factura (PDF, JPG, PNG, WebP de hasta 5 MB) en Maros/Receipts/_Inbox de su Drive. Solo lee: no etiqueta, archiva, borra ni envía nada, y no toca correos sin esa etiqueta. Es idempotente: un adjunto ya guardado se cuenta como duplicado. Cada archivo lleva en su descripción el correo de origen (id, remitente, asunto, fecha). Devuelve lo guardado con enlaces, los duplicados y lo omitido con el motivo. Exige permiso finance:write de esa persona.',
+    {
+      userId,
+      label: z.string().trim().min(1).max(100).refine(noLineBreaks, 'Sin saltos de línea').describe('Nombre exacto de la etiqueta de Gmail'),
+      maxMessages: z.number().int().min(1).max(25).default(10),
+      sinceDays: z.number().int().min(1).max(365).optional().describe('Solo correos de los últimos N días'),
+    },
+    async ({ userId: id, ...input }: { userId: number; label: string; maxMessages?: number; sinceDays?: number }) => {
+      const user = await deps.mcpActor.userAs(id);
+      return deps.googleWorkspaceService.importGmailInvoices(user, { ...input, maxMessages: input.maxMessages ?? 10 });
+    },
+  );
+
   registerMcpTool(
     server,
     'create_draft_with_attachment',

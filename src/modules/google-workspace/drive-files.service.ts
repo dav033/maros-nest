@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { drive_v3, google } from 'googleapis';
 import { Readable } from 'node:stream';
-import { DRIVE_FILE_SCOPE } from '../google-calendar/google-scopes';
+import { DRIVE_FILE_SCOPE, DRIVE_READONLY_SCOPE } from '../google-calendar/google-scopes';
 import { GoogleWorkspaceAuthService } from './google-workspace-auth.service';
 import { withCounter } from './invoice-file-name';
 import {
@@ -32,6 +32,32 @@ export interface DriveUploadInput {
    * keep both under one name.
    */
   avoidOverwrite?: boolean;
+  /** Free text kept on the file, e.g. which email it came from. */
+  description?: string;
+}
+
+export interface DriveSearchInput {
+  nameContains?: string;
+  mimeType?: string;
+  folderId?: string;
+  /** ISO date-time: only files modified after it. */
+  modifiedAfter?: string;
+  limit: number;
+}
+
+export interface DriveSearchFile {
+  id: string;
+  name: string;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  modifiedTime: string | null;
+  url: string | null;
+}
+
+export interface DriveSearchResult {
+  /** `all`: the whole Drive (drive.readonly). `app_files_only`: only files Maros created (reconnect to widen). */
+  visibility: 'all' | 'app_files_only';
+  files: DriveSearchFile[];
 }
 
 export interface DriveDownload {
@@ -82,6 +108,7 @@ export class DriveFilesService {
       requestBody: {
         name: finalName,
         parents: [folderId],
+        ...(input.description ? { description: input.description.slice(0, 1000) } : {}),
         ...(input.key ? { appProperties: { maros_key: input.key } } : {}),
       },
       media: { mimeType: input.mimeType, body: Readable.from(input.content) },
@@ -98,8 +125,9 @@ export class DriveFilesService {
    * PDF.
    */
   async download(userId: number, fileId: string, maxBytes: number): Promise<DriveDownload> {
-    const client = await this.auth.clientWithScope(userId, DRIVE_FILE_SCOPE);
+    const { client, granted } = await this.auth.clientWithAnyScope(userId, [DRIVE_READONLY_SCOPE, DRIVE_FILE_SCOPE]);
     const drive = google.drive({ version: 'v3', auth: client });
+    const seesWholeDrive = granted === DRIVE_READONLY_SCOPE;
 
     const meta = await drive.files
       .get({ fileId, fields: 'id,name,mimeType,size,trashed' })
@@ -107,7 +135,9 @@ export class DriveFilesService {
       .catch((error: { code?: number; status?: number }) => {
         if (error.code === 404 || error.status === 404) {
           throw new BadRequestException(
-            'Maros no puede ver ese archivo de Drive: solo accede a los que él mismo guardó (save_report_to_drive, save_invoice_to_receipts). Guárdalo con esas herramientas y usa el id que devuelven.',
+            seesWholeDrive
+              ? 'No existe ese archivo de Drive, o esta cuenta no tiene acceso a él.'
+              : 'Maros no puede ver ese archivo de Drive: esta conexión solo accede a los que él mismo guardó. Reconecta Google para ampliar el acceso, o guárdalo con save_report_to_drive y usa el id que devuelve.',
           );
         }
         throw error;
@@ -134,6 +164,37 @@ export class DriveFilesService {
       content,
       fileName: isNative && !baseName.toLowerCase().endsWith('.pdf') ? `${baseName}.pdf` : baseName,
       contentType: isNative ? 'application/pdf' : mime,
+    };
+  }
+
+  /** Read-only search. With drive.readonly it covers the whole Drive; otherwise only what Maros saved. */
+  async search(userId: number, input: DriveSearchInput): Promise<DriveSearchResult> {
+    const { client, granted } = await this.auth.clientWithAnyScope(userId, [DRIVE_READONLY_SCOPE, DRIVE_FILE_SCOPE]);
+    const drive = google.drive({ version: 'v3', auth: client });
+
+    const terms = ['trashed = false'];
+    if (input.nameContains) terms.push(`name contains ${driveQueryLiteral(input.nameContains)}`);
+    if (input.mimeType) terms.push(`mimeType = ${driveQueryLiteral(input.mimeType)}`);
+    if (input.folderId) terms.push(`${driveQueryLiteral(input.folderId)} in parents`);
+    if (input.modifiedAfter) terms.push(`modifiedTime > ${driveQueryLiteral(input.modifiedAfter)}`);
+
+    const { data } = await drive.files.list({
+      q: terms.join(' and '),
+      pageSize: input.limit,
+      orderBy: 'modifiedTime desc',
+      fields: 'files(id,name,mimeType,size,modifiedTime,webViewLink)',
+      spaces: 'drive',
+    });
+    return {
+      visibility: granted === DRIVE_READONLY_SCOPE ? 'all' : 'app_files_only',
+      files: (data.files ?? []).map((file) => ({
+        id: file.id ?? '',
+        name: file.name ?? '',
+        mimeType: file.mimeType ?? null,
+        sizeBytes: file.size ? Number(file.size) : null,
+        modifiedTime: file.modifiedTime ?? null,
+        url: file.webViewLink ?? null,
+      })),
     };
   }
 
