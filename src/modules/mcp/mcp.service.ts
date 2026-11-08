@@ -14,6 +14,8 @@ import { QuickbooksNormalizerService } from '../quickbooks/services/core/quickbo
 import { InvoiceScansService } from '../quickbooks/services/invoice-scans.service';
 import { InvoiceSearchService } from '../quickbooks/services/invoice-scans/invoice-search.service';
 import { InvoiceLocationService } from '../quickbooks/services/invoice-scans/invoice-location.service';
+import { QuickbooksWriteService } from '../quickbooks/services/write/quickbooks-write.service';
+import { registerQboWriteTools } from './tools/qbo-write';
 import { S3Service } from '../s3/services/s3.service';
 import { TasksService } from '../tasks/task-management/tasks.service';
 import { TaskCommentsService } from '../tasks/task-management/services/task-comments.service';
@@ -102,6 +104,7 @@ export class McpService {
     private readonly invoiceScansService: InvoiceScansService,
     private readonly invoiceSearchService: InvoiceSearchService,
     private readonly invoiceLocationService: InvoiceLocationService,
+    private readonly qboWriteService: QuickbooksWriteService,
     private readonly s3Service: S3Service,
     private readonly trelloService: TrelloService,
     private readonly notesService: NotesService,
@@ -155,6 +158,7 @@ export class McpService {
       invoiceScansService: this.invoiceScansService,
       invoiceSearchService: this.invoiceSearchService,
       invoiceLocationService: this.invoiceLocationService,
+      qboWriteService: this.qboWriteService,
       s3Service: this.s3Service,
       trelloService: this.trelloService,
       notesService: this.notesService,
@@ -218,6 +222,7 @@ export class McpService {
     registerNoteReferenceTools(server, deps);
     registerGoogleCalendarTools(server, deps);
     registerGoogleWorkspaceTools(server, deps);
+    registerQboWriteTools(server, deps);
 
     return server;
   }

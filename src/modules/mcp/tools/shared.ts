@@ -12,6 +12,7 @@ import { QuickbooksNormalizerService } from '../../quickbooks/services/core/quic
 import { InvoiceScansService } from '../../quickbooks/services/invoice-scans.service';
 import { InvoiceSearchService } from '../../quickbooks/services/invoice-scans/invoice-search.service';
 import { InvoiceLocationService } from '../../quickbooks/services/invoice-scans/invoice-location.service';
+import { QuickbooksWriteService } from '../../quickbooks/services/write/quickbooks-write.service';
 import { S3Service } from '../../s3/services/s3.service';
 import { TrelloService } from '../../trello/services/trello.service';
 import { NotesService } from '../../notes/note-management/notes.service';
@@ -77,6 +78,7 @@ export type McpToolDeps = {
   invoiceScansService: InvoiceScansService;
   invoiceSearchService: InvoiceSearchService;
   invoiceLocationService: InvoiceLocationService;
+  qboWriteService: QuickbooksWriteService;
   s3Service: S3Service;
   trelloService: TrelloService;
   notesService: NotesService;

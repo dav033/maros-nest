@@ -39,6 +39,7 @@ import { InvoiceCounterpartyWriteService } from './services/invoice-scans/invoic
 import { InvoiceScanNotificationsService } from './services/invoice-scans/invoice-scan-notifications.service';
 import { InvoiceSearchService } from './services/invoice-scans/invoice-search.service';
 import { InvoiceLocationService } from './services/invoice-scans/invoice-location.service';
+import { QuickbooksWriteService } from './services/write/quickbooks-write.service';
 import { InvoiceDocumentLocation } from './entities/invoice-document-location.entity';
 import { InvoiceDocumentEvent } from './entities/invoice-document-event.entity';
 import { InvoiceScanReminderCron } from './cron/invoice-scan-reminder.cron';
@@ -86,6 +87,7 @@ import { Project } from '../../entities/project.entity';
     InvoiceScanNotificationsService,
     InvoiceSearchService,
     InvoiceLocationService,
+    QuickbooksWriteService,
     InvoiceScanReminderCron,
   ],
   exports: [
@@ -94,6 +96,7 @@ import { Project } from '../../entities/project.entity';
     InvoiceScansService,
     InvoiceSearchService,
     InvoiceLocationService,
+    QuickbooksWriteService,
     QuickbooksAuthService,
     QuickbooksApiService,
     QuickbooksFinancialsService,

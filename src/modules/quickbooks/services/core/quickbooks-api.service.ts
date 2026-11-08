@@ -124,6 +124,26 @@ export class QuickbooksApiService {
     return result;
   }
 
+  /**
+   * Raw POST to a QBO path (e.g. the multipart `/upload`). Reuses the retry and token
+   * refresh of every other call and clears the read cache, like a mutation.
+   */
+  async postRaw(
+    realmId: string,
+    path: string,
+    body: Buffer | Record<string, unknown>,
+    headers: Record<string, string> = {},
+    timeoutMs = 60_000,
+  ): Promise<unknown> {
+    const result = await this.withRetry(realmId, (client) =>
+      client
+        .post<unknown>(path, body, { headers, timeout: timeoutMs, maxBodyLength: Infinity })
+        .then((r) => r.data),
+    );
+    this.clearReadCache();
+    return result;
+  }
+
   /** Retrieves CompanyInfo — used for health checks. */
   async getCompanyInfo(realmId: string): Promise<unknown> {
     return this.withRetry(realmId, (client) =>
