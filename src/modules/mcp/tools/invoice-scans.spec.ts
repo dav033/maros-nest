@@ -44,12 +44,18 @@ function registerTools() {
     search: jest.fn().mockResolvedValue({ results: [], missing: [] }),
   };
 
+  const invoiceLocationService = {
+    history: jest.fn().mockResolvedValue([]),
+    update: jest.fn().mockResolvedValue({ location: { id: 'l1' }, changed: true }),
+  };
+
   registerInvoiceScanTools(server as unknown as McpServer, {
     invoiceScansService,
     invoiceSearchService,
+    invoiceLocationService,
   } as unknown as McpToolDeps);
 
-  return { tools, invoiceScansService, invoiceSearchService };
+  return { tools, invoiceScansService, invoiceSearchService, invoiceLocationService };
 }
 
 const ID = '8c81e542-2141-4ba4-b4f4-fb442eb2fafe';
@@ -68,13 +74,54 @@ describe('registerInvoiceScanTools', () => {
       'complete_invoice_scan_file_attachment',
       'create_manual_transaction',
       'delete_invoice_scan',
+      'get_invoice_locations',
       'get_invoice_scan',
       'get_invoice_scan_download_url',
       'list_invoice_scans',
       'rescan_invoice_scan',
       'search_invoices',
+      'update_invoice_location',
       'update_invoice_scan',
     ]);
+  });
+
+  describe('invoice index tools', () => {
+    it('get_invoice_locations reads the history of a scan', async () => {
+      const { tools, invoiceLocationService } = registerTools();
+
+      await tools.get('get_invoice_locations')!.handler({ id: ID });
+
+      expect(invoiceLocationService.history).toHaveBeenCalledWith(ID);
+    });
+
+    it('update_invoice_location forwards the change attributed to the MCP', async () => {
+      const { tools, invoiceLocationService } = registerTools();
+      const args = { id: ID, status: 'categorized', driveFolder: 'Maros/Receipts/Categorized/064P', note: 'Alexandra categorised it' };
+
+      expect(parse(tools.get('update_invoice_location')!.schema, args).success).toBe(true);
+      await tools.get('update_invoice_location')!.handler(args);
+
+      expect(invoiceLocationService.update).toHaveBeenCalledWith({
+        invoiceScanId: ID,
+        status: 'categorized',
+        driveFileId: undefined,
+        driveFolder: 'Maros/Receipts/Categorized/064P',
+        note: 'Alexandra categorised it',
+        actor: 'mcp',
+      });
+    });
+
+    it.each([
+      ['an unknown status', { status: 'deleted' }],
+      ['a non-uuid id', { id: 'abc' }],
+      ['a malformed drive file id', { driveFileId: "x' or 1=1" }],
+      ['a folder with a line break', { driveFolder: 'a\nb' }],
+      ['an empty note', { note: ' ' }],
+    ])('update_invoice_location rejects %s', (_label, override) => {
+      const { tools } = registerTools();
+
+      expect(parse(tools.get('update_invoice_location')!.schema, { id: ID, status: 'moved', ...override }).success).toBe(false);
+    });
   });
 
   describe('search_invoices', () => {

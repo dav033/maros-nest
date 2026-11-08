@@ -98,6 +98,41 @@ export function registerInvoiceScanTools(server: McpServer, deps: McpToolDeps) {
 
   registerMcpTool(
     server,
+    'get_invoice_locations',
+    'Dónde está cada documento de una factura en Google Drive (carpeta, enlace, estado: in_receipts / categorized / moved / removed, recibido y última actualización) y el historial completo de cambios. Solo lectura. Si la migración del índice no está aplicada devuelve un error que lo explica.',
+    { id: uuid.describe('ID del document scan') },
+    async ({ id }: { id: string }) => deps.invoiceLocationService.history(id),
+  );
+
+  registerMcpTool(
+    server,
+    'update_invoice_location',
+    'Cambia el estado de un documento de factura en el índice (in_receipts, categorized, moved, removed) y opcionalmente su carpeta, conservando el historial (quién, cuándo y por qué). No mueve ni borra nada en Drive: solo registra lo que ocurrió. Si la factura tiene varios archivos en Drive, indica driveFileId.',
+    {
+      id: uuid.describe('ID del document scan'),
+      status: z.enum(['in_receipts', 'categorized', 'moved', 'removed']),
+      driveFileId: z.string().regex(/^[A-Za-z0-9_-]{10,120}$/).optional().describe('Obligatorio solo si la factura tiene más de un archivo'),
+      driveFolder: z.string().trim().min(1).max(500).refine((v) => !/[\r\n]/.test(v), 'Sin saltos de línea').optional().describe('Nueva carpeta, p. ej. Maros/Receipts/Categorized/064P'),
+      note: z.string().trim().min(1).max(1000).optional().describe('Motivo del cambio'),
+    },
+    async ({
+      id,
+      status,
+      driveFileId,
+      driveFolder,
+      note,
+    }: {
+      id: string;
+      status: 'in_receipts' | 'categorized' | 'moved' | 'removed';
+      driveFileId?: string;
+      driveFolder?: string;
+      note?: string;
+    }) =>
+      deps.invoiceLocationService.update({ invoiceScanId: id, status, driveFileId, driveFolder, note, actor: 'mcp' }),
+  );
+
+  registerMcpTool(
+    server,
     'get_invoice_scan',
     'Un document scan por id, con los datos extraídos, las sugerencias de QuickBooks y una URL firmada para ver el documento (15 minutos).',
     { id: uuid.describe('ID del document scan') },

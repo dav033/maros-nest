@@ -4,6 +4,7 @@ import { AttachmentSourceService, AttachmentSpec } from './attachment-source.ser
 import { DriveFilesService, DriveSearchInput, DriveSearchResult, DriveUploadResult } from './drive-files.service';
 import { GmailInvoiceImportService, ImportInput, ImportReport } from './gmail-invoice-import.service';
 import { DraftResult, GmailDraftsService } from './gmail-drafts.service';
+import { InvoiceLocationService } from '../quickbooks/services/invoice-scans/invoice-location.service';
 import { buildInvoiceFileName } from './invoice-file-name';
 import {
   ALLOWED_CONTENT_TYPES,
@@ -62,6 +63,7 @@ export class GoogleWorkspaceService {
     private readonly drive: DriveFilesService,
     private readonly attachments: AttachmentSourceService,
     private readonly gmailImport: GmailInvoiceImportService,
+    private readonly locations: InvoiceLocationService,
   ) {}
 
   /** Read-only Drive search as that person (whole Drive with drive.readonly). */
@@ -141,7 +143,7 @@ export class GoogleWorkspaceService {
       );
     }
 
-    return this.drive.upload(user.id, {
+    const filed = await this.drive.upload(user.id, {
       folderPath: ['Receipts', safeName(projectNumber as string)],
       name: named.name,
       mimeType: file.contentType,
@@ -149,6 +151,16 @@ export class GoogleWorkspaceService {
       key: `invoice_scan:${scan.id}`,
       avoidOverwrite: true,
     });
+    // Index where it lives (no-op if already recorded; never fails the filing).
+    await this.locations.recordFiled({
+      invoiceScanId: scan.id,
+      driveFileId: filed.id,
+      driveUrl: filed.url,
+      driveName: filed.name,
+      driveFolder: filed.folder,
+      actor: user.email,
+    });
+    return filed;
   }
 
   private requirePermission(user: AuthenticatedUser, code: 'finance:read' | 'finance:write', action: string): void {

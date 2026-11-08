@@ -1,5 +1,6 @@
 import type { InvoiceScan } from '../../entities/invoice-scan.entity';
 import {
+  attachLocations,
   buildSearchReport,
   projectMatches,
   vendorMatches,
@@ -222,5 +223,39 @@ describe('buildSearchReport: filters', () => {
     ]);
     expect(report.summary.documents).toBe(2);
     expect(report.summary.totalsByCurrency).toEqual({ USD: 30 });
+  });
+});
+
+describe('attachLocations', () => {
+  const location = {
+    status: 'in_receipts',
+    driveUrl: 'https://drive/1',
+    driveName: '064P-Lion-980.89.pdf',
+    driveFolder: 'Maros/Receipts/064P-0826',
+    receivedAt: new Date('2026-11-08T10:00:00Z'),
+    updatedAt: new Date('2026-11-08T10:00:00Z'),
+  };
+
+  it('adds the Drive locations to every document, including unassigned candidates', () => {
+    const report = buildSearchReport(
+      { projects: ['064P'], vendors: ['Lion', 'Bond'] },
+      [scan({ id: 'a', vendor: 'Lion' })],
+      [scan({ id: 'u1', projectNumber: null, vendor: 'Bond Plumbing' })],
+      url,
+    );
+    expect(report.results[0].documents[0].locations).toEqual([]);
+
+    attachLocations(report, new Map([['a', [location]], ['u1', [{ ...location, status: 'moved' }]]]));
+
+    expect(report.results[0].documents[0].locations).toEqual([location]);
+    expect(report.missing[0].possibleUnassigned[0].locations[0].status).toBe('moved');
+  });
+
+  it('leaves documents without a recorded location with an empty list', () => {
+    const report = buildSearchReport({ projects: ['064P'], vendors: [] }, [scan({ id: 'a', vendor: 'Lion' })], [], url);
+
+    attachLocations(report, new Map());
+
+    expect(report.results[0].documents[0].locations).toEqual([]);
   });
 });

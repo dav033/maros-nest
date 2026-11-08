@@ -27,6 +27,16 @@ export type InvoiceDocumentIssue =
   | 'no_total'
   | 'no_date';
 
+/** Where the document lives in Drive, from the invoice index (empty until it is filed there). */
+export interface InvoiceDocumentLocationSummary {
+  status: string;
+  driveUrl: string | null;
+  driveName: string;
+  driveFolder: string;
+  receivedAt: Date;
+  updatedAt: Date;
+}
+
 export interface InvoiceSearchDocument {
   id: string;
   url: string;
@@ -42,6 +52,7 @@ export interface InvoiceSearchDocument {
   enteredInQuickbooks: boolean;
   hasFile: boolean;
   issues: InvoiceDocumentIssue[];
+  locations: InvoiceDocumentLocationSummary[];
 }
 
 export interface InvoiceSearchGroup {
@@ -189,7 +200,21 @@ export function toSearchDocument(
     enteredInQuickbooks: !!scan.enteredAt,
     hasFile: !!scan.fileKey,
     issues: documentIssues(scan),
+    locations: [],
   };
+}
+
+/** Fills each document's Drive locations from the invoice index (mutates the report's documents). */
+export function attachLocations(
+  report: InvoiceSearchReport,
+  byScan: Map<string, InvoiceDocumentLocationSummary[]>,
+): InvoiceSearchReport {
+  const fill = (document: InvoiceSearchDocument) => {
+    document.locations = byScan.get(document.id) ?? [];
+  };
+  for (const group of report.results) group.documents.forEach(fill);
+  for (const item of report.missing) item.possibleUnassigned.forEach(fill);
+  return report;
 }
 
 /**

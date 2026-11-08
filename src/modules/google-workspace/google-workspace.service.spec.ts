@@ -19,8 +19,9 @@ function setup() {
   const gmailImport = {
     importLabel: jest.fn().mockResolvedValue({ saved: [], duplicates: 0, skipped: [] }),
   };
-  const service = new GoogleWorkspaceService(drafts as never, drive as never, attachments as never, gmailImport as never);
-  return { service, drafts, drive, attachments, gmailImport };
+  const locations = { recordFiled: jest.fn().mockResolvedValue(true) };
+  const service = new GoogleWorkspaceService(drafts as never, drive as never, attachments as never, gmailImport as never, locations as never);
+  return { service, drafts, drive, attachments, gmailImport, locations };
 }
 
 describe('createDraftWithAttachment', () => {
@@ -233,5 +234,52 @@ describe('searchDriveFiles and importGmailInvoices', () => {
 
     await expect(service.importGmailInvoices(user(['finance:read']), { label: 'Invoices', maxMessages: 10 })).rejects.toBeInstanceOf(ForbiddenException);
     expect(gmailImport.importLabel).not.toHaveBeenCalled();
+  });
+});
+
+describe('saveInvoiceToReceipts and the invoice index', () => {
+  const file = {
+    scan: {
+      id: 'scan-1',
+      fileName: 'a.pdf',
+      projectNumber: '064P-0826',
+      extractedData: { counterpartyName: 'Lion Plumbing Supply Inc.', total: 980.89, currency: 'USD' },
+    },
+    content: Buffer.from('x'),
+    contentType: 'application/pdf',
+  };
+
+  it('records where the document was filed, as the acting person', async () => {
+    const { service, drive, attachments, locations } = setup();
+    attachments.loadInvoiceFile.mockResolvedValue(file);
+    drive.upload.mockResolvedValue({ id: 'drive-9', name: '064P-LionPlumbingSupply-980.89.pdf', url: 'https://drive/9', folder: 'Maros/Receipts/064P-0826', alreadyExisted: false, renamed: false });
+
+    await service.saveInvoiceToReceipts(user(['finance:write']), { invoiceScanId: 'scan-1' });
+
+    expect(locations.recordFiled).toHaveBeenCalledWith({
+      invoiceScanId: 'scan-1',
+      driveFileId: 'drive-9',
+      driveUrl: 'https://drive/9',
+      driveName: '064P-LionPlumbingSupply-980.89.pdf',
+      driveFolder: 'Maros/Receipts/064P-0826',
+      actor: 'luis@maros.test',
+    });
+  });
+
+  it('still returns the filed document when the index could not record it', async () => {
+    const { service, drive, attachments, locations } = setup();
+    attachments.loadInvoiceFile.mockResolvedValue(file);
+    drive.upload.mockResolvedValue({ id: 'drive-9', name: 'n.pdf', url: 'u', folder: 'f', alreadyExisted: false, renamed: false });
+    locations.recordFiled.mockResolvedValue(false);
+
+    await expect(service.saveInvoiceToReceipts(user(['finance:write']), { invoiceScanId: 'scan-1' })).resolves.toMatchObject({ id: 'drive-9' });
+  });
+
+  it('does not record anything when the filing is refused', async () => {
+    const { service, attachments, locations } = setup();
+    attachments.loadInvoiceFile.mockResolvedValue({ ...file, scan: { ...file.scan, projectNumber: null } });
+
+    await expect(service.saveInvoiceToReceipts(user(['finance:write']), { invoiceScanId: 'scan-1' })).rejects.toThrow(/faltan project/);
+    expect(locations.recordFiled).not.toHaveBeenCalled();
   });
 });

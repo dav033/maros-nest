@@ -3,7 +3,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { InvoiceScan } from '../../entities/invoice-scan.entity';
 import { InvoiceScanNotificationsService } from './invoice-scan-notifications.service';
+import { InvoiceLocationService } from './invoice-location.service';
 import {
+  attachLocations,
   buildSearchReport,
   InvoiceSearchInput,
   InvoiceSearchReport,
@@ -24,6 +26,7 @@ export class InvoiceSearchService {
     @InjectRepository(InvoiceScan)
     private readonly scans: Repository<InvoiceScan>,
     private readonly notifications: InvoiceScanNotificationsService,
+    private readonly locations: InvoiceLocationService,
   ) {}
 
   async search(input: InvoiceSearchInput): Promise<InvoiceSearchReport> {
@@ -52,8 +55,10 @@ export class InvoiceSearchService {
           })
         : [];
 
-    return buildSearchReport(input, projectScans, unassignedScans, (id) =>
+    const report = buildSearchReport(input, projectScans, unassignedScans, (id) =>
       this.notifications.scanUrl(id),
     );
+    const ids = [...new Set([...projectScans, ...unassignedScans].map((scan) => scan.id))];
+    return attachLocations(report, await this.locations.forScans(ids));
   }
 }

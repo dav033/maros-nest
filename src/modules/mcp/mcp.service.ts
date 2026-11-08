@@ -13,6 +13,7 @@ import { QuickbooksVendorMatchingService } from '../quickbooks/services/vendor/q
 import { QuickbooksNormalizerService } from '../quickbooks/services/core/quickbooks-normalizer.service';
 import { InvoiceScansService } from '../quickbooks/services/invoice-scans.service';
 import { InvoiceSearchService } from '../quickbooks/services/invoice-scans/invoice-search.service';
+import { InvoiceLocationService } from '../quickbooks/services/invoice-scans/invoice-location.service';
 import { S3Service } from '../s3/services/s3.service';
 import { TasksService } from '../tasks/task-management/tasks.service';
 import { TaskCommentsService } from '../tasks/task-management/services/task-comments.service';
@@ -100,6 +101,7 @@ export class McpService {
     private readonly qboNormalizer: QuickbooksNormalizerService,
     private readonly invoiceScansService: InvoiceScansService,
     private readonly invoiceSearchService: InvoiceSearchService,
+    private readonly invoiceLocationService: InvoiceLocationService,
     private readonly s3Service: S3Service,
     private readonly trelloService: TrelloService,
     private readonly notesService: NotesService,
@@ -152,6 +154,7 @@ export class McpService {
       qboNormalizer: this.qboNormalizer,
       invoiceScansService: this.invoiceScansService,
       invoiceSearchService: this.invoiceSearchService,
+      invoiceLocationService: this.invoiceLocationService,
       s3Service: this.s3Service,
       trelloService: this.trelloService,
       notesService: this.notesService,

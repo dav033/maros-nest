@@ -38,12 +38,15 @@ import { MailModule } from '../mail/mail.module';
 import { InvoiceCounterpartyWriteService } from './services/invoice-scans/invoice-counterparty-write.service';
 import { InvoiceScanNotificationsService } from './services/invoice-scans/invoice-scan-notifications.service';
 import { InvoiceSearchService } from './services/invoice-scans/invoice-search.service';
+import { InvoiceLocationService } from './services/invoice-scans/invoice-location.service';
+import { InvoiceDocumentLocation } from './entities/invoice-document-location.entity';
+import { InvoiceDocumentEvent } from './entities/invoice-document-event.entity';
 import { InvoiceScanReminderCron } from './cron/invoice-scan-reminder.cron';
 import { Project } from '../../entities/project.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([QboConnection, Company, Lead, InvoiceScan, Project]),
+    TypeOrmModule.forFeature([QboConnection, Company, Lead, InvoiceScan, Project, InvoiceDocumentLocation, InvoiceDocumentEvent]),
     S3Module,
     MailModule,
     HttpModule,
@@ -82,6 +85,7 @@ import { Project } from '../../entities/project.entity';
     InvoiceCounterpartyWriteService,
     InvoiceScanNotificationsService,
     InvoiceSearchService,
+    InvoiceLocationService,
     InvoiceScanReminderCron,
   ],
   exports: [
@@ -89,6 +93,7 @@ import { Project } from '../../entities/project.entity';
     QuickbooksConnectionStatusService,
     InvoiceScansService,
     InvoiceSearchService,
+    InvoiceLocationService,
     QuickbooksAuthService,
     QuickbooksApiService,
     QuickbooksFinancialsService,
