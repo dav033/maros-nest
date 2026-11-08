@@ -3,6 +3,7 @@ import { AuthenticatedUser } from '../../common/auth/authenticated-user';
 import { AttachmentSourceService, AttachmentSpec } from './attachment-source.service';
 import { DriveFilesService, DriveSearchInput, DriveSearchResult, DriveUploadResult } from './drive-files.service';
 import { GmailInvoiceImportService, ImportInput, ImportReport } from './gmail-invoice-import.service';
+import { EnsuredLabel, GmailLabelsService } from './gmail-labels.service';
 import { DraftResult, GmailDraftsService } from './gmail-drafts.service';
 import { InvoiceLocationService } from '../quickbooks/services/invoice-scans/invoice-location.service';
 import { buildInvoiceFileName } from './invoice-file-name';
@@ -64,11 +65,18 @@ export class GoogleWorkspaceService {
     private readonly attachments: AttachmentSourceService,
     private readonly gmailImport: GmailInvoiceImportService,
     private readonly locations: InvoiceLocationService,
+    private readonly labels: GmailLabelsService,
   ) {}
 
   /** Read-only Drive search as that person (whole Drive with drive.readonly). */
   searchDriveFiles(user: AuthenticatedUser, input: DriveSearchInput): Promise<DriveSearchResult> {
     return this.drive.search(user.id, input);
+  }
+
+  /** Creates a Gmail label when it does not exist yet (nothing else in the mailbox changes). */
+  async ensureGmailLabel(user: AuthenticatedUser, name: string): Promise<EnsuredLabel> {
+    this.requirePermission(user, 'finance:write', 'crear la etiqueta de facturas');
+    return this.labels.ensureLabel(user.id, name);
   }
 
   /** Reads the emails of ONE Gmail label and stores their invoice attachments in Drive. */

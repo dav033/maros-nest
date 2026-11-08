@@ -99,6 +99,20 @@ export function registerGoogleWorkspaceTools(server: McpServer, deps: McpToolDep
 
   registerMcpTool(
     server,
+    'ensure_gmail_label',
+    'Crea una etiqueta en el Gmail de esa persona si todavía no existe (p. ej. "Invoices", la que usa import_gmail_invoices_to_receipts). No renombra, edita ni borra etiquetas y no toca ningún correo. Devuelve su id y si se creó o ya existía. Rechaza nombres reservados de Gmail (Inbox, Sent, Trash…). Exige permiso finance:write de esa persona.',
+    {
+      userId,
+      name: z.string().trim().min(1).max(100).refine(noLineBreaks, 'Sin saltos de línea').describe('Nombre de la etiqueta; "Padre/Hijo" crea una anidada'),
+    },
+    async ({ userId: id, name }: { userId: number; name: string }) => {
+      const user = await deps.mcpActor.userAs(id);
+      return deps.googleWorkspaceService.ensureGmailLabel(user, name);
+    },
+  );
+
+  registerMcpTool(
+    server,
     'import_gmail_invoices_to_receipts',
     'Lee los correos de UNA etiqueta de Gmail de esa persona y guarda los adjuntos de factura (PDF, JPG, PNG, WebP de hasta 5 MB) en Maros/Receipts/_Inbox de su Drive. Solo lee: no etiqueta, archiva, borra ni envía nada, y no toca correos sin esa etiqueta. Es idempotente: un adjunto ya guardado se cuenta como duplicado. Cada archivo lleva en su descripción el correo de origen (id, remitente, asunto, fecha). Devuelve lo guardado con enlaces, los duplicados y lo omitido con el motivo. Exige permiso finance:write de esa persona.',
     {

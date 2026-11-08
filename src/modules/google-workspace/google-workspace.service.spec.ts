@@ -20,8 +20,9 @@ function setup() {
     importLabel: jest.fn().mockResolvedValue({ saved: [], duplicates: 0, skipped: [] }),
   };
   const locations = { recordFiled: jest.fn().mockResolvedValue(true) };
-  const service = new GoogleWorkspaceService(drafts as never, drive as never, attachments as never, gmailImport as never, locations as never);
-  return { service, drafts, drive, attachments, gmailImport, locations };
+  const labels = { ensureLabel: jest.fn().mockResolvedValue({ id: 'L9', name: 'Invoices', created: true }) };
+  const service = new GoogleWorkspaceService(drafts as never, drive as never, attachments as never, gmailImport as never, locations as never, labels as never);
+  return { service, drafts, drive, attachments, gmailImport, locations, labels };
 }
 
 describe('createDraftWithAttachment', () => {
@@ -281,5 +282,21 @@ describe('saveInvoiceToReceipts and the invoice index', () => {
 
     await expect(service.saveInvoiceToReceipts(user(['finance:write']), { invoiceScanId: 'scan-1' })).rejects.toThrow(/faltan project/);
     expect(locations.recordFiled).not.toHaveBeenCalled();
+  });
+});
+
+describe('ensureGmailLabel', () => {
+  it('creates the label as the acting person when they have finance:write', async () => {
+    const { service, labels } = setup();
+
+    await expect(service.ensureGmailLabel(user(['finance:write']), 'Invoices')).resolves.toMatchObject({ created: true });
+    expect(labels.ensureLabel).toHaveBeenCalledWith(7, 'Invoices');
+  });
+
+  it('refuses without finance:write before touching the mailbox', async () => {
+    const { service, labels } = setup();
+
+    await expect(service.ensureGmailLabel(user([]), 'Invoices')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(labels.ensureLabel).not.toHaveBeenCalled();
   });
 });

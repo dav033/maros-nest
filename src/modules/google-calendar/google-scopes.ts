@@ -16,6 +16,9 @@ export const DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 export const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 export const DRIVE_READONLY_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
 
+/** Create labels (never touches message content). Used to set up the invoice label. */
+export const GMAIL_LABELS_SCOPE = 'https://www.googleapis.com/auth/gmail.labels';
+
 export const GOOGLE_CONNECT_SCOPES = [
   'openid',
   'email',
@@ -24,4 +27,5 @@ export const GOOGLE_CONNECT_SCOPES = [
   DRIVE_FILE_SCOPE,
   GMAIL_READONLY_SCOPE,
   DRIVE_READONLY_SCOPE,
+  GMAIL_LABELS_SCOPE,
 ] as const;

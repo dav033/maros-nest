@@ -20,6 +20,7 @@ function setup() {
     saveInvoiceToReceipts: jest.fn().mockResolvedValue({ id: 'f' }),
     searchDriveFiles: jest.fn().mockResolvedValue({ visibility: 'all', files: [] }),
     importGmailInvoices: jest.fn().mockResolvedValue({ saved: [], duplicates: 0, skipped: [] }),
+    ensureGmailLabel: jest.fn().mockResolvedValue({ id: 'L9', name: 'Invoices', created: true }),
   };
   registerGoogleWorkspaceTools(server as unknown as McpServer, { mcpActor, googleWorkspaceService } as unknown as McpToolDeps);
   return { tools, mcpActor, googleWorkspaceService, person };
@@ -29,9 +30,10 @@ const parse = (schema: ZodRawShape, args: unknown) => z.object(schema).safeParse
 const ID = '8c81e542-2141-4ba4-b4f4-fb442eb2fafe';
 
 describe('registerGoogleWorkspaceTools', () => {
-  it('registers the five tools', () => {
+  it('registers the six tools', () => {
     expect([...setup().tools.keys()].sort()).toEqual([
       'create_draft_with_attachment',
+      'ensure_gmail_label',
       'import_gmail_invoices_to_receipts',
       'save_invoice_to_receipts',
       'save_report_to_drive',
@@ -220,6 +222,30 @@ describe('registerGoogleWorkspaceTools', () => {
       const { tools } = setup();
 
       expect(parse(tools.get('import_gmail_invoices_to_receipts')!.schema, { userId: 7, label: 'Invoices', ...override }).success).toBe(false);
+    });
+  });
+
+  describe('ensure_gmail_label', () => {
+    it('acts as the named person and forwards the name', async () => {
+      const { tools, googleWorkspaceService, person } = setup();
+      const tool = tools.get('ensure_gmail_label')!;
+
+      expect(parse(tool.schema, { userId: 7, name: 'Invoices' }).success).toBe(true);
+      await tool.handler({ userId: 7, name: 'Invoices' });
+
+      expect(googleWorkspaceService.ensureGmailLabel).toHaveBeenCalledWith(person, 'Invoices');
+    });
+
+    it.each([
+      ['no name', { name: undefined }],
+      ['a blank name', { name: '  ' }],
+      ['a name with a line break', { name: 'a\nb' }],
+      ['a name over 100 characters', { name: 'x'.repeat(101) }],
+      ['no userId', { userId: undefined }],
+    ])('rejects %s', (_label, override) => {
+      const { tools } = setup();
+
+      expect(parse(tools.get('ensure_gmail_label')!.schema, { userId: 7, name: 'Invoices', ...override }).success).toBe(false);
     });
   });
 });

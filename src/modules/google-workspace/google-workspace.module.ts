@@ -8,6 +8,7 @@ import { AttachmentSourceService } from './attachment-source.service';
 import { DriveFilesService } from './drive-files.service';
 import { GmailDraftsService } from './gmail-drafts.service';
 import { GmailInvoiceImportService } from './gmail-invoice-import.service';
+import { GmailLabelsService } from './gmail-labels.service';
 import { GoogleWorkspaceAuthService } from './google-workspace-auth.service';
 import { GoogleWorkspaceService } from './google-workspace.service';
 
@@ -17,6 +18,7 @@ import { GoogleWorkspaceService } from './google-workspace.service';
     GoogleWorkspaceAuthService,
     GmailDraftsService,
     GmailInvoiceImportService,
+    GmailLabelsService,
     DriveFilesService,
     AttachmentSourceService,
     GoogleWorkspaceService,
