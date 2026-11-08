@@ -88,3 +88,14 @@ export function decodeBase64(value: string, maxBytes: number): Buffer {
   }
   return buffer;
 }
+
+/** Today as YYYY-MM-DD in the company's time zone (Maros works on US Eastern time). */
+export function todayInCompanyZone(now: Date = new Date()): string {
+  return now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+}
+
+/** `report.pdf` + `2026-11-08` -> `report-2026-11-08.pdf` (the date goes before the extension). */
+export function appendDate(name: string, date: string): string {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? `${name.slice(0, dot)}-${date}${name.slice(dot)}` : `${name}-${date}`;
+}

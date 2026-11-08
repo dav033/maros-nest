@@ -50,7 +50,18 @@ const contentType = z
   .string()
   .refine((value) => ALLOWED_CONTENT_TYPES.has(value), 'Tipo de archivo no permitido');
 
+const driveFileId = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{10,120}$/, 'ID de archivo de Drive inválido');
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Debe ser una fecha YYYY-MM-DD');
+
 const attachment = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('drive_file'),
+    fileId: driveFileId.describe(
+      'ID de un archivo de Drive guardado por Maros (save_report_to_drive / save_invoice_to_receipts). Los Google Docs/Sheets/Slides se adjuntan como PDF.',
+    ),
+  }),
   z.object({
     kind: z.literal('invoice_scan'),
     id: z.string().uuid().describe('ID del document scan; se adjunta su documento original'),
@@ -67,7 +78,7 @@ export function registerGoogleWorkspaceTools(server: McpServer, deps: McpToolDep
   registerMcpTool(
     server,
     'create_draft_with_attachment',
-    `Crea un BORRADOR en el Gmail de esa persona, con adjuntos opcionales (el documento original de un invoice scan, o contenido en base64). Nunca envía: la persona lo revisa y lo manda desde Gmail. Cuerpo en text o en html, uno solo. Máximo ${MAX_ATTACHMENTS} adjuntos y 20 MB en total. Adjuntar facturas exige permiso finance:read de esa persona.`,
+    `Crea un BORRADOR en el Gmail de esa persona, con adjuntos opcionales (un archivo de Drive por su id, el documento original de un invoice scan, o contenido en base64). Nunca envía: la persona lo revisa y lo manda desde Gmail. Cuerpo en text o en html, uno solo. Máximo ${MAX_ATTACHMENTS} adjuntos y 20 MB en total. Adjuntar facturas exige permiso finance:read de esa persona.`,
     {
       userId,
       to: recipients.min(1),
@@ -90,7 +101,7 @@ export function registerGoogleWorkspaceTools(server: McpServer, deps: McpToolDep
   registerMcpTool(
     server,
     'save_report_to_drive',
-    `Guarda un informe en el Drive de esa persona, dentro de Maros/Reports/<subcarpetas> (la carpeta la crea la app; no toca nada más de su Drive). Contenido en text o en contentBase64, hasta 10 MB. Con key, guardar dos veces lo mismo en la misma carpeta no duplica: devuelve el archivo existente (alreadyExisted: true). Subcarpetas: máximo ${MAX_FOLDER_DEPTH - 1} niveles.`,
+    `Guarda un informe en el Drive de esa persona, dentro de Maros/Reports/<subcarpetas> (la carpeta la crea la app; no toca nada más de su Drive). Contenido en text o en contentBase64, hasta 10 MB. Con addDate el nombre lleva la fecha antes de la extensión (informe.pdf -> informe-2026-11-08.pdf). Nunca sobrescribe: si el nombre ya existe en la carpeta, añade -2, -3. Con key, guardar dos veces lo mismo en la misma carpeta no duplica: devuelve el archivo existente (alreadyExisted: true). Subcarpetas: máximo ${MAX_FOLDER_DEPTH - 1} niveles.`,
     {
       userId,
       name: z.string().trim().min(1).max(150).refine(noLineBreaks, 'Sin saltos de línea'),
@@ -99,6 +110,8 @@ export function registerGoogleWorkspaceTools(server: McpServer, deps: McpToolDep
       contentBase64: z.string().min(1).max(14_000_000).optional(),
       folder: z.array(folderPart).max(MAX_FOLDER_DEPTH - 1).optional(),
       key: z.string().trim().min(1).max(120).refine(noLineBreaks, 'Sin saltos de línea').optional(),
+      addDate: z.boolean().optional().describe('Añade la fecha al nombre'),
+      date: isoDate.optional().describe('Fecha para addDate; por defecto hoy (hora del Este de EE. UU.)'),
     },
     async ({ userId: id, ...input }: { userId: number } & SaveReportInput) => {
       const user = await deps.mcpActor.userAs(id);
@@ -109,11 +122,13 @@ export function registerGoogleWorkspaceTools(server: McpServer, deps: McpToolDep
   registerMcpTool(
     server,
     'save_invoice_to_receipts',
-    'Copia el documento original de un invoice scan al Drive de esa persona, en Maros/Receipts/<proyecto>/, con nombre fecha_proveedor_número. Es idempotente: archivar la misma factura otra vez devuelve el archivo existente. Exige permiso finance:write de esa persona. No modifica el scan ni QuickBooks.',
+    'Copia el documento original de un invoice scan al Drive de esa persona, en Maros/Receipts/<proyecto>/, con el nombre estándar Proyecto-Proveedor-Valor (064P-HomeDepot-1250.00.pdf). Si falta proyecto, proveedor o importe NO guarda nada y dice qué falta (pásalos en project, vendor o amount); si el nombre ya existe añade -2, -3 y nunca sobrescribe. Es idempotente: archivar la misma factura otra vez devuelve el archivo existente. Exige permiso finance:write de esa persona. No modifica el scan ni QuickBooks.',
     {
       userId,
       invoiceScanId: z.string().uuid().describe('ID del document scan'),
-      project: projectNumber.optional().describe('Carpeta de proyecto; por defecto, el proyecto del scan o Unassigned'),
+      project: projectNumber.optional().describe('Proyecto; por defecto, el del scan'),
+      vendor: z.string().trim().min(2).max(80).refine(noLineBreaks, 'Sin saltos de línea').optional().describe('Proveedor; por defecto, el leído en la factura'),
+      amount: z.number().finite().min(0).max(100_000_000).optional().describe('Importe; por defecto, el total leído en la factura'),
     },
     async ({ userId: id, ...input }: { userId: number } & SaveReceiptInput) => {
       const user = await deps.mcpActor.userAs(id);

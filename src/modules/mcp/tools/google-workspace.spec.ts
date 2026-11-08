@@ -67,6 +67,16 @@ describe('registerGoogleWorkspaceTools', () => {
       expect(parse(tools.get('create_draft_with_attachment')!.schema, { ...valid, ...override }).success).toBe(false);
     });
 
+    it('accepts a Drive file attachment and rejects a malformed id', () => {
+      const { tools } = setup();
+      const schema = tools.get('create_draft_with_attachment')!.schema;
+      const withFile = (fileId: string) => ({ ...valid, attachments: [{ kind: 'drive_file', fileId }] });
+
+      expect(parse(schema, withFile('1AbCdEfGhIjKlMnOpQrStUvWxYz')).success).toBe(true);
+      expect(parse(schema, withFile('short')).success).toBe(false);
+      expect(parse(schema, withFile("abc'; drop table x;--")).success).toBe(false);
+    });
+
     it('requires exactly one of text and html', async () => {
       const { tools, googleWorkspaceService } = setup();
       const tool = tools.get('create_draft_with_attachment')!;
@@ -89,6 +99,15 @@ describe('registerGoogleWorkspaceTools', () => {
       await tools.get('save_report_to_drive')!.handler(args);
 
       expect(googleWorkspaceService.saveReportToDrive).toHaveBeenCalledWith(person, expect.objectContaining({ name: 'cobros.md' }));
+    });
+
+    it('accepts addDate with an ISO date and rejects other formats', () => {
+      const { tools } = setup();
+      const schema = tools.get('save_report_to_drive')!.schema;
+      const base = { userId: 7, name: 'r.pdf', contentType: 'application/pdf', contentBase64: 'JVBERg==' };
+
+      expect(parse(schema, { ...base, addDate: true, date: '2026-11-08' }).success).toBe(true);
+      expect(parse(schema, { ...base, addDate: true, date: '11/08/2026' }).success).toBe(false);
     });
 
     it.each([
@@ -114,6 +133,20 @@ describe('registerGoogleWorkspaceTools', () => {
       await tools.get('save_invoice_to_receipts')!.handler(args);
 
       expect(googleWorkspaceService.saveInvoiceToReceipts).toHaveBeenCalledWith(person, { invoiceScanId: ID, project: '064P-0826' });
+    });
+
+    it('forwards vendor and amount overrides and rejects nonsense values', async () => {
+      const { tools, googleWorkspaceService, person } = setup();
+      const schema = tools.get('save_invoice_to_receipts')!.schema;
+      const args = { userId: 7, invoiceScanId: ID, vendor: 'Home Depot', amount: 1250 };
+
+      expect(parse(schema, args).success).toBe(true);
+      await tools.get('save_invoice_to_receipts')!.handler(args);
+      expect(googleWorkspaceService.saveInvoiceToReceipts).toHaveBeenCalledWith(person, { invoiceScanId: ID, vendor: 'Home Depot', amount: 1250 });
+
+      expect(parse(schema, { ...args, amount: -5 }).success).toBe(false);
+      expect(parse(schema, { ...args, amount: Number.NaN }).success).toBe(false);
+      expect(parse(schema, { ...args, vendor: 'a\nb' }).success).toBe(false);
     });
 
     it.each([

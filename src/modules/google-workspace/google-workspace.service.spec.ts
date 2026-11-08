@@ -20,6 +20,19 @@ function setup() {
 }
 
 describe('createDraftWithAttachment', () => {
+  it('resolves attachments as the acting person, and a Drive file needs no finance permission', async () => {
+    const { service, attachments } = setup();
+
+    await service.createDraftWithAttachment(user([]), {
+      to: ['v@x.com'],
+      subject: 's',
+      text: 't',
+      attachments: [{ kind: 'drive_file', fileId: 'abcdefghij12345' }],
+    });
+
+    expect(attachments.resolveAll).toHaveBeenCalledWith(7, [{ kind: 'drive_file', fileId: 'abcdefghij12345' }]);
+  });
+
   it('creates the draft as the person, with the resolved attachments', async () => {
     const { service, drafts, attachments } = setup();
     attachments.resolveAll.mockResolvedValue([{ fileName: 'a.pdf', contentType: 'application/pdf', content: Buffer.from('x') }]);
@@ -103,13 +116,13 @@ describe('saveInvoiceToReceipts', () => {
       id: 'scan-1',
       fileName: 'IMG_0042.jpg',
       projectNumber: '064P-0826',
-      extractedData: { issueDate: '2026-10-16', counterpartyName: 'Lion Plumbing/Supply', invoiceNumber: 'INV 99' },
+      extractedData: { issueDate: '2026-10-16', counterpartyName: 'The Home Depot #4021', invoiceNumber: 'INV 99', total: 1250, currency: 'USD' },
     },
     content: Buffer.from('bytes'),
     contentType: 'image/jpeg',
   };
 
-  it('files it under Receipts/<project> with a readable, safe name and a stable key', async () => {
+  it('files it as Proyecto-Proveedor-Valor under Receipts/<project>, never overwriting', async () => {
     const { service, drive, attachments } = setup();
     attachments.loadInvoiceFile.mockResolvedValue(file);
 
@@ -117,22 +130,45 @@ describe('saveInvoiceToReceipts', () => {
 
     expect(drive.upload).toHaveBeenCalledWith(7, {
       folderPath: ['Receipts', '064P-0826'],
-      name: '2026-10-16_Lion Plumbing-Supply_INV 99.jpg',
+      name: '064P-HomeDepot-1250.00.jpg',
       mimeType: 'image/jpeg',
       content: file.content,
       key: 'invoice_scan:scan-1',
+      avoidOverwrite: true,
     });
   });
 
-  it('lets the caller override the project and falls back to Unassigned', async () => {
+  it('lets the caller supply or override project, vendor and amount', async () => {
     const { service, drive, attachments } = setup();
-    attachments.loadInvoiceFile.mockResolvedValue({ ...file, scan: { ...file.scan, projectNumber: null } });
+    attachments.loadInvoiceFile.mockResolvedValue({
+      ...file,
+      scan: { ...file.scan, projectNumber: null, extractedData: { ...file.scan.extractedData, counterpartyName: null, total: null } },
+    });
 
-    await service.saveInvoiceToReceipts(user(['finance:write']), { invoiceScanId: 'scan-1' });
-    await service.saveInvoiceToReceipts(user(['finance:write']), { invoiceScanId: 'scan-1', project: '070-0926' });
+    await service.saveInvoiceToReceipts(user(['finance:write']), {
+      invoiceScanId: 'scan-1',
+      project: '070-0926',
+      vendor: 'Bond Plumbing Supply, Inc.',
+      amount: 40.7,
+    });
 
-    expect(drive.upload.mock.calls[0][1].folderPath).toEqual(['Receipts', 'Unassigned']);
-    expect(drive.upload.mock.calls[1][1].folderPath).toEqual(['Receipts', '070-0926']);
+    expect(drive.upload.mock.calls[0][1]).toMatchObject({
+      folderPath: ['Receipts', '070-0926'],
+      name: '070-BondPlumbingSupply-40.70.jpg',
+    });
+  });
+
+  it('refuses to guess: a missing field stops the filing and says which one', async () => {
+    const { service, drive, attachments } = setup();
+    attachments.loadInvoiceFile.mockResolvedValue({
+      ...file,
+      scan: { ...file.scan, projectNumber: null, extractedData: { ...file.scan.extractedData, total: null } },
+    });
+
+    await expect(service.saveInvoiceToReceipts(user(['finance:write']), { invoiceScanId: 'scan-1' })).rejects.toThrow(
+      /faltan project, amount/,
+    );
+    expect(drive.upload).not.toHaveBeenCalled();
   });
 
   it('requires finance:write before touching storage', async () => {
@@ -143,5 +179,30 @@ describe('saveInvoiceToReceipts', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(attachments.loadInvoiceFile).not.toHaveBeenCalled();
     expect(drive.upload).not.toHaveBeenCalled();
+  });
+});
+
+describe('saveReportToDrive dating and overwrite safety', () => {
+  const report = { name: 'jfb-cobros.pdf', contentType: 'application/pdf', contentBase64: Buffer.from('%PDF').toString('base64'), folder: ['Maros Plumbing'] };
+
+  it('puts the given date before the extension and never overwrites', async () => {
+    const { service, drive } = setup();
+
+    await service.saveReportToDrive(user([]), { ...report, addDate: true, date: '2026-11-08' });
+
+    expect(drive.upload).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ name: 'jfb-cobros-2026-11-08.pdf', folderPath: ['Reports', 'Maros Plumbing'], avoidOverwrite: true }),
+    );
+  });
+
+  it('uses today (US Eastern) when no date is given, and keeps the name without addDate', async () => {
+    const { service, drive } = setup();
+
+    await service.saveReportToDrive(user([]), { ...report, addDate: true });
+    await service.saveReportToDrive(user([]), report);
+
+    expect(drive.upload.mock.calls[0][1].name).toMatch(/^jfb-cobros-\d{4}-\d{2}-\d{2}\.pdf$/);
+    expect(drive.upload.mock.calls[1][1].name).toBe('jfb-cobros.pdf');
   });
 });

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InvoiceScan } from '../quickbooks/entities/invoice-scan.entity';
 import { S3Service } from '../s3/services/s3.service';
+import { DriveFilesService } from './drive-files.service';
 import { DraftAttachment } from './gmail-drafts.service';
 import {
   ALLOWED_CONTENT_TYPES,
@@ -15,6 +16,7 @@ import {
 
 export type AttachmentSpec =
   | { kind: 'invoice_scan'; id: string }
+  | { kind: 'drive_file'; fileId: string }
   | { kind: 'inline'; fileName: string; contentType: string; contentBase64: string };
 
 export interface StoredInvoiceFile {
@@ -35,16 +37,17 @@ export class AttachmentSourceService {
     @InjectRepository(InvoiceScan)
     private readonly scans: Repository<InvoiceScan>,
     private readonly s3: S3Service,
+    private readonly drive: DriveFilesService,
   ) {}
 
-  async resolveAll(specs: AttachmentSpec[]): Promise<DraftAttachment[]> {
+  async resolveAll(userId: number, specs: AttachmentSpec[]): Promise<DraftAttachment[]> {
     if (specs.length > MAX_ATTACHMENTS) {
       throw new BadRequestException(`Máximo ${MAX_ATTACHMENTS} adjuntos por borrador.`);
     }
     const files: DraftAttachment[] = [];
     let total = 0;
     for (const spec of specs) {
-      const file = await this.resolve(spec);
+      const file = await this.resolve(userId, spec);
       total += file.content.length;
       if (total > MAX_TOTAL_ATTACHMENT_BYTES) {
         throw new BadRequestException(
@@ -73,7 +76,7 @@ export class AttachmentSourceService {
     };
   }
 
-  private async resolve(spec: AttachmentSpec): Promise<DraftAttachment> {
+  private async resolve(userId: number, spec: AttachmentSpec): Promise<DraftAttachment> {
     if (spec.kind === 'invoice_scan') {
       const file = await this.loadInvoiceFile(spec.id);
       return {
@@ -81,6 +84,10 @@ export class AttachmentSourceService {
         contentType: file.contentType,
         content: file.content,
       };
+    }
+    if (spec.kind === 'drive_file') {
+      const file = await this.drive.download(userId, spec.fileId, MAX_ATTACHMENT_BYTES);
+      return { fileName: safeName(file.fileName, 'attachment'), contentType: file.contentType, content: file.content };
     }
     if (!ALLOWED_CONTENT_TYPES.has(spec.contentType)) {
       throw new BadRequestException(`Tipo de archivo no permitido: ${spec.contentType}.`);

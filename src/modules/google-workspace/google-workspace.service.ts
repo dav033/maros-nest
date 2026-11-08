@@ -3,12 +3,14 @@ import { AuthenticatedUser } from '../../common/auth/authenticated-user';
 import { AttachmentSourceService, AttachmentSpec } from './attachment-source.service';
 import { DriveFilesService, DriveUploadResult } from './drive-files.service';
 import { DraftResult, GmailDraftsService } from './gmail-drafts.service';
+import { buildInvoiceFileName } from './invoice-file-name';
 import {
   ALLOWED_CONTENT_TYPES,
+  appendDate,
   decodeBase64,
-  extensionFor,
   MAX_REPORT_BYTES,
   safeName,
+  todayInCompanyZone,
 } from './workspace-input';
 
 export interface CreateDraftInput {
@@ -31,12 +33,20 @@ export interface SaveReportInput {
   folder?: string[];
   /** Stable identity: saving the same key to the same folder twice stores it once. */
   key?: string;
+  /** Put the date before the extension: `weekly-report.pdf` -> `weekly-report-2026-11-08.pdf`. */
+  addDate?: boolean;
+  /** YYYY-MM-DD to use with `addDate`; today (US Eastern) when omitted. */
+  date?: string;
 }
 
 export interface SaveReceiptInput {
   invoiceScanId: string;
   /** Overrides the project number stored on the scan. */
   project?: string;
+  /** Overrides the vendor read from the invoice. */
+  vendor?: string;
+  /** Overrides the invoice total. */
+  amount?: number;
 }
 
 /**
@@ -57,7 +67,7 @@ export class GoogleWorkspaceService {
     if (specs.some((spec) => spec.kind === 'invoice_scan')) {
       this.requirePermission(user, 'finance:read', 'adjuntar facturas');
     }
-    const attachments = await this.attachments.resolveAll(specs);
+    const attachments = await this.attachments.resolveAll(user.id, specs);
     return this.drafts.createDraft(user.id, {
       to: input.to,
       cc: input.cc,
@@ -88,10 +98,11 @@ export class GoogleWorkspaceService {
 
     return this.drive.upload(user.id, {
       folderPath: ['Reports', ...(input.folder ?? [])],
-      name: input.name,
+      name: input.addDate ? appendDate(safeName(input.name), input.date ?? todayInCompanyZone()) : input.name,
       mimeType: input.contentType,
       content,
       key: input.key ? `report:${input.key}` : undefined,
+      avoidOverwrite: true,
     });
   }
 
@@ -100,19 +111,30 @@ export class GoogleWorkspaceService {
     const file = await this.attachments.loadInvoiceFile(input.invoiceScanId);
     const { scan } = file;
     const data = scan.extractedData;
-    const project = safeName(input.project ?? scan.projectNumber ?? 'Unassigned');
+    const projectNumber = input.project ?? scan.projectNumber;
 
-    const parts = [data?.issueDate ?? 'undated', data?.counterpartyName, data?.invoiceNumber]
-      .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
-      .map((part) => safeName(part));
-    const name = `${parts.join('_')}.${extensionFor(scan.fileName, file.contentType)}`;
+    const named = buildInvoiceFileName({
+      project: projectNumber,
+      vendor: input.vendor ?? data?.counterpartyName,
+      amount: input.amount ?? data?.total,
+      currency: data?.currency,
+      fileName: scan.fileName,
+      contentType: file.contentType,
+    });
+    if (named.name === null) {
+      throw new BadRequestException(
+        `No se puede nombrar la factura (Proyecto-Proveedor-Valor): faltan ${named.missing.join(', ')}. ` +
+          'Complétalo en el document scan o pásalo como project, vendor o amount. No se guardó nada.',
+      );
+    }
 
     return this.drive.upload(user.id, {
-      folderPath: ['Receipts', project],
-      name,
+      folderPath: ['Receipts', safeName(projectNumber as string)],
+      name: named.name,
       mimeType: file.contentType,
       content: file.content,
       key: `invoice_scan:${scan.id}`,
+      avoidOverwrite: true,
     });
   }
 
